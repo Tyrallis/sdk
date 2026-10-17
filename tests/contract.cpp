@@ -26,19 +26,41 @@ namespace
 
     // --- the event table -------------------------------------------------------------------
 
+    /// Every id the table declares, in table order.
+    constexpr uint32_t kEventIds[] = {
+#define WXL_EVENT(family, name, id, args) id,
+#include "wxl/events.def"
+#undef WXL_EVENT
+    };
+
+    constexpr size_t kEventRows = sizeof(kEventIds) / sizeof(kEventIds[0]);
+
+    /// Ids are the ABI: a duplicate silently routes one event's args to another's handler.
+    bool IdsAreUnique()
+    {
+        for (size_t i = 0; i < kEventRows; ++i)
+            for (size_t j = i + 1; j < kEventRows; ++j)
+                if (kEventIds[i] == kEventIds[j]) return false;
+        return true;
+    }
+
+    /// No gaps: a hole means an id was removed, which the table forbids.
+    bool IdsAreDense()
+    {
+        for (uint32_t id = 0; id < kEventRows; ++id)
+        {
+            bool found = false;
+            for (size_t i = 0; i < kEventRows && !found; ++i) found = kEventIds[i] == id;
+            if (!found) return false;
+        }
+        return true;
+    }
+
     constexpr uint32_t CountFamilyWorld()
     {
         uint32_t n = 0;
 #define WXL_EVENT_World(name, id, args) ++n;
-#define WXL_EVENT_Render(name, id, args)
-#define WXL_EVENT_Object(name, id, args)
-#define WXL_EVENT_Asset(name, id, args)
-#define WXL_EVENT(family, name, id, args) WXL_EVENT_##family(name, id, args)
 #include "wxl/events.def"
-#undef WXL_EVENT
-#undef WXL_EVENT_Asset
-#undef WXL_EVENT_Object
-#undef WXL_EVENT_Render
 #undef WXL_EVENT_World
         return n;
     }
@@ -46,17 +68,9 @@ namespace
     constexpr uint32_t CountFamilyRender()
     {
         uint32_t n = 0;
-#define WXL_EVENT_World(name, id, args)
 #define WXL_EVENT_Render(name, id, args) ++n;
-#define WXL_EVENT_Object(name, id, args)
-#define WXL_EVENT_Asset(name, id, args)
-#define WXL_EVENT(family, name, id, args) WXL_EVENT_##family(name, id, args)
 #include "wxl/events.def"
-#undef WXL_EVENT
-#undef WXL_EVENT_Asset
-#undef WXL_EVENT_Object
 #undef WXL_EVENT_Render
-#undef WXL_EVENT_World
         return n;
     }
 
@@ -99,6 +113,34 @@ namespace
         int updates = 0;
         void OnUpdate(const wxl_update_args&) override { ++updates; }
     };
+
+    struct CountingNetScript final : wxl::NetScript
+    {
+        int      received   = 0;
+        uint32_t lastOpcode = 0;
+
+        void OnMessageReceived(const wxl_message_args& args) override
+        {
+            ++received;
+            lastOpcode = args.opcode;
+            if (args.suppressed && args.opcode == 0xF001) *args.suppressed = WXL_TRUE;
+        }
+    };
+
+    struct CountingLuaScript final : wxl::LuaScript
+    {
+        int      ready       = 0;
+        int      closing     = 0;
+        uint32_t lastContext = 0;
+
+        void OnScriptVmReady(const wxl_script_vm_args& args) override
+        {
+            ++ready;
+            lastContext = args.context;
+        }
+
+        void OnScriptVmClosing(const wxl_script_vm_args&) override { ++closing; }
+    };
 } // namespace
 
 int main()
@@ -108,12 +150,12 @@ int main()
 
     Section("event table");
     {
-        Check(WXL_EV_COUNT == 23, "the table holds the 23 events it declares");
+        Check(WXL_EV_COUNT == kEventRows, "the enum holds exactly the rows the table declares");
         Check(WXL_EV_Update == 0, "the first id is 0");
+        Check(IdsAreUnique(), "no id is used twice");
+        Check(IdsAreDense(), "the ids run 0..n-1 with no hole");
         Check(CountFamilyWorld() + CountFamilyRender() < WXL_EV_COUNT,
               "no family holds the whole table");
-        Check(static_cast<uint32_t>(WXL_EV_MapObjectLoad) == WXL_EV_COUNT - 1,
-              "the last declared event is the last id");
     }
 
     Section("version negotiation");
@@ -130,13 +172,23 @@ int main()
     CountingWorldScript  world;
     CountingRenderScript render;
     SecondWorldScript    secondWorld;
+    CountingNetScript    net;
+    CountingLuaScript    lua;
     {
+        const size_t before = host.LiveSubscriptions();
         wxl::ScriptMgr::Add(&world);
-        wxl::ScriptMgr::Add(&render);
-        wxl::ScriptMgr::Add(&secondWorld);
+        const size_t afterWorld = host.LiveSubscriptions();
+        Check(afterWorld - before == CountFamilyWorld(),
+              "a family subscribes its own events, and only those");
 
-        Check(host.LiveSubscriptions() == CountFamilyWorld() + CountFamilyRender(),
-              "a family subscribes once, for its own events only");
+        wxl::ScriptMgr::Add(&secondWorld);
+        Check(host.LiveSubscriptions() == afterWorld,
+              "a second script of a family costs no further subscription");
+
+        wxl::ScriptMgr::Add(&render);
+        wxl::ScriptMgr::Add(&net);
+        wxl::ScriptMgr::Add(&lua);
+        Check(host.LiveSubscriptions() > afterWorld, "other families subscribe on their own");
 
         const wxl_update_args tick{0.016f};
         host.Raise(WXL_EV_Update, &tick);
@@ -154,6 +206,19 @@ int main()
         const wxl_world_args entered{571, {100.0f, 200.0f, 300.0f}};
         host.Raise(WXL_EV_WorldEnter, &entered);
         Check(world.worldEnters == 1 && world.lastMap == 571, "a second event of a family runs");
+
+        wxl_bool                 suppressed = WXL_FALSE;
+        const uint8_t            body[4]    = {1, 2, 3, 4};
+        const wxl_message_args   message{0xF001, body, sizeof(body), &suppressed};
+        host.Raise(WXL_EV_MessageReceived, &message);
+        Check(net.received == 1 && net.lastOpcode == 0xF001, "the net family runs");
+        Check(suppressed == WXL_TRUE, "a mod can take an opcode the client does not know");
+
+        const wxl_script_vm_args vm{WXL_SCRIPT_CONTEXT_GAME, nullptr};
+        host.Raise(WXL_EV_ScriptVmReady, &vm);
+        host.Raise(WXL_EV_ScriptVmClosing, &vm);
+        Check(lua.ready == 1 && lua.closing == 1, "the script VM family sees both ends");
+        Check(lua.lastContext == WXL_SCRIPT_CONTEXT_GAME, "and which context it was");
     }
 
     Section("cancellation");

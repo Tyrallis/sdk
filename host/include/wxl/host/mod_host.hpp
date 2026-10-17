@@ -1,0 +1,164 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
+//
+// The runtime's handle on its mods: discovery, admission, loading, stages, events, services and
+// the wxl_host table handed to every mod. Everything two runtimes would otherwise write twice.
+
+#ifndef WXL_HOST_MOD_HOST_HPP
+#define WXL_HOST_MOD_HOST_HPP
+
+#include <cstdint>
+#include <filesystem>
+#include <string>
+#include <vector>
+
+#include "wxl/host.h"
+#include "wxl/host/admission.hpp"
+#include "wxl/host/discovery.hpp"
+#include "wxl/host/event_bus.hpp"
+#include "wxl/host/loader.hpp"
+#include "wxl/host/log.hpp"
+#include "wxl/host/manifest.hpp"
+#include "wxl/host/registry.hpp"
+#include "wxl/mod.h"
+
+namespace wxl::host
+{
+    /// What a runtime says about itself and what it offers. Read once, at construction.
+    struct HostConfig
+    {
+        std::filesystem::path mods_directory;
+
+        std::string runtime_id;          ///< "core", "client", "engine"
+        std::string runtime_name;        ///< for logs
+        uint32_t    runtime_version = 0; ///< opaque to a mod
+        std::string target = CurrentTarget(); ///< which "binaries" entry to load
+
+        LogSink*      log_sink    = nullptr; ///< not owned; null drops every line
+        wxl_log_level log_minimum = WXL_LOG_TRACE;
+
+        /// The events this runtime raises. A subscribe to any other gets WXL_SUBSCRIPTION_NONE.
+        std::vector<wxl_event> events;
+
+        /// Published before any mod loads, so a manifest's `requires` can be answered.
+        std::vector<PublishedService> services;
+
+        /// Null means the OS loader. A test injects its own.
+        LibraryLoader* loader = nullptr;
+    };
+
+    /// A mod whose wxl_mod_load returned WXL_OK.
+    struct LoadedMod
+    {
+        std::string           id;
+        std::string           name;
+        uint32_t              version = 0;
+        std::string           directory_name;
+        std::filesystem::path directory;
+        std::filesystem::path binary;
+        Manifest              manifest;
+        bool                  has_stage  = false; ///< exports wxl_mod_stage
+        bool                  has_unload = false; ///< exports wxl_mod_unload
+    };
+
+    /// A folder that did not become a loaded mod, and why.
+    struct RefusedMod
+    {
+        std::string           id; ///< empty when the manifest could not be read
+        std::string           directory_name;
+        std::filesystem::path directory;
+        Verdict               verdict = Verdict::Refuse; ///< Skip or Refuse
+        std::string           reason;
+    };
+
+    /**
+     * @brief The mod host.
+     *
+     * One per process: the wxl_host table is plain C function pointers with nowhere to carry an
+     * instance, so the live host is the one the table routes to. Construct it with the runtime's
+     * configuration, call @ref LoadAll once the mods directory is known, @ref Stage as the boot
+     * advances, @ref Raise at the runtime's own seams, and @ref Shutdown on the way out.
+     *
+     * Every method runs on the thread that calls it; the host does not lock.
+     */
+    class ModHost
+    {
+    public:
+        explicit ModHost(HostConfig config);
+        ~ModHost();
+
+        ModHost(const ModHost&)            = delete;
+        ModHost& operator=(const ModHost&) = delete;
+
+        /**
+         * @brief Finds, admits and loads every mod in the mods directory, in load order.
+         *
+         * Each outcome is logged and kept for @ref Loaded and @ref Refused. A second call does
+         * nothing: mods load once.
+         */
+        void LoadAll();
+
+        /**
+         * @brief Reports a boot stage to every loaded mod that exports wxl_mod_stage.
+         *
+         * Load order, except WXL_STAGE_SHUTDOWN, which runs in reverse.
+         */
+        void Stage(wxl_stage stage);
+
+        /// Calls wxl_mod_unload in reverse load order and frees the binaries.
+        void UnloadAll();
+
+        /// WXL_STAGE_SHUTDOWN, then @ref UnloadAll.
+        void Shutdown();
+
+        /// Dispatches an event. What the runtime calls at its own seams.
+        void Raise(wxl_event event, const void* args);
+
+        /// The table every mod receives. Valid for the host's lifetime.
+        const wxl_host* Table() const { return &table_; }
+
+        const std::vector<LoadedMod>&  Loaded() const { return loaded_; }
+        const std::vector<RefusedMod>& Refused() const { return refused_; }
+
+        const HostConfig&      Config() const { return config_; }
+        const Logger&          Log() const { return logger_; }
+        ServiceRegistry&       Services() { return services_; }
+        const ServiceRegistry& Services() const { return services_; }
+        EventBus&              Events() { return events_; }
+        const EventBus&        Events() const { return events_; }
+
+    private:
+        static ModHost* current_;
+
+        static void WXL_CALL                    ThunkLog(wxl_log_level level, const char* tag,
+                                                         wxl_str message);
+        static const wxl_runtime_info* WXL_CALL ThunkRuntime(void);
+        static wxl_bool WXL_CALL                ThunkHasService(const char* name, uint32_t version);
+        static const void* WXL_CALL             ThunkGetService(const char* name, uint32_t version);
+        static wxl_result WXL_CALL ThunkPublishService(const char* name, uint32_t version,
+                                                       const void* iface);
+        static wxl_subscription WXL_CALL ThunkSubscribe(wxl_event event, wxl_event_fn handler,
+                                                        void* user, int32_t priority);
+        static void WXL_CALL             ThunkUnsubscribe(wxl_subscription subscription);
+        static void WXL_CALL             ThunkEmit(wxl_event event, const void* args);
+
+        void Refuse(const std::string& id, const std::string& directoryName,
+                    const std::filesystem::path& directory, Verdict verdict,
+                    const std::string& reason);
+        void TryLoad(const ModCandidate& candidate);
+
+        HostConfig       config_;
+        Logger           logger_;
+        ServiceRegistry  services_;
+        EventBus         events_;
+        wxl_runtime_info info_{};
+        wxl_host         table_{};
+
+        std::vector<LoadedMod>  loaded_;
+        std::vector<ModBinary>  binaries_; ///< index-aligned with loaded_
+        std::vector<RefusedMod> refused_;
+        bool                    loadedAll_ = false;
+    };
+} // namespace wxl::host
+
+#endif // WXL_HOST_MOD_HOST_HPP

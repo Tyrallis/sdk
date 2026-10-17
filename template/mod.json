@@ -6,7 +6,8 @@
   "abi": "0.1",
   "description": "The shape of a mod: a lifecycle, two scripts, one optional service.",
   "binaries": {
-    "win-x64": "bin/x64/example.dll"
+    "win-x64": "bin/x64/example.dll",
+    "win-x86": "bin/x86/example.dll"
   },
   "optional": [
     { "service": "wxl.object", "version": 1 }

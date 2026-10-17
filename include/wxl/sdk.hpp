@@ -54,8 +54,8 @@ namespace wxl
      *
      * Load order is not something a mod can rely on, so nothing is looked up until it is needed:
      *
-     *     static wxl::Service<wxl_script_api> g_script("wxl.script", 1);
-     *     if (g_script) g_script->Register("myAddon", &MyFn);
+     *     static wxl::Service<wxl_script_api> g_script(WXL_SCRIPT_SERVICE, 1);
+     *     if (g_script) g_script->RegisterFunction("MyCall", &MyCall);
      *
      * A lookup that finds nothing is retried on the next use, so a service published later is
      * still picked up. Testing the handle is how a mod stays portable across runtimes that do not
@@ -78,13 +78,13 @@ namespace wxl
             return iface_;
         }
 
-        const T*    operator->() const { return Get(); }
-        explicit    operator bool() const { return Get() != nullptr; }
+        const T* operator->() const { return Get(); }
+        explicit operator bool() const { return Get() != nullptr; }
 
     private:
-        const char*       name_;
-        uint32_t          version_;
-        mutable const T*  iface_ = nullptr;
+        const char*      name_;
+        uint32_t         version_;
+        mutable const T* iface_ = nullptr;
     };
 
     // --- Scripts -------------------------------------------------------------------------
@@ -92,25 +92,19 @@ namespace wxl
     // One class per family, one virtual per event, generated from events.def. Override what
     // matters and ignore the rest; an empty override costs nothing.
     //
-    // An override that a runtime never calls is not an error. Ask Host()->has_service or watch
-    // the subscription result when a hook is load-bearing for the mod.
+    // An override a runtime never calls is not an error. Declare the event's service in the
+    // manifest when a hook is load-bearing, so the mod is refused with a reason instead of
+    // running half-dead.
+    //
+    // Each block names only its own family: events.def defaults the rest to nothing.
 
     /// The game's own facts: ticks, the world, input, sound.
     class WorldScript
     {
     public:
         virtual ~WorldScript() = default;
-#define WXL_EVENT_World(name, id, args) \
-    virtual void On##name(const args&) {}
-#define WXL_EVENT_Render(name, id, args)
-#define WXL_EVENT_Object(name, id, args)
-#define WXL_EVENT_Asset(name, id, args)
-#define WXL_EVENT(family, name, id, args) WXL_EVENT_##family(name, id, args)
+#define WXL_EVENT_World(name, id, args) virtual void On##name(const args&) {}
 #include "wxl/events.def"
-#undef WXL_EVENT
-#undef WXL_EVENT_Asset
-#undef WXL_EVENT_Object
-#undef WXL_EVENT_Render
 #undef WXL_EVENT_World
     };
 
@@ -119,18 +113,9 @@ namespace wxl
     {
     public:
         virtual ~RenderScript() = default;
-#define WXL_EVENT_World(name, id, args)
-#define WXL_EVENT_Render(name, id, args) \
-    virtual void On##name(const args&) {}
-#define WXL_EVENT_Object(name, id, args)
-#define WXL_EVENT_Asset(name, id, args)
-#define WXL_EVENT(family, name, id, args) WXL_EVENT_##family(name, id, args)
+#define WXL_EVENT_Render(name, id, args) virtual void On##name(const args&) {}
 #include "wxl/events.def"
-#undef WXL_EVENT
-#undef WXL_EVENT_Asset
-#undef WXL_EVENT_Object
 #undef WXL_EVENT_Render
-#undef WXL_EVENT_World
     };
 
     /// What lives in the world.
@@ -138,18 +123,9 @@ namespace wxl
     {
     public:
         virtual ~ObjectScript() = default;
-#define WXL_EVENT_World(name, id, args)
-#define WXL_EVENT_Render(name, id, args)
-#define WXL_EVENT_Object(name, id, args) \
-    virtual void On##name(const args&) {}
-#define WXL_EVENT_Asset(name, id, args)
-#define WXL_EVENT(family, name, id, args) WXL_EVENT_##family(name, id, args)
+#define WXL_EVENT_Object(name, id, args) virtual void On##name(const args&) {}
 #include "wxl/events.def"
-#undef WXL_EVENT
-#undef WXL_EVENT_Asset
 #undef WXL_EVENT_Object
-#undef WXL_EVENT_Render
-#undef WXL_EVENT_World
     };
 
     /// What comes off disk.
@@ -157,18 +133,29 @@ namespace wxl
     {
     public:
         virtual ~AssetScript() = default;
-#define WXL_EVENT_World(name, id, args)
-#define WXL_EVENT_Render(name, id, args)
-#define WXL_EVENT_Object(name, id, args)
-#define WXL_EVENT_Asset(name, id, args) \
-    virtual void On##name(const args&) {}
-#define WXL_EVENT(family, name, id, args) WXL_EVENT_##family(name, id, args)
+#define WXL_EVENT_Asset(name, id, args) virtual void On##name(const args&) {}
 #include "wxl/events.def"
-#undef WXL_EVENT
 #undef WXL_EVENT_Asset
-#undef WXL_EVENT_Object
-#undef WXL_EVENT_Render
-#undef WXL_EVENT_World
+    };
+
+    /// What crosses to the server.
+    class NetScript
+    {
+    public:
+        virtual ~NetScript() = default;
+#define WXL_EVENT_Net(name, id, args) virtual void On##name(const args&) {}
+#include "wxl/events.def"
+#undef WXL_EVENT_Net
+    };
+
+    /// The script VM coming and going.
+    class LuaScript
+    {
+    public:
+        virtual ~LuaScript() = default;
+#define WXL_EVENT_Lua(name, id, args) virtual void On##name(const args&) {}
+#include "wxl/events.def"
+#undef WXL_EVENT_Lua
     };
 
     namespace detail
@@ -206,8 +193,8 @@ namespace wxl
         void SubscribeFamily()
         {
             static_assert(NotAFamily<Script>::value,
-                          "ScriptMgr::Add takes a WorldScript, RenderScript, ObjectScript or "
-                          "AssetScript");
+                          "ScriptMgr::Add takes a WorldScript, RenderScript, ObjectScript, "
+                          "AssetScript, NetScript or LuaScript");
         }
 
         template <>
@@ -215,19 +202,11 @@ namespace wxl
         {
             const wxl_host* host = Host();
             if (!host) return;
-#define WXL_EVENT_World(name, id, args)                                                     \
-    host->subscribe(WXL_EV_##name,                                                          \
-                    &Thunk<WorldScript, args, &WorldScript::On##name>::Dispatch, nullptr,   \
+#define WXL_EVENT_World(name, id, args)                                                   \
+    host->subscribe(WXL_EV_##name,                                                        \
+                    &Thunk<WorldScript, args, &WorldScript::On##name>::Dispatch, nullptr, \
                     WXL_PRIORITY_DEFAULT);
-#define WXL_EVENT_Render(name, id, args)
-#define WXL_EVENT_Object(name, id, args)
-#define WXL_EVENT_Asset(name, id, args)
-#define WXL_EVENT(family, name, id, args) WXL_EVENT_##family(name, id, args)
 #include "wxl/events.def"
-#undef WXL_EVENT
-#undef WXL_EVENT_Asset
-#undef WXL_EVENT_Object
-#undef WXL_EVENT_Render
 #undef WXL_EVENT_World
         }
 
@@ -236,20 +215,12 @@ namespace wxl
         {
             const wxl_host* host = Host();
             if (!host) return;
-#define WXL_EVENT_World(name, id, args)
 #define WXL_EVENT_Render(name, id, args)                                                    \
     host->subscribe(WXL_EV_##name,                                                          \
                     &Thunk<RenderScript, args, &RenderScript::On##name>::Dispatch, nullptr, \
                     WXL_PRIORITY_DEFAULT);
-#define WXL_EVENT_Object(name, id, args)
-#define WXL_EVENT_Asset(name, id, args)
-#define WXL_EVENT(family, name, id, args) WXL_EVENT_##family(name, id, args)
 #include "wxl/events.def"
-#undef WXL_EVENT
-#undef WXL_EVENT_Asset
-#undef WXL_EVENT_Object
 #undef WXL_EVENT_Render
-#undef WXL_EVENT_World
         }
 
         template <>
@@ -257,20 +228,12 @@ namespace wxl
         {
             const wxl_host* host = Host();
             if (!host) return;
-#define WXL_EVENT_World(name, id, args)
-#define WXL_EVENT_Render(name, id, args)
 #define WXL_EVENT_Object(name, id, args)                                                    \
     host->subscribe(WXL_EV_##name,                                                          \
                     &Thunk<ObjectScript, args, &ObjectScript::On##name>::Dispatch, nullptr, \
                     WXL_PRIORITY_DEFAULT);
-#define WXL_EVENT_Asset(name, id, args)
-#define WXL_EVENT(family, name, id, args) WXL_EVENT_##family(name, id, args)
 #include "wxl/events.def"
-#undef WXL_EVENT
-#undef WXL_EVENT_Asset
 #undef WXL_EVENT_Object
-#undef WXL_EVENT_Render
-#undef WXL_EVENT_World
         }
 
         template <>
@@ -278,21 +241,40 @@ namespace wxl
         {
             const wxl_host* host = Host();
             if (!host) return;
-#define WXL_EVENT_World(name, id, args)
-#define WXL_EVENT_Render(name, id, args)
-#define WXL_EVENT_Object(name, id, args)
 #define WXL_EVENT_Asset(name, id, args)                                                   \
     host->subscribe(WXL_EV_##name,                                                        \
                     &Thunk<AssetScript, args, &AssetScript::On##name>::Dispatch, nullptr, \
                     WXL_PRIORITY_DEFAULT);
-#define WXL_EVENT(family, name, id, args) WXL_EVENT_##family(name, id, args)
 #include "wxl/events.def"
-#undef WXL_EVENT
 #undef WXL_EVENT_Asset
-#undef WXL_EVENT_Object
-#undef WXL_EVENT_Render
-#undef WXL_EVENT_World
         }
+
+        template <>
+        inline void SubscribeFamily<NetScript>()
+        {
+            const wxl_host* host = Host();
+            if (!host) return;
+#define WXL_EVENT_Net(name, id, args)                                                 \
+    host->subscribe(WXL_EV_##name,                                                    \
+                    &Thunk<NetScript, args, &NetScript::On##name>::Dispatch, nullptr, \
+                    WXL_PRIORITY_DEFAULT);
+#include "wxl/events.def"
+#undef WXL_EVENT_Net
+        }
+
+        template <>
+        inline void SubscribeFamily<LuaScript>()
+        {
+            const wxl_host* host = Host();
+            if (!host) return;
+#define WXL_EVENT_Lua(name, id, args)                                                 \
+    host->subscribe(WXL_EV_##name,                                                    \
+                    &Thunk<LuaScript, args, &LuaScript::On##name>::Dispatch, nullptr, \
+                    WXL_PRIORITY_DEFAULT);
+#include "wxl/events.def"
+#undef WXL_EVENT_Lua
+        }
+
         /// Keeps one script, and subscribes its family the first time that family is used.
         template <class Family>
         void Register(Family* script)
@@ -320,6 +302,8 @@ namespace wxl
         static void Add(RenderScript* script) { detail::Register(script); }
         static void Add(ObjectScript* script) { detail::Register(script); }
         static void Add(AssetScript* script) { detail::Register(script); }
+        static void Add(NetScript* script) { detail::Register(script); }
+        static void Add(LuaScript* script) { detail::Register(script); }
     };
 
     // --- The mod itself ------------------------------------------------------------------
@@ -353,33 +337,33 @@ namespace wxl
  *
  *     WXL_MOD(MyMod, "wxl.example", "Example", 1)
  */
-#define WXL_MOD(ModClass, ModId, ModName, ModVersion)                                        \
-    namespace                                                                                \
-    {                                                                                        \
-        ModClass* wxl_mod_instance_ = nullptr;                                               \
-    }                                                                                        \
-    extern "C" WXL_EXPORT const wxl_mod_info* WXL_CALL wxl_mod_query(void)                   \
-    {                                                                                        \
-        static const wxl_mod_info info = {sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR,       \
-                                          WXL_ABI_VERSION_MINOR, ModId, ModName, ModVersion};\
-        return &info;                                                                        \
-    }                                                                                        \
-    extern "C" WXL_EXPORT wxl_result WXL_CALL wxl_mod_load(const wxl_host* host)             \
-    {                                                                                        \
-        if (!host) return WXL_E_INVALID;                                                     \
-        ::wxl::detail::HostRef() = host;                                                     \
-        wxl_mod_instance_ = new ModClass();                                                  \
-        return wxl_mod_instance_->OnLoad();                                                  \
-    }                                                                                        \
-    extern "C" WXL_EXPORT void WXL_CALL wxl_mod_stage(wxl_stage stage)                       \
-    {                                                                                        \
-        if (wxl_mod_instance_) wxl_mod_instance_->OnStage(stage);                            \
-    }                                                                                        \
-    extern "C" WXL_EXPORT void WXL_CALL wxl_mod_unload(void)                                 \
-    {                                                                                        \
-        if (wxl_mod_instance_) wxl_mod_instance_->OnUnload();                                \
-        delete wxl_mod_instance_;                                                            \
-        wxl_mod_instance_ = nullptr;                                                         \
+#define WXL_MOD(ModClass, ModId, ModName, ModVersion)                                         \
+    namespace                                                                                 \
+    {                                                                                         \
+        ModClass* wxl_mod_instance_ = nullptr;                                                \
+    }                                                                                         \
+    extern "C" WXL_EXPORT const wxl_mod_info* WXL_CALL wxl_mod_query(void)                    \
+    {                                                                                         \
+        static const wxl_mod_info info = {sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR,        \
+                                          WXL_ABI_VERSION_MINOR, ModId, ModName, ModVersion}; \
+        return &info;                                                                         \
+    }                                                                                         \
+    extern "C" WXL_EXPORT wxl_result WXL_CALL wxl_mod_load(const wxl_host* host)              \
+    {                                                                                         \
+        if (!host) return WXL_E_INVALID;                                                      \
+        ::wxl::detail::HostRef() = host;                                                      \
+        wxl_mod_instance_ = new ModClass();                                                   \
+        return wxl_mod_instance_->OnLoad();                                                   \
+    }                                                                                         \
+    extern "C" WXL_EXPORT void WXL_CALL wxl_mod_stage(wxl_stage stage)                        \
+    {                                                                                         \
+        if (wxl_mod_instance_) wxl_mod_instance_->OnStage(stage);                             \
+    }                                                                                         \
+    extern "C" WXL_EXPORT void WXL_CALL wxl_mod_unload(void)                                  \
+    {                                                                                         \
+        if (wxl_mod_instance_) wxl_mod_instance_->OnUnload();                                 \
+        delete wxl_mod_instance_;                                                             \
+        wxl_mod_instance_ = nullptr;                                                          \
     }
 
 #endif // WXL_SDK_HPP

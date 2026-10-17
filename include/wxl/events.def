@@ -15,8 +15,47 @@
 // Only events every runtime can raise belong here. A hook that exists because of how one client
 // happens to be built is published by that runtime as a service of its own, not added below.
 
+// Two ways to consume it, and nothing to remember:
+//
+//   define WXL_EVENT(family, name, id, args)       -- every row, family as an argument
+//   define WXL_EVENT_<family>(name, id, args)      -- only the families you name
+//
+// Whatever is left undefined defaults below and is cleaned up at the end, so a runtime that
+// serves one family writes one macro and a mod that wants the whole table writes the other.
+
+#if !defined(WXL_EVENT) && !defined(WXL_EVENT_World) && !defined(WXL_EVENT_Render) && \
+    !defined(WXL_EVENT_Object) && !defined(WXL_EVENT_Asset) && !defined(WXL_EVENT_Net) && \
+    !defined(WXL_EVENT_Lua)
+    #error "define WXL_EVENT(family, name, id, args) or a WXL_EVENT_<family> before events.def"
+#endif
+
 #ifndef WXL_EVENT
-    #error "define WXL_EVENT(family, name, id, args) before including events.def"
+    #define WXL_EVENT(family, name, id, args) WXL_EVENT_##family(name, id, args)
+    #define WXL_EVENT_DEFAULTED
+#endif
+#ifndef WXL_EVENT_World
+    #define WXL_EVENT_World(name, id, args)
+    #define WXL_EVENT_World_DEFAULTED
+#endif
+#ifndef WXL_EVENT_Render
+    #define WXL_EVENT_Render(name, id, args)
+    #define WXL_EVENT_Render_DEFAULTED
+#endif
+#ifndef WXL_EVENT_Object
+    #define WXL_EVENT_Object(name, id, args)
+    #define WXL_EVENT_Object_DEFAULTED
+#endif
+#ifndef WXL_EVENT_Asset
+    #define WXL_EVENT_Asset(name, id, args)
+    #define WXL_EVENT_Asset_DEFAULTED
+#endif
+#ifndef WXL_EVENT_Net
+    #define WXL_EVENT_Net(name, id, args)
+    #define WXL_EVENT_Net_DEFAULTED
+#endif
+#ifndef WXL_EVENT_Lua
+    #define WXL_EVENT_Lua(name, id, args)
+    #define WXL_EVENT_Lua_DEFAULTED
 #endif
 
 // --- World: the game's own facts -----------------------------------------------------------
@@ -79,3 +118,75 @@ WXL_EVENT(Asset, TextureLoad,       20, wxl_texture_load_args)
 WXL_EVENT(Asset, TerrainChunkBuild, 21, wxl_terrain_chunk_args)
 /** A map object's root was read, before its sub-chunks are walked. */
 WXL_EVENT(Asset, MapObjectLoad,     22, wxl_map_object_args)
+/** A file is about to be opened by name. A handler may answer with another path. */
+WXL_EVENT(Asset, FileOpen,          29, wxl_file_open_args)
+/** A file open finished, whether or not it found anything. */
+WXL_EVENT(Asset, FileOpened,        30, wxl_file_opened_args)
+/** A client database finished loading; its records are readable. */
+WXL_EVENT(Asset, ClientDbLoaded,    31, wxl_client_db_args)
+
+// --- Net: what crosses to the server -----------------------------------------------------
+//
+// The payload is the wire body, after the opcode and before any client parsing. A handler may
+// suppress a message in either direction; suppressing an incoming one hides it from the client
+// entirely, which is how a mod serves an opcode the client does not know.
+
+/** A message arrived from the server, before the client dispatches it. */
+WXL_EVENT(Net, MessageReceived, 23, wxl_message_args)
+/** A message is about to go to the server. */
+WXL_EVENT(Net, MessageSent,     24, wxl_message_args)
+/** The connection to the world server came up. */
+WXL_EVENT(Net, Connected,       25, wxl_connection_args)
+/** The connection went away, for any reason. */
+WXL_EVENT(Net, Disconnected,    26, wxl_connection_args)
+
+// --- Lua: the script VM ------------------------------------------------------------------
+//
+// The client runs two script contexts in turn: the login glue and the game. Each is created and
+// destroyed more than once in a session, so anything registered on one is registered again on the
+// next -- these events are where that happens.
+
+/** A script context exists and can be registered on. */
+WXL_EVENT(Lua, ScriptVmReady,   27, wxl_script_vm_args)
+/** A script context is about to be destroyed. Anything held on it dies with it. */
+WXL_EVENT(Lua, ScriptVmClosing, 28, wxl_script_vm_args)
+
+// --- Object, continued -------------------------------------------------------------------
+
+/** A unit died. */
+WXL_EVENT(Object, UnitDeath,       32, wxl_unit_args)
+/** An aura was applied to or removed from a unit. */
+WXL_EVENT(Object, UnitAuraChanged, 33, wxl_unit_aura_args)
+
+// Give back whatever was defaulted above, so the file can be included again right after with a
+// different selector. What the consumer defined itself is left alone: undefining it here would
+// break the consumer that includes the table twice on purpose.
+
+#ifdef WXL_EVENT_DEFAULTED
+    #undef WXL_EVENT
+    #undef WXL_EVENT_DEFAULTED
+#endif
+#ifdef WXL_EVENT_World_DEFAULTED
+    #undef WXL_EVENT_World
+    #undef WXL_EVENT_World_DEFAULTED
+#endif
+#ifdef WXL_EVENT_Render_DEFAULTED
+    #undef WXL_EVENT_Render
+    #undef WXL_EVENT_Render_DEFAULTED
+#endif
+#ifdef WXL_EVENT_Object_DEFAULTED
+    #undef WXL_EVENT_Object
+    #undef WXL_EVENT_Object_DEFAULTED
+#endif
+#ifdef WXL_EVENT_Asset_DEFAULTED
+    #undef WXL_EVENT_Asset
+    #undef WXL_EVENT_Asset_DEFAULTED
+#endif
+#ifdef WXL_EVENT_Net_DEFAULTED
+    #undef WXL_EVENT_Net
+    #undef WXL_EVENT_Net_DEFAULTED
+#endif
+#ifdef WXL_EVENT_Lua_DEFAULTED
+    #undef WXL_EVENT_Lua
+    #undef WXL_EVENT_Lua_DEFAULTED
+#endif

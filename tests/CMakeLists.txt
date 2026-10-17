@@ -11,3 +11,15 @@ else()
 endif()
 
 add_test(NAME contract COMMAND wxl-contract)
+
+# The shared runtime scaffolding, against a binding backed by a table instead of a client.
+add_executable(wxl-runtime-tests runtime.cpp)
+target_link_libraries(wxl-runtime-tests PRIVATE wxl::runtime)
+
+if(MSVC)
+    target_compile_options(wxl-runtime-tests PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(wxl-runtime-tests PRIVATE -Wall -Wextra)
+endif()
+
+add_test(NAME runtime COMMAND wxl-runtime-tests)

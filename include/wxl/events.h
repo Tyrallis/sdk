@@ -146,6 +146,102 @@ typedef struct wxl_map_object_args
     uint32_t    size;
 } wxl_map_object_args;
 
+/**
+ * @brief A file about to be opened by name.
+ *
+ * Writing a NUL-terminated path into @ref redirect opens that instead. This is how a mod replaces
+ * an asset without touching an archive. The last handler to write wins, so a handler that cares
+ * reads @ref redirect first to see whether another already answered.
+ */
+typedef struct wxl_file_open_args
+{
+    wxl_str  path;              ///< what was asked for
+    char*    redirect;          ///< empty on entry; write a path here to answer with another file
+    uint32_t redirect_capacity; ///< bytes available in @ref redirect, terminator included
+} wxl_file_open_args;
+
+/// The result of an open.
+typedef struct wxl_file_opened_args
+{
+    wxl_str  path;  ///< the path actually opened, after any redirect
+    wxl_bool found;
+    uint32_t size;  ///< bytes, 0 when not found
+} wxl_file_opened_args;
+
+/**
+ * @brief A client database that finished loading.
+ *
+ * The records are the file's own rows, a flat array of @ref record_size bytes each -- a file
+ * format, not a client structure, so reading them is portable. They stay valid until the database
+ * is unloaded.
+ */
+typedef struct wxl_client_db_args
+{
+    wxl_str     name;         ///< the file it came from, e.g. "Spell.dbc"
+    const void* records;
+    uint32_t    record_count;
+    uint32_t    record_size;
+} wxl_client_db_args;
+
+/**
+ * @brief A message crossing to or from the server.
+ *
+ * @ref data is the wire body, positioned after the opcode and before any client parsing. It is
+ * valid for the call only. Suppressing an incoming message hides it from the client entirely,
+ * which is how a mod serves an opcode the client does not know; suppressing an outgoing one stops
+ * it being sent.
+ */
+typedef struct wxl_message_args
+{
+    uint32_t    opcode;
+    const void* data;
+    uint32_t    size;
+    wxl_bool*   suppressed; ///< write WXL_TRUE to stop it going any further
+} wxl_message_args;
+
+/// The connection to the world server coming up or going away.
+typedef struct wxl_connection_args
+{
+    wxl_str address; ///< what was connected to; empty when the runtime does not expose it
+} wxl_connection_args;
+
+/// Which script context the client is running.
+typedef enum wxl_script_context
+{
+    WXL_SCRIPT_CONTEXT_GLUE = 0, ///< the login and character-select screens
+    WXL_SCRIPT_CONTEXT_GAME = 1  ///< in the world
+} wxl_script_context;
+
+/**
+ * @brief A script context coming up or going down.
+ *
+ * Both contexts are created and destroyed more than once in a session, so anything registered on
+ * one has to be registered again on the next.
+ *
+ * @ref native_state is the VM's own state pointer, for a mod that wants to talk to the VM
+ * directly. Using it ties the mod to that VM and to that runtime; the script service is the
+ * portable way to register a function.
+ */
+typedef struct wxl_script_vm_args
+{
+    uint32_t context;      ///< a wxl_script_context value
+    void*    native_state; ///< the VM's state, or NULL when the runtime does not expose one
+} wxl_script_vm_args;
+
+/// Something that happened to a unit.
+typedef struct wxl_unit_args
+{
+    wxl_handle unit;
+} wxl_unit_args;
+
+/// An aura appearing on or leaving a unit.
+typedef struct wxl_unit_aura_args
+{
+    wxl_handle unit;
+    uint32_t   spell_id;
+    wxl_bool   removed; ///< WXL_TRUE when the aura left, WXL_FALSE when it was applied
+} wxl_unit_aura_args;
+
 // --- The enum ------------------------------------------------------------------------------
 
 /// Event ids. The numbers are the ABI; see events.def.

@@ -54,11 +54,18 @@ include/wxl/
   mod.h             what a mod exposes to a runtime
   sdk.hpp           the C++ layer: Mod, the script families, Service, WXL_MOD
   objects.hpp       world objects as C++ objects
-  services/         one header per service
+  services/         one header per service: object, script, storage, net, ui, hook
+host/               the mod host: discovery, manifests, load order, registry, event bus
+runtime/            service scaffolding every runtime shares: handles, enumeration, gating
+cmake/              wxl_add_mod(), which builds a mod for every target at once
 schema/mod.json     the manifest, as a JSON Schema
 template/           a buildable mod to start from
 tests/              the conformance checks every runtime has to pass
+docs/               building a mod
 ```
+
+A mod links `wxl::sdk` and nothing else. A runtime links `wxl::host` and `wxl::runtime` too, and
+supplies only the bindings that reach its own client.
 
 ## How it holds together
 
@@ -78,6 +85,12 @@ it requires in its manifest and is refused before it loads if that cannot be met
 asks for at runtime and does without.
 
 **Ids are the ABI.** Event ids and stage numbers are appended, never renumbered, never removed.
+
+**Written once, bound twice.** Reaching a unit's health means: resolve the handle, check the
+generation, find the object, read the field. Only the last step differs between a runtime that
+loads at an offset in a shipped binary and one compiled from the client's source. So the first
+three live in `runtime/`, written once, and a runtime supplies the leaf reads -- a few lines each.
+That is the only thing that exists twice.
 
 ## Versioning
 

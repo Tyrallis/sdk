@@ -1,27 +1,15 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(wxl-example VERSION 1.0.0 LANGUAGES CXX)
+# No language here: wxl_add_mod enables C++ in each per-architecture child build.
+project(wxl-example VERSION 1.0.0 LANGUAGES NONE)
 
-# Point this at a checkout of WarcraftXL/sdk, or install the SDK and use find_package(wxl-sdk).
+# A checkout of WarcraftXL/sdk. With an installed SDK, replace these two lines by
+# find_package(wxl-sdk REQUIRED).
 set(WXL_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.." CACHE PATH "Path to the WarcraftXL SDK")
+include("${WXL_SDK_DIR}/cmake/wxl_add_mod.cmake")
 
-if(NOT TARGET wxl::sdk)
-    add_subdirectory("${WXL_SDK_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/wxl-sdk")
-endif()
-
-add_library(example MODULE src/mod.cpp)
-
-# wxl::sdk-mod is wxl::sdk plus WXL_BUILDING_MOD, which declares the entry points.
-target_link_libraries(example PRIVATE wxl::sdk-mod)
-
-set_target_properties(example PROPERTIES
-    OUTPUT_NAME "example"
-    PREFIX ""
-    CXX_STANDARD 17
-    CXX_STANDARD_REQUIRED ON)
-
-if(MSVC)
-    target_compile_options(example PRIVATE /W4 /permissive-)
-else()
-    target_compile_options(example PRIVATE -Wall -Wextra)
-endif()
+# One source, one command, two binaries: dist/wxl.example/{mod.json,bin/x64,bin/x86}.
+wxl_add_mod(example
+    SOURCES src/mod.cpp
+    MANIFEST mod.json
+    TARGETS win-x64 win-x86)

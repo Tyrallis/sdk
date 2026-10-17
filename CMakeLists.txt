@@ -25,6 +25,8 @@ target_compile_definitions(wxl-sdk-mod INTERFACE WXL_BUILDING_MOD)
 
 option(WXL_SDK_TESTS "Build the contract tests" ${PROJECT_IS_TOP_LEVEL})
 
+add_subdirectory(runtime)
+
 if(WXL_SDK_TESTS)
     enable_testing()
     add_subdirectory(tests)
@@ -32,6 +34,8 @@ endif()
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
+
+add_subdirectory(host)
 
 install(TARGETS wxl-sdk wxl-sdk-mod EXPORT wxl-sdk-targets)
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
