@@ -172,7 +172,7 @@ else if (hp.IsUnsupported())   // this runtime has no object service
 
 ### Objects
 
-`wxl::Object`, `wxl::Unit`, `wxl::Player`, `wxl::GameObject` are values over a handle: copy them,
+`wxl::Object` and its kinds -- `Item`, `Container`, `Unit`, `Player`, `GameObject`, `DynamicObject`, `Corpse`, one per `wxl_object_type`, one header each under `wxl/objects/` -- are values over a handle: copy them,
 compare them, order them, hash them, keep them across frames. `if (unit)` asks whether the unit
 is still there (one call); `unit.HasHandle()` asks whether there is a handle at all (free).
 `object.As<wxl::Unit>()` is a checked downcast returning `std::optional`.

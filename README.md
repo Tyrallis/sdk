@@ -161,7 +161,9 @@ include/wxl/
     mod.h          what a mod exposes to a runtime
     expected.hpp   Expected<T>: a value or the wxl_result that stood in for it
     sdk.hpp        the C++ layer: Mod, the script families, Subscription, Service, WXL_MOD
-    objects.hpp    world objects as C++ values, ObjectService, ObjectView
+    objects.hpp    world objects as C++ values: the umbrella over objects/
+    objects/       one header per kind the client knows: Object, Item, Container, Unit, Player,
+                   GameObject, DynamicObject, Corpse; plus the view and the ObjectService facade
     services.hpp   every typed facade at once
     services/      one C header per service, and one .hpp with its typed facade
 host/              the mod host: discovery, manifests, load order, registry, event bus

@@ -74,9 +74,15 @@ namespace
         stream << text;
     }
 
+#define WXL_TEST_STR_(x) #x
+#define WXL_TEST_STR(x)  WXL_TEST_STR_(x)
+
+    /// The ABI the host under test speaks, as a manifest spells it.
+    constexpr const char* kAbi = WXL_TEST_STR(WXL_ABI_VERSION_MAJOR) "." WXL_TEST_STR(WXL_ABI_VERSION_MINOR);
+
     /// A manifest with the required fields filled and @p extra spliced in before the brace.
     std::string ManifestText(const char* id, const std::string& extra = std::string(),
-                             const char* abi = "0.1", const char* binary = "mod.dll")
+                             const char* abi = kAbi, const char* binary = "mod.dll")
     {
         std::string text = "{\n  \"id\": \"";
         text += id;
@@ -383,14 +389,15 @@ int main(int argc, char** argv)
             "  \"authors\": [ \"a\", \"b\" ],\n"
             "  \"homepage\": \"https://example.test\",\n"
             "  \"$schema\": \"../schema/mod.json\"",
-            "0.1", "bin/mod.dll");
+            kAbi, "bin/mod.dll");
         Check(ParseManifest(full, manifest, error), "a full manifest parses");
         if (!error.empty()) std::printf("        %s\n", error.c_str());
         Check(manifest.id == "wxl.example" && manifest.name == "Test", "id and name");
         Check(manifest.version.major == 1 && manifest.version.minor == 0 &&
                   manifest.version.patch == 0 && manifest.version.text == "1.0.0",
               "the version is parsed and kept as written");
-        Check(manifest.abi.major == 0 && manifest.abi.minor == 1, "the abi is parsed");
+        Check(manifest.abi.major == WXL_ABI_VERSION_MAJOR && manifest.abi.minor == WXL_ABI_VERSION_MINOR,
+              "the abi is parsed");
         Check(manifest.binaries.size() == 1 && manifest.BinaryFor(CurrentTarget()) &&
                   *manifest.BinaryFor(CurrentTarget()) == "bin/mod.dll",
               "the binary for this target resolves");
@@ -793,23 +800,23 @@ int main(int argc, char** argv)
         fs::remove_all(mods);
         // Directory names run against the intended order: loadAfter must win.
         WriteFile(mods / "a-second" / "mod.json",
-                  ManifestText("wxl.second", "\"loadAfter\": [ \"wxl.good\" ]", "0.1", "second.dll"));
-        WriteFile(mods / "b-good" / "mod.json", ManifestText("wxl.good", "", "0.1", "good.dll"));
+                  ManifestText("wxl.second", "\"loadAfter\": [ \"wxl.good\" ]", kAbi, "second.dll"));
+        WriteFile(mods / "b-good" / "mod.json", ManifestText("wxl.good", "", kAbi, "good.dll"));
         WriteFile(mods / "c-nostage" / "mod.json",
-                  ManifestText("wxl.nostage", "\"loadAfter\": [ \"wxl.second\" ]", "0.1", "nostage.dll"));
-        WriteFile(mods / "declines" / "mod.json", ManifestText("wxl.declines", "", "0.1", "declines.dll"));
-        WriteFile(mods / "badload" / "mod.json", ManifestText("wxl.badload", "", "0.1", "badload.dll"));
-        WriteFile(mods / "liar" / "mod.json", ManifestText("wxl.liar", "", "0.1", "liar.dll"));
-        WriteFile(mods / "missing" / "mod.json", ManifestText("wxl.missing", "", "0.1", "missing.dll"));
+                  ManifestText("wxl.nostage", "\"loadAfter\": [ \"wxl.second\" ]", kAbi, "nostage.dll"));
+        WriteFile(mods / "declines" / "mod.json", ManifestText("wxl.declines", "", kAbi, "declines.dll"));
+        WriteFile(mods / "badload" / "mod.json", ManifestText("wxl.badload", "", kAbi, "badload.dll"));
+        WriteFile(mods / "liar" / "mod.json", ManifestText("wxl.liar", "", kAbi, "liar.dll"));
+        WriteFile(mods / "missing" / "mod.json", ManifestText("wxl.missing", "", kAbi, "missing.dll"));
         WriteFile(mods / "needy" / "mod.json",
                   ManifestText("wxl.needy", "\"requires\": [ { \"service\": \"wxl.nothing\", \"version\": 1 } ]",
-                               "0.1", "good.dll"));
+                               kAbi, "good.dll"));
         WriteFile(mods / "oldabi" / "mod.json", ManifestText("wxl.oldabi", "", "9.0", "good.dll"));
         WriteFile(mods / "elsewhere" / "mod.json",
                   "{ \"id\": \"wxl.elsewhere\", \"name\": \"E\", \"version\": \"1.0.0\", \"abi\": \"0.1\", "
                   "\"binaries\": { \"linux-x64\": \"e.so\" } }");
         WriteFile(mods / "unreadable" / "mod.json", "{ \"id\": \"wxl.unreadable\" ");
-        WriteFile(mods / "noquery" / "mod.json", ManifestText("wxl.noquery", "", "0.1", "noquery.dll"));
+        WriteFile(mods / "noquery" / "mod.json", ManifestText("wxl.noquery", "", kAbi, "noquery.dll"));
 
         FakeLoader loader;
         loader.images.push_back({"good.dll", Fn(&GoodQuery), Fn(&GoodLoad), Fn(&GoodStage), Fn(&GoodUnload)});
@@ -947,8 +954,8 @@ int main(int argc, char** argv)
         fs::create_directories(mods / "fixture");
         fs::copy_file(fixture, mods / "fixture" / "fixture.dll");
         WriteFile(mods / "fixture" / "mod.json",
-                  ManifestText("wxl.fixture", "", "0.1", "fixture.dll"));
-        WriteFile(mods / "ghost" / "mod.json", ManifestText("wxl.ghost", "", "0.1", "ghost.dll"));
+                  ManifestText("wxl.fixture", "", kAbi, "fixture.dll"));
+        WriteFile(mods / "ghost" / "mod.json", ManifestText("wxl.ghost", "", kAbi, "ghost.dll"));
 
         CaptureSink sink;
         HostConfig  config;
