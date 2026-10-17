@@ -1,0 +1,81 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
+//
+// The event table: one row per event, and the single source of the event enum, of the C++ hook
+// methods and of the event -> args binding.
+//
+// Include it with WXL_EVENT(family, name, id, args) defined. Expanders ignore the columns they do
+// not need.
+//
+//   family  which C++ script class carries the hook
+//   name    the event's name; the C++ method is On<name>, the enum value WXL_EV_<name>
+//   id      the ABI. Appended with the next free number, never renumbered, never removed.
+//   args    the struct passed to handlers, declared in events.h
+//
+// Only events every runtime can raise belong here. A hook that exists because of how one client
+// happens to be built is published by that runtime as a service of its own, not added below.
+
+#ifndef WXL_EVENT
+    #error "define WXL_EVENT(family, name, id, args) before including events.def"
+#endif
+
+// --- World: the game's own facts -----------------------------------------------------------
+
+/** The logic tick advanced. */
+WXL_EVENT(World, Update,        0, wxl_update_args)
+/** The world finished loading and the player is in it. */
+WXL_EVENT(World, WorldEnter,    1, wxl_world_args)
+/** The world is being torn down; the map being left is still loaded. */
+WXL_EVENT(World, WorldLeave,    2, wxl_world_args)
+/** A click resolved to a point in the world, and possibly to an object. */
+WXL_EVENT(World, WorldClick,    3, wxl_world_click_args)
+/** Raw input arrived. A handler may swallow it. */
+WXL_EVENT(World, Input,         4, wxl_input_args)
+/** A sound is about to play. A handler may suppress it. */
+WXL_EVENT(World, SoundPlay,     5, wxl_sound_args)
+
+// --- Render: the slots of a frame --------------------------------------------------------
+//
+// These carry no device. A mod that needs to draw asks the runtime for its graphics service; what
+// the slots guarantee is *when* they run, which is the part every runtime can promise.
+
+/** A frame is starting, before anything is drawn. */
+WXL_EVENT(Render, FrameBegin,        6, wxl_frame_args)
+/** The frame is drawn and about to be presented. */
+WXL_EVENT(Render, FrameEnd,          7, wxl_frame_args)
+/** The world pass is about to draw. */
+WXL_EVENT(Render, WorldRenderBegin,  8, wxl_frame_args)
+/** The world is drawn and the interface is not: the post-process slot. */
+WXL_EVENT(Render, WorldRenderEnd,    9, wxl_frame_args)
+/** The interface is drawn: the overlay slot, on top of everything. */
+WXL_EVENT(Render, UiRenderEnd,      10, wxl_frame_args)
+/** Swapchain resources are about to be released; release anything derived from them. */
+WXL_EVENT(Render, SwapchainLost,    11, wxl_swapchain_args)
+/** The swapchain is back; recreate what was released. */
+WXL_EVENT(Render, SwapchainRestored,12, wxl_swapchain_args)
+
+// --- Object: what lives in the world -----------------------------------------------------
+
+/** An object entered the client's view. */
+WXL_EVENT(Object, ObjectCreate,     13, wxl_object_args)
+/** An object's server-side fields changed. */
+WXL_EVENT(Object, ObjectUpdate,     14, wxl_object_args)
+/** An object is about to leave; it is still resident and its handle still resolves. */
+WXL_EVENT(Object, ObjectDestroy,    15, wxl_object_args)
+/** The player's target changed. */
+WXL_EVENT(Object, TargetChanged,    16, wxl_target_args)
+/** A map doodad was placed. */
+WXL_EVENT(Object, DoodadSpawn,      17, wxl_doodad_args)
+/** A unit's equipment slot was filled or cleared. */
+WXL_EVENT(Object, EquipmentChanged, 18, wxl_equipment_args)
+
+// --- Asset: what comes off disk ----------------------------------------------------------
+
+/** A model's bytes were read, before they are parsed. A handler may substitute them. */
+WXL_EVENT(Asset, ModelLoad,         19, wxl_model_load_args)
+/** A texture was requested by name. Fires on every reference, cached or not. */
+WXL_EVENT(Asset, TextureLoad,       20, wxl_texture_load_args)
+/** A terrain chunk is being built. */
+WXL_EVENT(Asset, TerrainChunkBuild, 21, wxl_terrain_chunk_args)
+/** A map object's root was read, before its sub-chunks are walked. */
+WXL_EVENT(Asset, MapObjectLoad,     22, wxl_map_object_args)
