@@ -667,10 +667,12 @@ When you need more than that, wait for the stage that brings it up:
 | `OnShutdown` | coming down |
 | `OnUnload` | you are being removed |
 
-> ⚠️ On the stock 32-bit client only the first stage is raised today. Everything else about
-> Scout works on both clients, because nothing it does is load-bearing on a stage -- the one
-> `OnReady` override only writes a line in the log. Write your mod the same way and it will
-> work everywhere.
+> ⚠️ A runtime reports the stages it can recognise and no others. Today both of them report
+> `OnLoad`, `OnStorageReady`, `OnScriptReady` and `OnReady`; neither reports
+> `OnGraphicsReady`, `OnShutdown` or `OnUnload`. An override that is never called is not an
+> error -- it is that runtime saying it cannot tell you. Scout's one `OnReady` override only
+> writes a line in the log, so nothing it does depends on a stage. Write your mod the same way
+> and it will work everywhere.
 
 And the declaration, once, in one file:
 

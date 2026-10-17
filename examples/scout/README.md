@@ -78,7 +78,8 @@ you ask for it by number.
 | | stock `Wow.exe` 3.3.5a | the recompiled client |
 |---|---|---|
 | the journal, the Lua API, the traffic counters | yes | yes |
-| `OnReady` and the other lifecycle stages | not raised yet; only the first one is | yes |
+| `OnLoad`, `OnStorageReady`, `OnScriptReady`, `OnReady` | yes | yes |
+| `OnGraphicsReady`, `OnShutdown`, `OnUnload` | not reported by either runtime yet | the same |
 
 Nothing Scout does is load-bearing on a stage, which is why it works on both. `mod.json`
 requires `wxl.object` -- without it there is nothing to watch, and a runtime that lacks it
