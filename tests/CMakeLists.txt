@@ -23,3 +23,14 @@ else()
 endif()
 
 add_test(NAME runtime COMMAND wxl-runtime-tests)
+
+# The documents against the example they quote. A tutorial whose snippets have drifted still
+# builds and still reads well; only this says it is wrong.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME docs COMMAND "${Python3_EXECUTABLE}" -I
+             "${CMAKE_CURRENT_SOURCE_DIR}/../examples/check_docs.py")
+else()
+    message(WARNING "Python 3 was not found, so the documentation check will not run. "
+        "Run sdk/examples/check_docs.py by hand.")
+endif()

@@ -1,0 +1,18 @@
+{
+  "$schema": "../../schema/mod.json",
+  "id": "wxl.scout",
+  "name": "Scout",
+  "version": "1.0.0",
+  "abi": "0.2",
+  "description": "Keeps a journal of what happens around you and hands it to the interface.",
+  "binaries": {
+    "win-x64": "bin/x64/scout.dll",
+    "win-x86": "bin/x86/scout.dll"
+  },
+  "requires": [
+    { "service": "wxl.object", "version": 1 }
+  ],
+  "optional": [
+    { "service": "wxl.script", "version": 1 }
+  ]
+}

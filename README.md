@@ -119,6 +119,9 @@ WXL_MOD(GreeterMod, "wxl.greeter", "Greeter", 1)
 ```
 
 [`template/`](template/) is the same thing as a buildable project, with its manifest.
+[`examples/scout/`](examples/scout/) is a mod that does real work -- it reads the world,
+serves the client's own Lua and watches the server traffic -- and
+[docs/your-first-mod.md](docs/your-first-mod.md) builds it from nothing, one file at a time.
 
 ## 🔌 What a runtime offers
 
@@ -171,6 +174,7 @@ runtime/           service scaffolding every runtime shares: handles, enumeratio
 cmake/             wxl_add_mod(), which builds a mod for every target at once
 schema/mod.json    the manifest, as a JSON Schema
 template/          a buildable mod to start from
+examples/scout/    a worked example: the world, the client's Lua, the server traffic
 tests/             the conformance checks every runtime has to pass
 ```
 
@@ -190,9 +194,11 @@ Event ids and stage numbers are appended, never renumbered, never removed.
 
 ## 📚 Documentation
 
+- [Your first mod](docs/your-first-mod.md) -- a tutorial, from an empty folder to a mod that does real work
 - [Building a mod](docs/building-a-mod.md) -- the manifest, the targets, the C++ layer
 - [`schema/mod.json`](schema/mod.json) -- the manifest schema, for your editor
 - [`template/`](template/) -- a working mod to copy
+- [`examples/scout/`](examples/scout/) -- the worked example the tutorial builds
 
 ## 💬 Support
 
