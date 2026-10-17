@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 WarcraftXL
 //
-// The event bus: subscriptions in priority order, safe to change from inside a handler.
+// The event bus: subscriptions in priority order, safe to change from inside a handler, each
+// handler called under the crash guard.
 
 #ifndef WXL_HOST_EVENT_BUS_HPP
 #define WXL_HOST_EVENT_BUS_HPP
@@ -12,6 +13,7 @@
 
 #include "wxl/events.h"
 #include "wxl/host.h"
+#include "wxl/host/guard.hpp"
 #include "wxl/host/log.hpp"
 
 namespace wxl::host
@@ -29,13 +31,20 @@ namespace wxl::host
      * A subscription made from inside a dispatch of the same event is held back until that
      * dispatch ends. A subscription dropped from inside a dispatch is skipped for the rest of it
      * and erased when it ends. An exception leaving a handler is caught here, logged, and the
-     * dispatch continues: nothing crosses back into C.
+     * dispatch continues: nothing crosses back into C. A handler that faults is caught by the
+     * crash guard, reported to the fault handler, and the dispatch continues past it.
+     *
+     * Every subscription carries an owner, an opaque token the host assigns to the mod that
+     * made it (0 for nobody); @ref DropOwner drops them all at once, during a dispatch included.
      *
      * Single-threaded: dispatch and subscription changes happen on the thread that raises.
      */
     class EventBus
     {
     public:
+        /// Told when a handler faulted: whose it was, which event, and what happened.
+        using FaultFn = void (*)(void* user, uint32_t owner, wxl_event event, const Fault& fault);
+
         /// Nothing can be raised until @ref SetRaisable says so.
         EventBus();
 
@@ -46,13 +55,28 @@ namespace wxl::host
         void SetRaisable(wxl_event event, bool raisable);
         bool CanRaise(wxl_event event) const;
 
+        /// Where the host keeps the owner whose code is running: set to each handler's owner
+        /// around its call and put back after, so a subscribe made inside is attributed right.
+        void SetOwnerSlot(uint32_t* slot) { ownerSlot_ = slot; }
+
+        /// Called after a handler faulted, before the dispatch goes on. Null drops the report.
+        void SetFaultHandler(FaultFn handler, void* user)
+        {
+            faultFn_   = handler;
+            faultUser_ = user;
+        }
+
         /// @return WXL_SUBSCRIPTION_NONE for a null handler, an unknown event, or one the
         ///         runtime does not raise.
         wxl_subscription Subscribe(wxl_event event, wxl_event_fn handler, void* user,
-                                   int32_t priority);
+                                   int32_t priority, uint32_t owner = 0);
 
         /// A token that is not live is ignored.
         void Unsubscribe(wxl_subscription subscription);
+
+        /// Drops every live subscription of an owner. Safe inside a dispatch: the rest of it
+        /// skips them.
+        void DropOwner(uint32_t owner);
 
         void Emit(wxl_event event, const void* args);
 
@@ -67,6 +91,7 @@ namespace wxl::host
             wxl_event_fn     handler;
             void*            user;
             int32_t          priority;
+            uint32_t         owner;
             bool             live;
         };
 
@@ -88,8 +113,11 @@ namespace wxl::host
 
         std::vector<List> lists_;
         std::vector<bool> raisable_;
-        const Logger*     logger_ = nullptr;
-        wxl_subscription  next_   = WXL_SUBSCRIPTION_NONE;
+        const Logger*     logger_    = nullptr;
+        uint32_t*         ownerSlot_ = nullptr;
+        FaultFn           faultFn_   = nullptr;
+        void*             faultUser_ = nullptr;
+        wxl_subscription  next_      = WXL_SUBSCRIPTION_NONE;
     };
 } // namespace wxl::host
 

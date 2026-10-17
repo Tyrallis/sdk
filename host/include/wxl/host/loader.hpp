@@ -76,6 +76,10 @@ namespace wxl::host
         /// Unloads the binary. Idempotent.
         void Close();
 
+        /// Forgets the binary without unloading it: for one whose code faulted, since its
+        /// detach routine is more of that code. Idempotent.
+        void Abandon();
+
         explicit operator bool() const { return library_ != nullptr; }
 
         const EntryPoints&           Entries() const { return entries_; }

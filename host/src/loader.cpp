@@ -75,4 +75,11 @@ namespace wxl::host
         loader_  = nullptr;
         entries_ = EntryPoints{};
     }
+
+    void ModBinary::Abandon()
+    {
+        library_ = nullptr;
+        loader_  = nullptr;
+        entries_ = EntryPoints{};
+    }
 } // namespace wxl::host

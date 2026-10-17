@@ -18,6 +18,7 @@
 #include "wxl/host/admission.hpp"
 #include "wxl/host/discovery.hpp"
 #include "wxl/host/event_bus.hpp"
+#include "wxl/host/guard.hpp"
 #include "wxl/host/json.hpp"
 #include "wxl/host/loader.hpp"
 #include "wxl/host/log.hpp"
@@ -251,6 +252,87 @@ namespace
         g_trace.push_back("liar:load");
         return WXL_OK;
     }
+
+
+    // --- mods that fault, for the crash guard ----------------------------------------------
+
+    wxl_mod_info g_steadyInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
+                              "wxl.steady", "Steady", 10};
+    wxl_mod_info g_faultyInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
+                              "wxl.faulty", "Faulty", 11};
+    wxl_mod_info g_stagecrashInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
+                                  "wxl.stagecrash", "Stage crash", 12};
+    wxl_mod_info g_loadcrashInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
+                                 "wxl.loadcrash", "Load crash", 13};
+
+    /// Writes through a null pointer. The pointer is volatile so the store is emitted as written.
+    void Crash()
+    {
+        volatile int* nowhere = nullptr;
+        *nowhere              = 1;
+    }
+
+    int g_steadyTag      = 100;
+    int g_faultyEarlyTag = 101;
+    int g_faultyLateTag  = 102;
+
+    void WXL_CALL FaultyHandler(void* user, const void*)
+    {
+        g_order.push_back(*static_cast<int*>(user));
+        Crash();
+    }
+
+    const wxl_mod_info* WXL_CALL SteadyQuery(void) { return &g_steadyInfo; }
+    wxl_result WXL_CALL SteadyLoad(const wxl_host* host)
+    {
+        host->subscribe(WXL_EV_Update, &Record, &g_steadyTag, 0);
+        return WXL_OK;
+    }
+    void WXL_CALL SteadyStage(wxl_stage stage)
+    {
+        g_trace.push_back("steady:stage" + std::to_string(static_cast<int>(stage)));
+    }
+    void WXL_CALL SteadyUnload(void) { g_trace.push_back("steady:unload"); }
+
+    const wxl_mod_info* WXL_CALL FaultyQuery(void) { return &g_faultyInfo; }
+    wxl_result WXL_CALL FaultyLoad(const wxl_host* host)
+    {
+        host->subscribe(WXL_EV_Update, &FaultyHandler, &g_faultyEarlyTag, -1);
+        host->subscribe(WXL_EV_Update, &Record, &g_faultyLateTag, 1);
+        host->subscribe(WXL_EV_FrameBegin, &Record, &g_faultyLateTag, 0);
+        return WXL_OK;
+    }
+    void WXL_CALL FaultyStage(wxl_stage stage)
+    {
+        g_trace.push_back("faulty:stage" + std::to_string(static_cast<int>(stage)));
+    }
+    void WXL_CALL FaultyUnload(void) { g_trace.push_back("faulty:unload"); }
+
+    const wxl_mod_info* WXL_CALL StageCrashQuery(void) { return &g_stagecrashInfo; }
+    wxl_result WXL_CALL StageCrashLoad(const wxl_host*) { return WXL_OK; }
+    void WXL_CALL StageCrashStage(wxl_stage stage)
+    {
+        g_trace.push_back("stagecrash:stage" + std::to_string(static_cast<int>(stage)));
+        if (stage == WXL_STAGE_READY) Crash();
+    }
+    void WXL_CALL StageCrashUnload(void) { g_trace.push_back("stagecrash:unload"); }
+
+    const wxl_mod_info* WXL_CALL LoadCrashQuery(void) { return &g_loadcrashInfo; }
+    wxl_result WXL_CALL LoadCrashLoad(const wxl_host* host)
+    {
+        host->subscribe(WXL_EV_Update, &Record, &g_steadyTag, 0);
+        Crash();
+        return WXL_OK;
+    }
+
+    const wxl_mod_info* WXL_CALL QueryCrashQuery(void)
+    {
+        Crash();
+        return nullptr;
+    }
+
+    void GuardedCrash(void*) { Crash(); }
+    void GuardedFine(void* context) { *static_cast<int*>(context) = 1; }
 
     /// Hands out in-process entry points by file name; the file itself need not exist.
     class FakeLoader final : public LibraryLoader
@@ -941,6 +1023,111 @@ int main(int argc, char** argv)
         host.LoadAll();
         Check(host.Loaded().empty(), "LoadAll is a one-shot");
     }
+
+    Section("crash guard");
+#if defined(_MSC_VER)
+    {
+        Fault fault;
+        int   touched = 0;
+        Check(CallGuarded(&GuardedFine, &touched, &fault) && touched == 1,
+              "a call that returns is reported as returned");
+        Check(!CallGuarded(&GuardedCrash, nullptr, &fault) && fault.code == 0xC0000005u,
+              "a null write inside the guard is reported as an access violation");
+        char text[96];
+        Check(Contains(DescribeFault(fault, text, sizeof text), "access violation (0xC0000005) at 0x"),
+              "a fault describes itself");
+    }
+    if (scratch.empty())
+    {
+        std::printf("  (skipped: no scratch directory given)\n");
+    }
+    else
+    {
+        const fs::path mods = scratch / "crash";
+        fs::remove_all(mods);
+        WriteFile(mods / "a-steady" / "mod.json", ManifestText("wxl.steady", "", kAbi, "steady.dll"));
+        WriteFile(mods / "b-faulty" / "mod.json",
+                  ManifestText("wxl.faulty", "\"loadAfter\": [ \"wxl.steady\" ]", kAbi, "faulty.dll"));
+        WriteFile(mods / "c-stagecrash" / "mod.json",
+                  ManifestText("wxl.stagecrash", "\"loadAfter\": [ \"wxl.faulty\" ]", kAbi, "stagecrash.dll"));
+        WriteFile(mods / "loadcrash" / "mod.json", ManifestText("wxl.loadcrash", "", kAbi, "loadcrash.dll"));
+        WriteFile(mods / "querycrash" / "mod.json", ManifestText("wxl.querycrash", "", kAbi, "querycrash.dll"));
+
+        FakeLoader loader;
+        loader.images.push_back({"steady.dll", Fn(&SteadyQuery), Fn(&SteadyLoad), Fn(&SteadyStage), Fn(&SteadyUnload)});
+        loader.images.push_back({"faulty.dll", Fn(&FaultyQuery), Fn(&FaultyLoad), Fn(&FaultyStage), Fn(&FaultyUnload)});
+        loader.images.push_back({"stagecrash.dll", Fn(&StageCrashQuery), Fn(&StageCrashLoad), Fn(&StageCrashStage), Fn(&StageCrashUnload)});
+        loader.images.push_back({"loadcrash.dll", Fn(&LoadCrashQuery), Fn(&LoadCrashLoad), nullptr, nullptr});
+        loader.images.push_back({"querycrash.dll", Fn(&QueryCrashQuery), Fn(&SteadyLoad), nullptr, nullptr});
+
+        CaptureSink sink;
+        HostConfig  config;
+        config.mods_directory = mods;
+        config.runtime_id     = "test";
+        config.runtime_name   = "Test runtime";
+        config.log_sink       = &sink;
+        config.events         = {WXL_EV_Update, WXL_EV_FrameBegin};
+        config.loader         = &loader;
+
+        g_trace.clear();
+        ModHost host(config);
+        host.LoadAll();
+        Check(host.Loaded().size() == 3 && host.Loaded()[0].id == "wxl.steady" &&
+                  host.Loaded()[1].id == "wxl.faulty" && host.Loaded()[2].id == "wxl.stagecrash",
+              "the mods that survive their entry points load; the two that fault at the door do not");
+        const RefusedMod* refused = FindRefused(host, "wxl.loadcrash");
+        Check(refused && Contains(refused->reason, "wxl_mod_load faulted") &&
+                  Contains(refused->reason, "access violation"),
+              "a load that faults is refused with the fault named");
+        refused = FindRefused(host, "wxl.querycrash");
+        Check(refused && Contains(refused->reason, "wxl_mod_query faulted"),
+              "a query that faults is refused the same way");
+        Check(loader.opened == 5 && loader.closed == 0,
+              "a binary that faulted is left mapped rather than unloaded");
+        Check(host.Events().LiveCount(WXL_EV_Update) == 3,
+              "the subscription a faulting load made is dropped with it");
+
+        host.Stage(WXL_STAGE_EARLY);
+        Check(g_trace == std::vector<std::string>{"steady:stage0", "faulty:stage0", "stagecrash:stage0"},
+              "every loaded mod sees the early stage");
+
+        const wxl_update_args tick{0.5f};
+        g_order.clear();
+        host.Raise(WXL_EV_Update, &tick);
+        Check(g_order == std::vector<int>{101, 100},
+              "a handler that faults ends only itself: the next mod's handler still runs, and the "
+              "faulting mod's later handler for the same event does not");
+        Check(host.Loaded()[1].disabled && Contains(host.Loaded()[1].fault, "Update"),
+              "the faulting mod is disabled, remembering what it was doing");
+        Check(sink.Has("mod wxl.faulty faulted in its handler for Update") &&
+                  sink.Has("access violation (0xC0000005)"),
+              "the log names the mod, what it was doing and the fault");
+        Check(host.Events().LiveCount() == 1,
+              "every subscription of the disabled mod is gone, other events included");
+        g_order.clear();
+        host.Raise(WXL_EV_Update, &tick);
+        host.Raise(WXL_EV_FrameBegin, &tick);
+        Check(g_order == std::vector<int>{100}, "the next dispatches run without it");
+
+        g_trace.clear();
+        host.Stage(WXL_STAGE_READY);
+        Check(g_trace == std::vector<std::string>{"steady:stage4", "stagecrash:stage4"},
+              "a disabled mod is skipped at the next stage; a stage that faults ends there");
+        Check(host.Loaded()[2].disabled && Contains(host.Loaded()[2].fault, "wxl_mod_stage(ready)"),
+              "the mod whose stage faulted is disabled, naming the stage");
+
+        g_trace.clear();
+        host.Shutdown();
+        Check(g_trace == std::vector<std::string>{"steady:stage5", "steady:unload"},
+              "shutdown and unload skip the disabled mods");
+        Check(host.Loaded().empty() && loader.closed == 1,
+              "the sound mod's binary is released; the disabled ones stay mapped");
+        Check(sink.Has("left wxl.faulty mapped") && sink.Has("left wxl.stagecrash mapped"),
+              "and the log says so");
+    }
+#else
+    std::printf("  (skipped: off MSVC the guard is a plain call)\n");
+#endif
 
     Section("mod host with the fixture binary");
     if (fixture.empty() || scratch.empty())

@@ -9,7 +9,11 @@
 // wxl_script_vm_args of the ScriptVmReady event, for a mod that accepts being tied to one VM.
 //
 // Registrations do not survive a context: both the glue and the game context are created and
-// destroyed more than once in a session, so a mod registers again on every ScriptVmReady.
+// destroyed more than once in a session, so a mod registers again on every ScriptVmReady. The
+// state is closed with the context, which takes every global and every listener with it; the
+// runtime forgets what it was told at ScriptVmClosing, and until the next ScriptVmReady every
+// call below that needs a context answers WXL_E_FAILED. Nothing kept from one context -- a
+// wxl_script_call, a string an argument pointed into, an index -- means anything in the next.
 
 #ifndef WXL_SERVICE_SCRIPT_H
 #define WXL_SERVICE_SCRIPT_H
@@ -67,8 +71,11 @@ typedef struct wxl_script_api
     /**
      * @brief Makes a function callable from script, under a global name.
      *
-     * Only valid while a context exists, so call it from ScriptVmReady. A name already taken is
-     * refused rather than replaced: shadowing a client function silently is never what was meant.
+     * Only valid while a context exists, so call it from ScriptVmReady; WXL_E_FAILED otherwise.
+     * A name already taken is refused with WXL_E_INVALID rather than replaced: shadowing a
+     * client function silently is never what was meant. The function is called on the client's
+     * main thread, from inside the script engine; a fault in it is caught, reported to the
+     * script as an error, and disables the mod.
      */
     wxl_result(WXL_CALL* register_function)(const char* name, wxl_script_fn fn, void* user);
 
@@ -76,10 +83,12 @@ typedef struct wxl_script_api
      * @brief Declares an event name the script side can register frames for.
      *
      * Declaring is separate from raising so that a frame can listen before anything raises it.
+     * Only valid while a context exists (WXL_E_FAILED otherwise); declaring a name twice is fine.
      */
     wxl_result(WXL_CALL* register_event)(const char* name);
 
-    /// Raises a declared event, with its payload.
+    /// Raises a declared event, with its payload: WXL_E_NOT_FOUND for a name nobody declared on
+    /// this context, WXL_E_FAILED while no context exists.
     wxl_result(WXL_CALL* fire_event)(const char* name, const wxl_value* args, uint32_t count);
 
     /**

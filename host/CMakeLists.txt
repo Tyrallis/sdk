@@ -4,6 +4,7 @@ add_library(wxl-host STATIC
     src/admission.cpp
     src/discovery.cpp
     src/event_bus.cpp
+    src/guard.cpp
     src/json.cpp
     src/loader.cpp
     src/log.cpp

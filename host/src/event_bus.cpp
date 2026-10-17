@@ -30,6 +30,41 @@ namespace wxl::host
         return events;
     }
 
+    namespace
+    {
+        /// One handler call as the guard runs it: the C call, with C++ exceptions caught here.
+        struct HandlerCall
+        {
+            wxl_event_fn  handler;
+            void*         user;
+            const void*   args;
+            wxl_event     event;
+            const Logger* logger;
+        };
+
+        void InvokeHandler(void* context)
+        {
+            HandlerCall* call = static_cast<HandlerCall*>(context);
+            try
+            {
+                call->handler(call->user, call->args);
+            }
+            catch (const std::exception& e)
+            {
+                if (call->logger)
+                    call->logger->Error(kHostTag, std::string("a handler for ") +
+                                                      EventName(call->event) + " threw: " + e.what());
+            }
+            catch (...)
+            {
+                if (call->logger)
+                    call->logger->Error(kHostTag, std::string("a handler for ") +
+                                                      EventName(call->event) +
+                                                      " threw something that is not a std::exception");
+            }
+        }
+    } // namespace
+
     EventBus::EventBus() : lists_(WXL_EV_COUNT), raisable_(WXL_EV_COUNT, false) {}
 
     EventBus::EventBus(const std::vector<wxl_event>& raisable, const Logger* logger) : EventBus()
@@ -72,12 +107,12 @@ namespace wxl::host
     }
 
     wxl_subscription EventBus::Subscribe(wxl_event event, wxl_event_fn handler, void* user,
-                                         int32_t priority)
+                                         int32_t priority, uint32_t owner)
     {
         if (!handler || !CanRaise(event)) return WXL_SUBSCRIPTION_NONE;
 
         List&       list  = lists_[event];
-        const Entry entry{++next_, handler, user, priority, true};
+        const Entry entry{++next_, handler, user, priority, owner, true};
         if (list.depth > 0) list.pending.push_back(entry);
         else Insert(list, entry);
         return entry.id;
@@ -110,6 +145,33 @@ namespace wxl::host
         }
     }
 
+    void EventBus::DropOwner(uint32_t owner)
+    {
+        if (owner == 0) return;
+
+        for (List& list : lists_)
+        {
+            for (Entry& entry : list.pending)
+                if (entry.owner == owner) entry.live = false;
+
+            if (list.depth > 0)
+            {
+                for (Entry& entry : list.entries)
+                {
+                    if (entry.owner != owner || !entry.live) continue;
+                    entry.live = false;
+                    list.dead  = true;
+                }
+            }
+            else
+            {
+                list.entries.erase(std::remove_if(list.entries.begin(), list.entries.end(),
+                                                  [owner](const Entry& e) { return e.owner == owner; }),
+                                   list.entries.end());
+            }
+        }
+    }
+
     void EventBus::Emit(wxl_event event, const void* args)
     {
         if (!Known(event)) return;
@@ -121,22 +183,30 @@ namespace wxl::host
         {
             const Entry& entry = list.entries[i];
             if (!entry.live) continue;
-            try
+
+            HandlerCall call{entry.handler, entry.user, args, event, logger_};
+            const uint32_t owner = entry.owner;
+
+            uint32_t saved = 0;
+            if (ownerSlot_)
             {
-                entry.handler(entry.user, args);
+                saved       = *ownerSlot_;
+                *ownerSlot_ = owner;
             }
-            catch (const std::exception& e)
+            Fault      fault;
+            const bool returned = CallGuarded(&InvokeHandler, &call, &fault);
+            if (ownerSlot_) *ownerSlot_ = saved;
+
+            if (returned) continue;
+
+            if (logger_)
             {
-                if (logger_)
-                    logger_->Error(kHostTag, std::string("a handler for ") + EventName(event) +
-                                                 " threw: " + e.what());
+                char description[96];
+                logger_->Error(kHostTag, std::string("a handler for ") + EventName(event) +
+                                             " faulted: " +
+                                             DescribeFault(fault, description, sizeof description));
             }
-            catch (...)
-            {
-                if (logger_)
-                    logger_->Error(kHostTag, std::string("a handler for ") + EventName(event) +
-                                                 " threw something that is not a std::exception");
-            }
+            if (faultFn_) faultFn_(faultUser_, owner, event, fault);
         }
         if (--list.depth == 0) Settle(list);
     }

@@ -10,12 +10,14 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "wxl/host.h"
 #include "wxl/host/admission.hpp"
 #include "wxl/host/discovery.hpp"
 #include "wxl/host/event_bus.hpp"
+#include "wxl/host/guard.hpp"
 #include "wxl/host/loader.hpp"
 #include "wxl/host/log.hpp"
 #include "wxl/host/manifest.hpp"
@@ -59,6 +61,8 @@ namespace wxl::host
         Manifest              manifest;
         bool                  has_stage  = false; ///< exports wxl_mod_stage
         bool                  has_unload = false; ///< exports wxl_mod_unload
+        bool                  disabled   = false; ///< faulted; no more of its code is called
+        std::string           fault;              ///< what it was doing when it faulted
     };
 
     /// A folder that did not become a loaded mod, and why.
@@ -79,11 +83,24 @@ namespace wxl::host
      * configuration, call @ref LoadAll once the mods directory is known, @ref Stage as the boot
      * advances, @ref Raise at the runtime's own seams, and @ref Shutdown on the way out.
      *
+     * Every call into a mod -- its four entry points and every event handler -- runs under the
+     * crash guard. A mod that faults is logged with what it was doing and disabled: its
+     * subscriptions are dropped, its later stages and its unload are skipped, its binary stays
+     * mapped, and the host goes on. The services it published stay published, since another mod
+     * may hold the pointer.
+     *
      * Every method runs on the thread that calls it; the host does not lock.
      */
     class ModHost
     {
     public:
+        /// A mod as the host refers to it from inside a call: its position in @ref Loaded plus
+        /// one, so that 0 means nobody.
+        using ModToken = uint32_t;
+
+        /// Told when a mod is disabled, after its subscriptions are dropped.
+        using DisableFn = void (*)(void* user, ModToken token, const char* id);
+
         explicit ModHost(HostConfig config);
         ~ModHost();
 
@@ -101,11 +118,12 @@ namespace wxl::host
         /**
          * @brief Reports a boot stage to every loaded mod that exports wxl_mod_stage.
          *
-         * Load order, except WXL_STAGE_SHUTDOWN, which runs in reverse.
+         * Load order, except WXL_STAGE_SHUTDOWN, which runs in reverse. A disabled mod is skipped.
          */
         void Stage(wxl_stage stage);
 
-        /// Calls wxl_mod_unload in reverse load order and frees the binaries.
+        /// Calls wxl_mod_unload in reverse load order and frees the binaries. A disabled mod's
+        /// unload is not called and its binary is left mapped.
         void UnloadAll();
 
         /// WXL_STAGE_SHUTDOWN, then @ref UnloadAll.
@@ -113,6 +131,42 @@ namespace wxl::host
 
         /// Dispatches an event. What the runtime calls at its own seams.
         void Raise(wxl_event event, const void* args);
+
+        /**
+         * @brief Disables a mod after it faulted: logs what it was doing, drops its
+         *        subscriptions, skips its remaining entry points, tells the disable handler.
+         *
+         * @param what  what the mod was doing, for the log: "in wxl_mod_stage(early)".
+         */
+        void Disable(ModToken token, std::string_view what);
+
+        /// Called after a mod is disabled. A runtime uses it to withdraw what the mod registered
+        /// with its services.
+        void SetDisableHandler(DisableFn handler, void* user)
+        {
+            disableFn_   = handler;
+            disableUser_ = user;
+        }
+
+        /**
+         * @brief The mod whose code is running, or 0 for nobody.
+         *
+         * Set around every entry point and every handler the host calls. A runtime that calls
+         * into a mod by another route (a script function, say) brackets the call with
+         * @ref SwapCurrentMod so that what the mod does inside is attributed to it.
+         */
+        ModToken CurrentMod() const { return currentMod_; }
+
+        /// Sets the current mod and returns the previous one, to put back after the call.
+        ModToken SwapCurrentMod(ModToken token)
+        {
+            const ModToken previous = currentMod_;
+            currentMod_             = token;
+            return previous;
+        }
+
+        /// The loaded mod a token names, or null for 0 or a token past the end.
+        const LoadedMod* ModOf(ModToken token) const;
 
         /// The table every mod receives. Valid for the host's lifetime.
         const wxl_host* Table() const { return &table_; }
@@ -142,10 +196,17 @@ namespace wxl::host
         static void WXL_CALL             ThunkUnsubscribe(wxl_subscription subscription);
         static void WXL_CALL             ThunkEmit(wxl_event event, const void* args);
 
+        static void OnHandlerFault(void* user, uint32_t owner, wxl_event event, const Fault& fault);
+
         void Refuse(const std::string& id, const std::string& directoryName,
                     const std::filesystem::path& directory, Verdict verdict,
                     const std::string& reason);
         void TryLoad(const ModCandidate& candidate);
+
+        /// Calls one entry point of a mod under the guard, as that mod. False when it faulted;
+        /// @p description then says how.
+        bool CallEntry(ModToken token, GuardedFn fn, void* context, char* description,
+                       size_t capacity);
 
         HostConfig       config_;
         Logger           logger_;
@@ -157,7 +218,10 @@ namespace wxl::host
         std::vector<LoadedMod>  loaded_;
         std::vector<ModBinary>  binaries_; ///< index-aligned with loaded_
         std::vector<RefusedMod> refused_;
-        bool                    loadedAll_ = false;
+        bool                    loadedAll_  = false;
+        ModToken                currentMod_ = 0;
+        DisableFn               disableFn_   = nullptr;
+        void*                   disableUser_ = nullptr;
     };
 } // namespace wxl::host
 

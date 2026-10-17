@@ -3,6 +3,7 @@
 
 #include "wxl/host/mod_host.hpp"
 
+#include <cstdio>
 #include <string_view>
 #include <utility>
 
@@ -30,6 +31,51 @@ namespace wxl::host
             }
             return "?";
         }
+
+        // The entry points as the guard calls them: one plain function per entry, reading its
+        // arguments and writing its result through a context block.
+
+        struct QueryCall
+        {
+            wxl_mod_query_fn    fn;
+            const wxl_mod_info* result;
+        };
+
+        void InvokeQuery(void* context)
+        {
+            QueryCall* call = static_cast<QueryCall*>(context);
+            call->result    = call->fn();
+        }
+
+        struct LoadCall
+        {
+            wxl_mod_load_fn fn;
+            const wxl_host* table;
+            wxl_result      result;
+        };
+
+        void InvokeLoad(void* context)
+        {
+            LoadCall* call = static_cast<LoadCall*>(context);
+            call->result   = call->fn(call->table);
+        }
+
+        struct StageCall
+        {
+            wxl_mod_stage_fn fn;
+            wxl_stage        stage;
+        };
+
+        void InvokeStage(void* context)
+        {
+            StageCall* call = static_cast<StageCall*>(context);
+            call->fn(call->stage);
+        }
+
+        void InvokeUnload(void* context)
+        {
+            static_cast<wxl_mod_unload_fn>(context)();
+        }
     } // namespace
 
     ModHost::ModHost(HostConfig config)
@@ -37,6 +83,9 @@ namespace wxl::host
           events_(config_.events, &logger_)
     {
         current_ = this;
+
+        events_.SetOwnerSlot(&currentMod_);
+        events_.SetFaultHandler(&ModHost::OnHandlerFault, this);
 
         info_.struct_size = sizeof(info_);
         info_.id          = wxl_str{config_.runtime_id.data(),
@@ -115,7 +164,7 @@ namespace wxl::host
                                                       void* user, int32_t priority)
     {
         if (!current_) return WXL_SUBSCRIPTION_NONE;
-        return current_->events_.Subscribe(event, handler, user, priority);
+        return current_->events_.Subscribe(event, handler, user, priority, current_->currentMod_);
     }
 
     void WXL_CALL ModHost::ThunkUnsubscribe(wxl_subscription subscription)
@@ -126,6 +175,54 @@ namespace wxl::host
     void WXL_CALL ModHost::ThunkEmit(wxl_event event, const void* args)
     {
         if (current_) current_->events_.Emit(event, args);
+    }
+
+    // --- Faults ----------------------------------------------------------------------------
+
+    void ModHost::OnHandlerFault(void* user, uint32_t owner, wxl_event event, const Fault&)
+    {
+        ModHost* host = static_cast<ModHost*>(user);
+        if (!host) return;
+        if (owner == 0)
+        {
+            host->logger_.Error(kHostTag, std::string("the faulting handler for ") + EventName(event) +
+                                              " belongs to no mod; nothing is disabled");
+            return;
+        }
+        host->Disable(owner, std::string("in its handler for ") + EventName(event));
+    }
+
+    const LoadedMod* ModHost::ModOf(ModToken token) const
+    {
+        if (token == 0 || token > loaded_.size()) return nullptr;
+        return &loaded_[token - 1];
+    }
+
+    void ModHost::Disable(ModToken token, std::string_view what)
+    {
+        if (token == 0 || token > loaded_.size()) return;
+        LoadedMod& mod = loaded_[token - 1];
+        if (mod.disabled) return;
+
+        mod.disabled = true;
+        mod.fault    = std::string(what);
+        events_.DropOwner(token);
+        logger_.Error(kHostTag, "mod " + mod.id + " faulted " + mod.fault +
+                                    "; it is disabled: its handlers are dropped, its remaining "
+                                    "stages and its unload are skipped, its binary stays mapped, "
+                                    "and what it published or wrote stays as it was");
+        if (disableFn_) disableFn_(disableUser_, token, mod.id.c_str());
+    }
+
+    bool ModHost::CallEntry(ModToken token, GuardedFn fn, void* context, char* description,
+                            size_t capacity)
+    {
+        const ModToken previous = SwapCurrentMod(token);
+        Fault          fault;
+        const bool     returned = CallGuarded(fn, context, &fault);
+        SwapCurrentMod(previous);
+        if (!returned) DescribeFault(fault, description, capacity);
+        return returned;
     }
 
     // --- Loading ---------------------------------------------------------------------------
@@ -163,9 +260,23 @@ namespace wxl::host
             return;
         }
 
+        // The token this mod gets if it loads: its place at the end of loaded_.
+        const ModToken token = static_cast<ModToken>(loaded_.size() + 1);
+        char           description[96];
+
         // The first mod code to run, and by contract side-effect free.
-        const wxl_mod_info* info     = binary.Entries().query();
-        const Decision      accepted = AdmitInfo(manifest, info);
+        QueryCall query{binary.Entries().query, nullptr};
+        if (!CallEntry(token, &InvokeQuery, &query, description, sizeof description))
+        {
+            events_.DropOwner(token);
+            binary.Abandon();
+            Refuse(manifest.id, candidate.directory_name, candidate.directory, Verdict::Refuse,
+                   std::string("wxl_mod_query faulted: ") + description +
+                       "; the binary stays mapped and nothing of it is called again");
+            return;
+        }
+
+        const Decision accepted = AdmitInfo(manifest, query.result);
         if (!accepted)
         {
             Refuse(manifest.id, candidate.directory_name, candidate.directory, Verdict::Refuse,
@@ -175,8 +286,8 @@ namespace wxl::host
 
         LoadedMod loaded;
         loaded.id             = manifest.id;
-        loaded.name           = info->name ? info->name : manifest.name;
-        loaded.version        = info->version;
+        loaded.name           = query.result->name ? query.result->name : manifest.name;
+        loaded.version        = query.result->version;
         loaded.directory_name = candidate.directory_name;
         loaded.directory      = candidate.directory;
         loaded.binary         = path;
@@ -184,11 +295,21 @@ namespace wxl::host
         loaded.has_stage      = binary.Entries().stage != nullptr;
         loaded.has_unload     = binary.Entries().unload != nullptr;
 
-        const wxl_result result = binary.Entries().load(&table_);
-        if (result != WXL_OK)
+        LoadCall load{binary.Entries().load, &table_, WXL_E_FAILED};
+        if (!CallEntry(token, &InvokeLoad, &load, description, sizeof description))
         {
+            events_.DropOwner(token);
+            binary.Abandon();
             Refuse(manifest.id, candidate.directory_name, candidate.directory, Verdict::Refuse,
-                   std::string("wxl_mod_load returned ") + ResultName(result));
+                   std::string("wxl_mod_load faulted: ") + description +
+                       "; the binary stays mapped and nothing of it is called again");
+            return;
+        }
+        if (load.result != WXL_OK)
+        {
+            events_.DropOwner(token);
+            Refuse(manifest.id, candidate.directory_name, candidate.directory, Verdict::Refuse,
+                   std::string("wxl_mod_load returned ") + ResultName(load.result));
             return;
         }
 
@@ -226,15 +347,24 @@ namespace wxl::host
     {
         logger_.Debug(kHostTag, std::string("stage ") + StageName(stage));
         const size_t count = binaries_.size();
+
+        const auto one = [&](size_t i) {
+            if (loaded_[i].disabled || !binaries_[i].Entries().stage) return;
+            StageCall call{binaries_[i].Entries().stage, stage};
+            char      description[96];
+            if (!CallEntry(static_cast<ModToken>(i + 1), &InvokeStage, &call, description,
+                           sizeof description))
+                Disable(static_cast<ModToken>(i + 1), std::string("in wxl_mod_stage(") +
+                                                         StageName(stage) + "): " + description);
+        };
+
         if (stage == WXL_STAGE_SHUTDOWN)
         {
-            for (size_t i = count; i-- > 0;)
-                if (binaries_[i].Entries().stage) binaries_[i].Entries().stage(stage);
+            for (size_t i = count; i-- > 0;) one(i);
         }
         else
         {
-            for (size_t i = 0; i < count; ++i)
-                if (binaries_[i].Entries().stage) binaries_[i].Entries().stage(stage);
+            for (size_t i = 0; i < count; ++i) one(i);
         }
     }
 
@@ -242,7 +372,25 @@ namespace wxl::host
     {
         for (size_t i = binaries_.size(); i-- > 0;)
         {
-            if (binaries_[i].Entries().unload) binaries_[i].Entries().unload();
+            if (loaded_[i].disabled)
+            {
+                logger_.Info(kHostTag, "left " + loaded_[i].id + " mapped: it is disabled");
+                binaries_[i].Abandon();
+                continue;
+            }
+            if (binaries_[i].Entries().unload)
+            {
+                char description[96];
+                if (!CallEntry(static_cast<ModToken>(i + 1), &InvokeUnload,
+                               reinterpret_cast<void*>(binaries_[i].Entries().unload), description,
+                               sizeof description))
+                {
+                    Disable(static_cast<ModToken>(i + 1),
+                            std::string("in wxl_mod_unload: ") + description);
+                    binaries_[i].Abandon();
+                    continue;
+                }
+            }
             logger_.Info(kHostTag, "unloaded " + loaded_[i].id);
             binaries_[i].Close();
         }
