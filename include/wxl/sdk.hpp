@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 WarcraftXL
 //
-// The C++ layer: a mod is a class, a hook is an override.
+// The C++ layer: a mod is a class, a hook is an override, a resource is an object.
 //
 // Everything here compiles into the mod and resolves to the C calls in host.h. No C++ type ever
 // reaches the runtime -- a script's vtable is read inside the mod, by a thunk the runtime calls
@@ -12,11 +12,14 @@
 #define WXL_SDK_HPP
 
 #include <cstring>
+#include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "wxl/abi.h"
 #include "wxl/events.h"
+#include "wxl/expected.hpp"
 #include "wxl/host.h"
 #include "wxl/mod.h"
 
@@ -41,7 +44,25 @@ namespace wxl
         return wxl_str{text, text ? static_cast<uint32_t>(std::strlen(text)) : 0u};
     }
 
+    /// Wraps a view for the boundary. The view's storage must outlive the call it is given to.
+    inline wxl_str Str(std::string_view text)
+    {
+        return wxl_str{text.data(), static_cast<uint32_t>(text.size())};
+    }
+
+    /// The view over a boundary string. Empty when the runtime answered with nothing.
+    inline std::string_view View(wxl_str text)
+    {
+        return text.data ? std::string_view(text.data, text.size) : std::string_view();
+    }
+
     /// Writes one line to the runtime's log.
+    inline void Log(wxl_log_level level, const char* tag, std::string_view message)
+    {
+        if (const wxl_host* host = Host()) host->log(level, tag, Str(message));
+    }
+
+    /// The same for a NUL-terminated string; a null message logs an empty line.
     inline void Log(wxl_log_level level, const char* tag, const char* message)
     {
         if (const wxl_host* host = Host()) host->log(level, tag, Str(message));
@@ -50,16 +71,15 @@ namespace wxl
     // --- Services ------------------------------------------------------------------------
 
     /**
-     * @brief A capability another mod or the runtime published, resolved on first use.
+     * @brief A raw service table, resolved on first use.
      *
-     * Load order is not something a mod can rely on, so nothing is looked up until it is needed:
+     * Load order is not something a mod can rely on, so nothing is looked up until it is needed,
+     * and a lookup that finds nothing is retried on the next use. The typed facades in
+     * wxl/services/*.hpp wrap one of these with the name and version sealed in; this is for a
+     * table those do not cover, or for reaching a raw table directly.
      *
-     *     static wxl::Service<wxl_script_api> g_script(WXL_SCRIPT_SERVICE, 1);
-     *     if (g_script) g_script->RegisterFunction("MyCall", &MyCall);
-     *
-     * A lookup that finds nothing is retried on the next use, so a service published later is
-     * still picked up. Testing the handle is how a mod stays portable across runtimes that do not
-     * all offer the same things.
+     *     static wxl::Service<my_api> g_mine("my.service", 1);
+     *     if (g_mine) g_mine->call();
      */
     template <class T>
     class Service
@@ -67,7 +87,7 @@ namespace wxl
     public:
         constexpr Service(const char* name, uint32_t version) : name_(name), version_(version) {}
 
-        /// The service, or nullptr while nobody has published it under that name and version.
+        /// The table, or nullptr while nobody has published it under that name and version.
         const T* Get() const
         {
             if (!iface_)
@@ -81,11 +101,154 @@ namespace wxl
         const T* operator->() const { return Get(); }
         explicit operator bool() const { return Get() != nullptr; }
 
+        constexpr const char* Name() const { return name_; }
+        constexpr uint32_t    Version() const { return version_; }
+
     private:
         const char*      name_;
         uint32_t         version_;
         mutable const T* iface_ = nullptr;
     };
+
+    namespace detail
+    {
+        /**
+         * @brief Shared shape of every typed facade: a stateless object over one cached table.
+         *
+         * Derived names the table type and carries `kName` and `kVersion`. The table is resolved
+         * on first use and shared by every instance, so a facade can be a temporary.
+         */
+        template <class Derived, class Api>
+        class Facade
+        {
+        public:
+            using api_type = Api;
+
+            /// The raw table, or nullptr while the runtime does not publish the service.
+            static const Api* Raw()
+            {
+                static Service<Api> service(Derived::kName, Derived::kVersion);
+                return service.Get();
+            }
+
+            /// Whether the runtime publishes the service right now.
+            static bool Available() { return Raw() != nullptr; }
+
+            explicit operator bool() const { return Available(); }
+        };
+    } // namespace detail
+
+    // --- Subscriptions -------------------------------------------------------------------
+
+    /**
+     * @brief A live event subscription, dropped when this goes out of scope.
+     *
+     * Move-only. Release() hands the token back for code that manages it by hand; Reset() drops
+     * it early. Destroying one after the host is gone does nothing.
+     */
+    class Subscription
+    {
+    public:
+        Subscription() = default;
+        explicit Subscription(wxl_subscription token) : token_(token) {}
+
+        Subscription(Subscription&& other) noexcept : token_(other.Release()) {}
+        Subscription& operator=(Subscription&& other) noexcept
+        {
+            if (this != &other)
+            {
+                Reset();
+                token_ = other.Release();
+            }
+            return *this;
+        }
+
+        Subscription(const Subscription&)            = delete;
+        Subscription& operator=(const Subscription&) = delete;
+
+        ~Subscription() { Reset(); }
+
+        explicit operator bool() const { return token_ != WXL_SUBSCRIPTION_NONE; }
+        wxl_subscription Get() const { return token_; }
+
+        /// Gives up ownership without unsubscribing.
+        wxl_subscription Release()
+        {
+            const wxl_subscription token = token_;
+            token_                       = WXL_SUBSCRIPTION_NONE;
+            return token;
+        }
+
+        /// Unsubscribes now. Safe to call more than once and safe inside the handler itself.
+        void Reset()
+        {
+            if (token_ == WXL_SUBSCRIPTION_NONE) return;
+            if (const wxl_host* host = Host()) host->unsubscribe(token_);
+            token_ = WXL_SUBSCRIPTION_NONE;
+        }
+
+    private:
+        wxl_subscription token_ = WXL_SUBSCRIPTION_NONE;
+    };
+
+    /// The args struct an event carries, per events.def: `wxl::EventArgs<WXL_EV_Update>::type`.
+    template <wxl_event Event>
+    struct EventArgs;
+
+#define WXL_EVENT(family, name, id, args) \
+    template <>                           \
+    struct EventArgs<WXL_EV_##name>       \
+    {                                     \
+        using type = args;                \
+    };
+#include "wxl/events.def"
+#undef WXL_EVENT
+
+    template <wxl_event Event>
+    using EventArgsOf = typename EventArgs<Event>::type;
+
+    /// Subscribes a raw handler. An empty Subscription means the runtime does not raise the event.
+    inline Subscription Subscribe(wxl_event event, wxl_event_fn handler, void* user,
+                                  int32_t priority = WXL_PRIORITY_DEFAULT)
+    {
+        const wxl_host* host = Host();
+        if (!host || !handler) return Subscription();
+        return Subscription(host->subscribe(event, handler, user, priority));
+    }
+
+    namespace detail
+    {
+        template <wxl_event Event, class Handler>
+        struct HandlerThunk
+        {
+            static void WXL_CALL Dispatch(void* user, const void* args)
+            {
+                (*static_cast<Handler*>(user))(*static_cast<const EventArgsOf<Event>*>(args));
+            }
+        };
+    } // namespace detail
+
+    /**
+     * @brief Subscribes a callable object to one event, with the args typed.
+     *
+     * The handler is called as `(*handler)(const EventArgsOf<Event>&)` and must outlive the
+     * subscription; a lambda stored in a member works, a temporary does not.
+     *
+     *     wxl::Subscription tick = wxl::Subscribe<WXL_EV_Update>(&m_onTick);
+     */
+    template <wxl_event Event, class Handler>
+    Subscription Subscribe(Handler* handler, int32_t priority = WXL_PRIORITY_DEFAULT)
+    {
+        if (!handler) return Subscription();
+        return Subscribe(Event, &detail::HandlerThunk<Event, Handler>::Dispatch, handler, priority);
+    }
+
+    /// Raises an event to every subscriber, the runtime's own included.
+    template <wxl_event Event>
+    void Emit(const EventArgsOf<Event>& args)
+    {
+        if (const wxl_host* host = Host()) host->emit(Event, &args);
+    }
 
     // --- Scripts -------------------------------------------------------------------------
     //
@@ -160,12 +323,20 @@ namespace wxl
 
     namespace detail
     {
-        /// Every registered script of one family. Lives in the mod.
+        /// One family's registered scripts and the subscriptions that feed them. Lives in the mod.
         template <class Script>
-        std::vector<Script*>& Scripts()
+        struct Family
         {
-            static std::vector<Script*> scripts;
-            return scripts;
+            std::vector<Script*>      scripts;
+            std::vector<Subscription> subscriptions;
+            bool                      subscribed = false;
+        };
+
+        template <class Script>
+        Family<Script>& FamilyOf()
+        {
+            static Family<Script> family;
+            return family;
         }
 
         /**
@@ -179,7 +350,7 @@ namespace wxl
             static void WXL_CALL Dispatch(void*, const void* args)
             {
                 const Args& typed = *static_cast<const Args*>(args);
-                for (Script* script : Scripts<Script>()) (script->*Method)(typed);
+                for (Script* script : FamilyOf<Script>().scripts) (script->*Method)(typed);
             }
         };
 
@@ -197,15 +368,15 @@ namespace wxl
                           "AssetScript, NetScript or LuaScript");
         }
 
+#define WXL_SDK_SUBSCRIBE_ROW(Script, name, args)                                              \
+    FamilyOf<Script>().subscriptions.push_back(                                                \
+        Subscribe(WXL_EV_##name, &Thunk<Script, args, &Script::On##name>::Dispatch, nullptr, \
+                  WXL_PRIORITY_DEFAULT));
+
         template <>
         inline void SubscribeFamily<WorldScript>()
         {
-            const wxl_host* host = Host();
-            if (!host) return;
-#define WXL_EVENT_World(name, id, args)                                                   \
-    host->subscribe(WXL_EV_##name,                                                        \
-                    &Thunk<WorldScript, args, &WorldScript::On##name>::Dispatch, nullptr, \
-                    WXL_PRIORITY_DEFAULT);
+#define WXL_EVENT_World(name, id, args) WXL_SDK_SUBSCRIBE_ROW(WorldScript, name, args)
 #include "wxl/events.def"
 #undef WXL_EVENT_World
         }
@@ -213,12 +384,7 @@ namespace wxl
         template <>
         inline void SubscribeFamily<RenderScript>()
         {
-            const wxl_host* host = Host();
-            if (!host) return;
-#define WXL_EVENT_Render(name, id, args)                                                    \
-    host->subscribe(WXL_EV_##name,                                                          \
-                    &Thunk<RenderScript, args, &RenderScript::On##name>::Dispatch, nullptr, \
-                    WXL_PRIORITY_DEFAULT);
+#define WXL_EVENT_Render(name, id, args) WXL_SDK_SUBSCRIBE_ROW(RenderScript, name, args)
 #include "wxl/events.def"
 #undef WXL_EVENT_Render
         }
@@ -226,12 +392,7 @@ namespace wxl
         template <>
         inline void SubscribeFamily<ObjectScript>()
         {
-            const wxl_host* host = Host();
-            if (!host) return;
-#define WXL_EVENT_Object(name, id, args)                                                    \
-    host->subscribe(WXL_EV_##name,                                                          \
-                    &Thunk<ObjectScript, args, &ObjectScript::On##name>::Dispatch, nullptr, \
-                    WXL_PRIORITY_DEFAULT);
+#define WXL_EVENT_Object(name, id, args) WXL_SDK_SUBSCRIBE_ROW(ObjectScript, name, args)
 #include "wxl/events.def"
 #undef WXL_EVENT_Object
         }
@@ -239,12 +400,7 @@ namespace wxl
         template <>
         inline void SubscribeFamily<AssetScript>()
         {
-            const wxl_host* host = Host();
-            if (!host) return;
-#define WXL_EVENT_Asset(name, id, args)                                                   \
-    host->subscribe(WXL_EV_##name,                                                        \
-                    &Thunk<AssetScript, args, &AssetScript::On##name>::Dispatch, nullptr, \
-                    WXL_PRIORITY_DEFAULT);
+#define WXL_EVENT_Asset(name, id, args) WXL_SDK_SUBSCRIBE_ROW(AssetScript, name, args)
 #include "wxl/events.def"
 #undef WXL_EVENT_Asset
         }
@@ -252,12 +408,7 @@ namespace wxl
         template <>
         inline void SubscribeFamily<NetScript>()
         {
-            const wxl_host* host = Host();
-            if (!host) return;
-#define WXL_EVENT_Net(name, id, args)                                                 \
-    host->subscribe(WXL_EV_##name,                                                    \
-                    &Thunk<NetScript, args, &NetScript::On##name>::Dispatch, nullptr, \
-                    WXL_PRIORITY_DEFAULT);
+#define WXL_EVENT_Net(name, id, args) WXL_SDK_SUBSCRIBE_ROW(NetScript, name, args)
 #include "wxl/events.def"
 #undef WXL_EVENT_Net
         }
@@ -265,24 +416,47 @@ namespace wxl
         template <>
         inline void SubscribeFamily<LuaScript>()
         {
-            const wxl_host* host = Host();
-            if (!host) return;
-#define WXL_EVENT_Lua(name, id, args)                                                 \
-    host->subscribe(WXL_EV_##name,                                                    \
-                    &Thunk<LuaScript, args, &LuaScript::On##name>::Dispatch, nullptr, \
-                    WXL_PRIORITY_DEFAULT);
+#define WXL_EVENT_Lua(name, id, args) WXL_SDK_SUBSCRIBE_ROW(LuaScript, name, args)
 #include "wxl/events.def"
 #undef WXL_EVENT_Lua
         }
 
+#undef WXL_SDK_SUBSCRIBE_ROW
+
         /// Keeps one script, and subscribes its family the first time that family is used.
-        template <class Family>
-        void Register(Family* script)
+        template <class Script>
+        void Register(Script* script)
         {
             if (!script) return;
-            static const bool subscribed = (SubscribeFamily<Family>(), true);
-            (void)subscribed;
-            Scripts<Family>().push_back(script);
+            Family<Script>& family = FamilyOf<Script>();
+            if (!family.subscribed)
+            {
+                family.subscribed = true;
+                SubscribeFamily<Script>();
+            }
+            family.scripts.push_back(script);
+        }
+
+        template <class Script>
+        void Unregister(Script* script)
+        {
+            std::vector<Script*>& scripts = FamilyOf<Script>().scripts;
+            for (size_t i = 0; i < scripts.size(); ++i)
+            {
+                if (scripts[i] != script) continue;
+                scripts.erase(scripts.begin() + static_cast<std::ptrdiff_t>(i));
+                return;
+            }
+        }
+
+        /// Drops a family's scripts and its subscriptions; the next Add subscribes again.
+        template <class Script>
+        void ClearFamily()
+        {
+            Family<Script>& family = FamilyOf<Script>();
+            family.scripts.clear();
+            family.subscriptions.clear();
+            family.subscribed = false;
         }
     } // namespace detail
 
@@ -290,7 +464,8 @@ namespace wxl
      * @brief Registers scripts.
      *
      * A family subscribes once, the first time one of its scripts is added, so a mod pays only for
-     * the families it uses.
+     * the families it uses. The subscriptions are owned here and dropped by Clear(), which WXL_MOD
+     * runs at unload so no handler outlives the code it points into.
      *
      * The overloads take the family, not the derived type: a script that belongs to two families
      * is added twice, once per family, which says plainly what it is doing.
@@ -304,6 +479,24 @@ namespace wxl
         static void Add(AssetScript* script) { detail::Register(script); }
         static void Add(NetScript* script) { detail::Register(script); }
         static void Add(LuaScript* script) { detail::Register(script); }
+
+        static void Remove(WorldScript* script) { detail::Unregister(script); }
+        static void Remove(RenderScript* script) { detail::Unregister(script); }
+        static void Remove(ObjectScript* script) { detail::Unregister(script); }
+        static void Remove(AssetScript* script) { detail::Unregister(script); }
+        static void Remove(NetScript* script) { detail::Unregister(script); }
+        static void Remove(LuaScript* script) { detail::Unregister(script); }
+
+        /// Drops every script and every family subscription.
+        static void Clear()
+        {
+            detail::ClearFamily<WorldScript>();
+            detail::ClearFamily<RenderScript>();
+            detail::ClearFamily<ObjectScript>();
+            detail::ClearFamily<AssetScript>();
+            detail::ClearFamily<NetScript>();
+            detail::ClearFamily<LuaScript>();
+        }
     };
 
     // --- The mod itself ------------------------------------------------------------------
@@ -312,7 +505,8 @@ namespace wxl
      * @brief A mod, as the runtime sees it.
      *
      * Derive, override what is needed, and declare it with WXL_MOD. Scripts are usually added in
-     * OnLoad; anything that needs a subsystem waits for its stage.
+     * OnLoad; anything that needs a subsystem waits for the stage that brings it up, which is the
+     * named virtual for that stage.
      */
     class Mod
     {
@@ -322,11 +516,50 @@ namespace wxl
         /// Set-up. Nothing the boot brings up exists yet. Return anything but WXL_OK to abort.
         virtual wxl_result OnLoad() { return WXL_OK; }
 
-        /// The client reached a boot stage.
+        /// WXL_STAGE_EARLY: nothing is up yet.
+        virtual void OnEarly() {}
+
+        /// WXL_STAGE_STORAGE: archives are mounted and files can be read.
+        virtual void OnStorageReady() {}
+
+        /// WXL_STAGE_GRAPHICS: a graphics device exists.
+        virtual void OnGraphicsReady() {}
+
+        /// WXL_STAGE_SCRIPT: the script VM exists and an API can be registered on it.
+        virtual void OnScriptReady() {}
+
+        /// WXL_STAGE_READY: fully booted, before the first frame.
+        virtual void OnReady() {}
+
+        /// WXL_STAGE_SHUTDOWN: coming down. Release what the stages above acquired.
+        virtual void OnShutdown() {}
+
+        /**
+         * @brief Every stage, after its named virtual.
+         *
+         * The general hook: for logging the boot, and for a stage appended to the contract after
+         * this SDK was built, which has no named virtual yet.
+         */
         virtual void OnStage(wxl_stage) {}
 
-        /// Tear-down, after WXL_STAGE_SHUTDOWN.
+        /// Tear-down, after WXL_STAGE_SHUTDOWN. ScriptMgr is cleared right after it returns.
         virtual void OnUnload() {}
+
+        /// Routes a stage to its named virtual, then to OnStage. Called by WXL_MOD.
+        void DispatchStage(wxl_stage stage)
+        {
+            switch (stage)
+            {
+            case WXL_STAGE_EARLY: OnEarly(); break;
+            case WXL_STAGE_STORAGE: OnStorageReady(); break;
+            case WXL_STAGE_GRAPHICS: OnGraphicsReady(); break;
+            case WXL_STAGE_SCRIPT: OnScriptReady(); break;
+            case WXL_STAGE_READY: OnReady(); break;
+            case WXL_STAGE_SHUTDOWN: OnShutdown(); break;
+            default: break;
+            }
+            OnStage(stage);
+        }
     };
 } // namespace wxl
 
@@ -352,16 +585,24 @@ namespace wxl
     {                                                                                         \
         if (!host) return WXL_E_INVALID;                                                      \
         ::wxl::detail::HostRef() = host;                                                      \
-        wxl_mod_instance_ = new ModClass();                                                   \
-        return wxl_mod_instance_->OnLoad();                                                   \
+        wxl_mod_instance_        = new ModClass();                                            \
+        const wxl_result result  = wxl_mod_instance_->OnLoad();                               \
+        if (result != WXL_OK)                                                                 \
+        {                                                                                     \
+            ::wxl::ScriptMgr::Clear();                                                        \
+            delete wxl_mod_instance_;                                                         \
+            wxl_mod_instance_ = nullptr;                                                      \
+        }                                                                                     \
+        return result;                                                                        \
     }                                                                                         \
     extern "C" WXL_EXPORT void WXL_CALL wxl_mod_stage(wxl_stage stage)                        \
     {                                                                                         \
-        if (wxl_mod_instance_) wxl_mod_instance_->OnStage(stage);                             \
+        if (wxl_mod_instance_) wxl_mod_instance_->DispatchStage(stage);                       \
     }                                                                                         \
     extern "C" WXL_EXPORT void WXL_CALL wxl_mod_unload(void)                                  \
     {                                                                                         \
         if (wxl_mod_instance_) wxl_mod_instance_->OnUnload();                                 \
+        ::wxl::ScriptMgr::Clear();                                                            \
         delete wxl_mod_instance_;                                                             \
         wxl_mod_instance_ = nullptr;                                                          \
     }

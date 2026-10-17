@@ -82,6 +82,9 @@ namespace wxltest
         const std::vector<Subscription>& Subscriptions() const { return subscriptions_; }
         const std::vector<std::string>&  LogLines() const { return log_; }
 
+        /// How many times unsubscribe was called, whether or not the token was live.
+        size_t UnsubscribeCalls() const { return unsubscribeCalls_; }
+
         size_t LiveSubscriptions() const
         {
             size_t count = 0;
@@ -138,6 +141,7 @@ namespace wxltest
 
         static void WXL_CALL Unsubscribe(wxl_subscription id)
         {
+            ++current_->unsubscribeCalls_;
             for (Subscription& sub : current_->subscriptions_)
                 if (sub.id == id) sub.live = false;
         }
@@ -154,6 +158,7 @@ namespace wxltest
         std::vector<std::string>  log_;
         std::vector<wxl_event>    withheld_;
         wxl_subscription          next_id_ = 0;
+        size_t                    unsubscribeCalls_ = 0;
     };
 
     inline FakeHost* FakeHost::current_ = nullptr;

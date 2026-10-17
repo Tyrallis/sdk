@@ -4,12 +4,17 @@
 // The conformance checks a runtime has to pass. Run here against the fake host; a real runtime
 // passes the same file by linking its own host in place of the fake one.
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <set>
+#include <string>
+#include <unordered_set>
+#include <vector>
 
 #include "fake_host.hpp"
-#include "wxl/objects.hpp"
-#include "wxl/sdk.hpp"
+#include "fake_services.hpp"
+#include "wxl/services.hpp"
 
 namespace
 {
@@ -78,10 +83,10 @@ namespace
 
     struct CountingWorldScript final : wxl::WorldScript
     {
-        int   updates     = 0;
-        int   worldEnters = 0;
-        float lastDelta   = 0.0f;
-        uint32_t lastMap  = 0;
+        int      updates     = 0;
+        int      worldEnters = 0;
+        float    lastDelta   = 0.0f;
+        uint32_t lastMap     = 0;
 
         void OnUpdate(const wxl_update_args& args) override
         {
@@ -141,7 +146,82 @@ namespace
 
         void OnScriptVmClosing(const wxl_script_vm_args&) override { ++closing; }
     };
+
+    /// A typed handler for the free-standing Subscribe.
+    struct TickHandler
+    {
+        int   ticks = 0;
+        float last  = 0.0f;
+        void  operator()(const wxl_update_args& args)
+        {
+            ++ticks;
+            last = args.delta;
+        }
+    };
+
+    // --- a mod under test -------------------------------------------------------------------
+
+    struct LifecycleMod final : wxl::Mod
+    {
+        static inline std::vector<std::string> trace;
+        static inline CountingWorldScript*     script = nullptr;
+
+        wxl_result OnLoad() override
+        {
+            trace.push_back("load");
+            if (script) wxl::ScriptMgr::Add(script);
+            return WXL_OK;
+        }
+        void OnEarly() override { trace.push_back("early"); }
+        void OnStorageReady() override { trace.push_back("storage"); }
+        void OnGraphicsReady() override { trace.push_back("graphics"); }
+        void OnScriptReady() override { trace.push_back("script"); }
+        void OnReady() override { trace.push_back("ready"); }
+        void OnShutdown() override { trace.push_back("shutdown"); }
+        void OnStage(wxl_stage stage) override { trace.push_back("stage" + std::to_string(stage)); }
+        void OnUnload() override { trace.push_back("unload"); }
+    };
+
+    // --- script-side functions --------------------------------------------------------------
+
+    void Greet(wxl::ScriptCall& call)
+    {
+        const std::optional<std::string_view> name = call.String(0);
+        if (!name)
+        {
+            call.Fail("Greet(name) wants a string");
+            return;
+        }
+        call.PushString(*name);
+        call.PushNumber(static_cast<double>(call.ArgCount()));
+        call.PushBool(call.Bool(1).value_or(false));
+    }
+
+    struct Adder
+    {
+        double total = 0.0;
+        void   operator()(wxl::ScriptCall& call)
+        {
+            total += call.Number(0).value_or(0.0);
+            call.PushNumber(total);
+        }
+    };
+
+    // --- panels and hooks -------------------------------------------------------------------
+
+    int g_panelDraws = 0;
+    void DrawPanel()
+    {
+        ++g_panelDraws;
+        wxl::UiService().Text("hello");
+    }
+
+    using ThingFn = int(WXL_CALL*)(int);
+    int WXL_CALL ThingDetour(int x) { return x + 1; }
 } // namespace
+
+// The entry points the WXL_MOD macro writes, exercised in-process.
+WXL_MOD(LifecycleMod, "wxl.contract", "Contract", 1)
 
 int main()
 {
@@ -156,6 +236,9 @@ int main()
         Check(IdsAreDense(), "the ids run 0..n-1 with no hole");
         Check(CountFamilyWorld() + CountFamilyRender() < WXL_EV_COUNT,
               "no family holds the whole table");
+        Check(std::is_same_v<wxl::EventArgsOf<WXL_EV_Update>, wxl_update_args> &&
+                  std::is_same_v<wxl::EventArgsOf<WXL_EV_MessageReceived>, wxl_message_args>,
+              "EventArgs binds each id to its args struct");
     }
 
     Section("version negotiation");
@@ -166,6 +249,60 @@ int main()
         Check(info->abi_minor >= WXL_ABI_VERSION_MINOR,
               "the runtime is not older than what this mod was built against");
         Check(info->struct_size == sizeof(wxl_runtime_info), "struct_size is filled in");
+    }
+
+    Section("subscriptions are owned");
+    {
+        const size_t before = host.LiveSubscriptions();
+        const size_t calls  = host.UnsubscribeCalls();
+        TickHandler  handler;
+        {
+            wxl::Subscription tick = wxl::Subscribe<WXL_EV_Update>(&handler);
+            Check(static_cast<bool>(tick), "a typed subscribe takes");
+            Check(host.LiveSubscriptions() == before + 1, "and is live");
+
+            const wxl_update_args args{0.25f};
+            host.Raise(WXL_EV_Update, &args);
+            Check(handler.ticks == 1 && handler.last == 0.25f, "the handler sees typed args");
+
+            wxl::Subscription moved = std::move(tick);
+            Check(!tick && moved, "a move hands the token over");
+            Check(host.LiveSubscriptions() == before + 1, "without releasing it");
+
+            moved.Reset();
+            moved.Reset();
+            Check(host.LiveSubscriptions() == before, "Reset drops it");
+            Check(host.UnsubscribeCalls() == calls + 1, "exactly once, however often Reset runs");
+        }
+        Check(host.UnsubscribeCalls() == calls + 1, "and the destructor adds nothing after a Reset");
+
+        {
+            wxl::Subscription scoped = wxl::Subscribe<WXL_EV_Update>(&handler);
+            Check(host.LiveSubscriptions() == before + 1, "a scoped subscription is live inside");
+        }
+        Check(host.LiveSubscriptions() == before, "and gone at the end of its scope");
+        Check(host.UnsubscribeCalls() == calls + 2, "released by the destructor, once");
+
+        wxl_subscription raw = WXL_SUBSCRIPTION_NONE;
+        {
+            wxl::Subscription kept = wxl::Subscribe<WXL_EV_Update>(&handler);
+            raw                    = kept.Release();
+        }
+        Check(raw != WXL_SUBSCRIPTION_NONE && host.LiveSubscriptions() == before + 1,
+              "Release disowns: the subscription outlives the wrapper");
+        host.Table()->unsubscribe(raw);
+
+        wxl::Subscription      orphan      = wxl::Subscribe<WXL_EV_Update>(&handler);
+        const wxl_subscription orphanToken = orphan.Get();
+        wxl::detail::HostRef()             = nullptr;
+        orphan.Reset();
+        Check(host.UnsubscribeCalls() == calls + 3 && host.LiveSubscriptions() == before + 1,
+              "a wrapper outliving the host does not call into it");
+        wxl::detail::HostRef() = host.Table();
+        host.Table()->unsubscribe(orphanToken);
+
+        Check(!wxl::Subscribe<WXL_EV_Update>(static_cast<TickHandler*>(nullptr)),
+              "a null handler yields an empty subscription");
     }
 
     Section("script dispatch");
@@ -207,9 +344,9 @@ int main()
         host.Raise(WXL_EV_WorldEnter, &entered);
         Check(world.worldEnters == 1 && world.lastMap == 571, "a second event of a family runs");
 
-        wxl_bool                 suppressed = WXL_FALSE;
-        const uint8_t            body[4]    = {1, 2, 3, 4};
-        const wxl_message_args   message{0xF001, body, sizeof(body), &suppressed};
+        wxl_bool               suppressed = WXL_FALSE;
+        const uint8_t          body[4]    = {1, 2, 3, 4};
+        const wxl_message_args message{0xF001, body, sizeof(body), &suppressed};
         host.Raise(WXL_EV_MessageReceived, &message);
         Check(net.received == 1 && net.lastOpcode == 0xF001, "the net family runs");
         Check(suppressed == WXL_TRUE, "a mod can take an opcode the client does not know");
@@ -219,10 +356,25 @@ int main()
         host.Raise(WXL_EV_ScriptVmClosing, &vm);
         Check(lua.ready == 1 && lua.closing == 1, "the script VM family sees both ends");
         Check(lua.lastContext == WXL_SCRIPT_CONTEXT_GAME, "and which context it was");
+
+        wxl::ScriptMgr::Remove(&secondWorld);
+        host.Raise(WXL_EV_Update, &tick);
+        Check(world.updates == 2 && secondWorld.updates == 1, "a removed script no longer runs");
+
+        wxl::ScriptMgr::Clear();
+        Check(host.LiveSubscriptions() == before, "Clear releases every family subscription");
+        host.Raise(WXL_EV_Update, &tick);
+        Check(world.updates == 2, "and nothing runs afterwards");
+
+        wxl::ScriptMgr::Add(&world);
+        Check(host.LiveSubscriptions() == afterWorld, "a family subscribes again after Clear");
+        wxl::ScriptMgr::Clear();
     }
 
     Section("cancellation");
     {
+        wxl::ScriptMgr::Add(&world);
+
         wxl_bool             handled = WXL_FALSE;
         const wxl_input_args input{0x100, 0, 0, &handled};
         host.Raise(WXL_EV_Input, &input);
@@ -232,34 +384,470 @@ int main()
         const wxl_input_args other{0x200, 0, 0, &untouched};
         host.Raise(WXL_EV_Input, &other);
         Check(untouched == WXL_FALSE, "and leaves the rest alone");
+
+        wxl::ScriptMgr::Clear();
+    }
+
+    Section("the mod lifecycle");
+    {
+        const size_t before = host.LiveSubscriptions();
+        LifecycleMod::script = &world;
+
+        Check(wxl_mod_query()->abi_major == WXL_ABI_VERSION_MAJOR &&
+                  std::strcmp(wxl_mod_query()->id, "wxl.contract") == 0,
+              "WXL_MOD reports the mod");
+        Check(wxl_mod_load(host.Table()) == WXL_OK, "load runs OnLoad");
+        Check(host.LiveSubscriptions() == before + CountFamilyWorld(),
+              "a script added in OnLoad subscribes its family");
+
+        for (int stage = WXL_STAGE_EARLY; stage <= WXL_STAGE_SHUTDOWN; ++stage)
+            wxl_mod_stage(static_cast<wxl_stage>(stage));
+        wxl_mod_unload();
+
+        const std::vector<std::string> expected = {
+            "load",    "early",  "stage0", "storage",  "stage1", "graphics", "stage2", "script",
+            "stage3",  "ready",  "stage4", "shutdown", "stage5", "unload"};
+        Check(LifecycleMod::trace == expected,
+              "each stage reaches its named virtual, then OnStage; unload comes last");
+        Check(host.LiveSubscriptions() == before,
+              "unload releases what ScriptMgr subscribed, so no handler outlives the mod");
+
+        LifecycleMod::trace.clear();
+        wxl_mod_stage(static_cast<wxl_stage>(99));
+        Check(LifecycleMod::trace.empty(), "a stage after unload reaches nothing");
+    }
+
+    Section("a service that is not there");
+    {
+        Check(!wxl::ObjectService::Available() && !wxl::HasObjects(),
+              "an unpublished service resolves to nothing");
+
+        const wxl::Unit unit(wxltest::FakeObjects::kPlayer);
+        Check(!unit.IsValid() && !unit, "no object is valid without the service");
+
+        const wxl::Expected<uint32_t> health = unit.Health();
+        Check(!health && health.IsUnsupported() && health.Error() == WXL_E_UNSUPPORTED,
+              "a read without the service is unsupported, not zero");
+        Check(health.ValueOr(7) == 7, "ValueOr answers the fallback");
+        Check(!health.ToOptional().has_value(), "and the optional view is empty");
+
+        Check(!wxl::Player::Local().HasHandle(), "no local player without the service");
+        Check(wxl::ObjectService().InView<wxl::Unit>().empty(), "and nothing is in view");
+
+        Check(wxl::ScriptService().RegisterFunction<&Greet>("Greet") == WXL_E_UNSUPPORTED,
+              "a facade call without its service answers unsupported");
+        Check(!wxl::StorageService().Open("x"), "a File without the service is empty");
+        Check(!wxl::PatchService().Apply("x", 0x1000, "a", "b", 1), "so is a Patch");
+        Check(!wxl::HookService().Attach("Thing", &ThingDetour, static_cast<ThingFn*>(nullptr)),
+              "so is a Hook");
+        Check(wxl::NetService().Claim(0x600).IsUnsupported(), "and a claim says why");
+        Check(wxl::UiService().AddPanel<&DrawPanel>("P").IsUnsupported(), "as does a panel");
     }
 
     Section("services");
     {
         wxl::Service<wxl_object_api> objects(WXL_OBJECT_SERVICE, WXL_OBJECT_SERVICE_VERSION);
-        Check(!objects, "an unpublished service resolves to nothing");
-        Check(wxl::HasObjects() == false, "and the convenience check agrees");
-
-        static wxl_object_api api{};
-        api.struct_size = sizeof(api);
-        api.valid        = [](wxl_handle h) -> wxl_bool { return h == 42 ? WXL_TRUE : WXL_FALSE; };
-        api.local_player = []() -> wxl_handle { return 42; };
-        api.type         = [](wxl_handle) -> uint32_t { return WXL_OBJECT_PLAYER; };
+        Check(!objects, "a raw handle to an unpublished service is empty");
 
         Check(host.Table()->publish_service(WXL_OBJECT_SERVICE, WXL_OBJECT_SERVICE_VERSION,
-                                            &api) == WXL_OK,
+                                            wxltest::FakeObjects::Table()) == WXL_OK,
               "a service can be published");
         Check(host.Table()->has_service(WXL_OBJECT_SERVICE, WXL_OBJECT_SERVICE_VERSION) == WXL_TRUE,
               "and is then visible");
         Check(host.Table()->has_service(WXL_OBJECT_SERVICE, 99) == WXL_FALSE,
               "another version does not match");
-        Check(static_cast<bool>(objects), "a handle resolved late picks it up");
+        Check(static_cast<bool>(objects), "a raw handle resolved late picks it up");
+        Check(wxl::ObjectService::Available() && wxl::HasObjects(), "so does the facade");
+        Check(wxl::ObjectService::Raw() == wxltest::FakeObjects::Table(),
+              "the facade reaches the table that was published");
+        Check(std::strcmp(wxl::ObjectService::kName, WXL_OBJECT_SERVICE) == 0 &&
+                  wxl::ObjectService::kVersion == WXL_OBJECT_SERVICE_VERSION,
+              "the name and the version are sealed in the facade");
+
+        host.Table()->publish_service(WXL_SCRIPT_SERVICE, WXL_SCRIPT_SERVICE_VERSION, wxltest::FakeScript::Table());
+        host.Table()->publish_service(WXL_STORAGE_SERVICE, WXL_STORAGE_SERVICE_VERSION, wxltest::FakeStorage::Table());
+        host.Table()->publish_service(WXL_NET_SERVICE, WXL_NET_SERVICE_VERSION, wxltest::FakeNet::Table());
+        host.Table()->publish_service(WXL_UI_SERVICE, WXL_UI_SERVICE_VERSION, wxltest::FakeUi::Table());
+        host.Table()->publish_service(WXL_HOOK_SERVICE, WXL_HOOK_SERVICE_VERSION, wxltest::FakeHooks::Table());
+        host.Table()->publish_service(WXL_HOOK_RAW_SERVICE, WXL_HOOK_RAW_SERVICE_VERSION, wxltest::FakeHooks::RawTable());
+        host.Table()->publish_service(WXL_PATCH_SERVICE, WXL_PATCH_SERVICE_VERSION, wxltest::FakePatch::Table());
+    }
+
+    Section("reads that can fail");
+    {
+        using wxltest::FakeObjects;
 
         const wxl::Player me = wxl::Player::Local();
-        Check(me.IsValid(), "the local player resolves through the service");
-        Check(me.Type() == WXL_OBJECT_PLAYER, "and reports its type");
-        Check(wxl::Object(WXL_HANDLE_NONE).IsValid() == false, "a null handle is never valid");
-        Check(wxl::Object(7).IsValid() == false, "a stale handle answers instead of misreading");
+        Check(me.IsValid() && me.Handle() == FakeObjects::kPlayer, "the local player resolves");
+        Check(me.Type() && *me.Type() == WXL_OBJECT_PLAYER, "and reports its type");
+
+        const wxl::Expected<uint32_t> dead = me.Health();
+        Check(dead && *dead == 0, "a dead unit reads as a value of zero");
+        Check(me.MaxHealth().ValueOr(0) == 5000 && me.Level().ValueOr(0) == 80, "other reads arrive");
+        Check(me.HealthFraction() && *me.HealthFraction() == 0.0f, "a fraction of zero is a value");
+
+        const wxl::Unit stale(FakeObjects::kStale);
+        Check(!stale.IsValid(), "a stale handle is not valid");
+        const wxl::Expected<uint32_t> gone = stale.Health();
+        Check(!gone && gone.IsNotFound(), "a read through a stale handle is absent, not zero");
+        Check(gone.Error() == WXL_E_NOT_FOUND, "and says it is not found");
+        Check(stale.Name().IsNotFound() && stale.Position().IsNotFound() &&
+                  stale.Guid().IsNotFound() && stale.Type().IsNotFound(),
+              "every read on a stale handle says the same");
+
+        const wxl::Unit none;
+        Check(none.Health().IsNotFound() && !none.HasHandle(),
+              "a null handle reads as not found without asking the runtime");
+
+        const wxl::Unit chest(FakeObjects::kChest);
+        Check(chest.IsValid(), "a game object is a valid object");
+        Check(chest.Health().IsInvalid(), "but asking it for health is a mistake, not a miss");
+        Check(chest.Guid() && *chest.Guid() == WXL_GUID_NONE,
+              "a live object the server does not own has a guid of none, as a value");
+
+        Check(me.Name() && *me.Name() == "Thorgrim", "a name is copied out");
+        Check(me.Position() && me.Position()->x == 42.0f, "a position reads");
+
+        const wxl::Expected<wxl::Unit> target = me.Target();
+        Check(target && target->Handle() == FakeObjects::kBoar, "a target reads as a unit");
+        const wxl::Unit boar(FakeObjects::kBoar);
+        Check(boar.Target() && !boar.Target()->HasHandle(), "a unit with no target reads as a null unit");
+        Check(boar.Health().ValueOr(0) == 90, "a live unit reads its health");
+    }
+
+    Section("objects are values");
+    {
+        using wxltest::FakeObjects;
+
+        const wxl::Unit a(FakeObjects::kBoar), b(FakeObjects::kBoar), c(FakeObjects::kPlayer);
+        Check(a == b && a != c && !(a < b) && (c < a) == (c.Handle() < a.Handle()),
+              "objects compare by handle");
+        Check(wxl::Object(a) == a, "a unit equals itself as an object");
+
+        std::set<wxl::Unit> ordered{a, b, c};
+        Check(ordered.size() == 2, "a std::set holds each object once");
+
+        std::unordered_set<wxl::Unit> hashed{a, b, c};
+        Check(hashed.size() == 2 && hashed.count(wxl::Unit(FakeObjects::kPlayer)) == 1,
+              "and so does an unordered_set");
+
+        Check(static_cast<bool>(a) && !wxl::Unit(FakeObjects::kStale) && !wxl::Unit(),
+              "operator bool is IsValid");
+
+        const wxl::Object chest(FakeObjects::kChest);
+        Check(!chest.As<wxl::Unit>().has_value(), "a chest does not view as a unit");
+        Check(chest.As<wxl::GameObject>().has_value(), "but does as a game object");
+        Check(wxl::Object(FakeObjects::kPlayer).As<wxl::Unit>().has_value() &&
+                  wxl::Object(FakeObjects::kPlayer).As<wxl::Player>().has_value() &&
+                  !wxl::Object(FakeObjects::kBoar).As<wxl::Player>().has_value(),
+              "a player is a unit and a player; a boar is not a player");
+        Check(!wxl::Object(FakeObjects::kStale).As<wxl::Unit>().has_value(),
+              "a stale object views as nothing");
+
+        const wxl::ObjectService objects;
+        Check(objects.FromGuid(0x200) == wxl::Object(FakeObjects::kBoar), "a guid finds its object");
+        Check(!objects.FromGuid(0x999).HasHandle(), "an unknown guid finds nothing");
+    }
+
+    Section("iteration composes");
+    {
+        using wxltest::FakeObjects;
+        const wxl::ObjectService objects;
+
+        const wxl::ObjectView<wxl::Object> all = objects.InView<>();
+        Check(all.size() == 3 && !all.empty(), "everything in view");
+
+        const wxl::ObjectView<wxl::Unit> units = objects.InView<wxl::Unit>();
+        Check(units.size() == 2, "units are units and players");
+        Check(objects.InView<wxl::Player>().size() == 1 && objects.InView<wxl::GameObject>().size() == 1,
+              "narrower classes narrow the view");
+        Check(objects.InView(WXL_OBJECT_GAMEOBJECT).size() == 1, "and so does a server type");
+
+        int seen = 0;
+        for (wxl::Unit unit : units) seen += unit.IsValid() ? 1 : 0;
+        Check(seen == 2, "a range-for visits each unit");
+
+        const auto alive = std::count_if(units.begin(), units.end(),
+                                         [](const wxl::Unit& u) { return u.Health().ValueOr(0) > 0; });
+        Check(alive == 1, "std::count_if works over a view");
+
+        const auto found = std::find_if(units.begin(), units.end(), [](const wxl::Unit& u) {
+            return u.Name().ValueOr("") == "Boar";
+        });
+        Check(found != units.end() && (*found).Handle() == FakeObjects::kBoar, "std::find_if finds a unit");
+
+        const std::vector<wxl::Unit> copied = units.ToVector();
+        Check(copied.size() == 2 && copied[0] == units[0], "a view materialises to a vector");
+
+        const wxl::Expected<std::vector<wxl_vec3>> positions = objects.Positions(units);
+        Check(positions && positions->size() == 2 && (*positions)[0].x == static_cast<float>(units[0].Handle()),
+              "positions read in bulk for a whole view");
+    }
+
+    Section("wxl.script");
+    {
+        wxl::ScriptService script;
+        Check(static_cast<bool>(script) && script.Context().ValueOr(WXL_SCRIPT_CONTEXT_GLUE) == WXL_SCRIPT_CONTEXT_GAME,
+              "the facade sees the context");
+        Check(script.RegisterFunction<&Greet>("Greet") == WXL_OK, "a plain function registers");
+        Check(script.RegisterFunction<&Greet>("Greet") == WXL_E_INVALID, "a taken name is refused");
+
+        Adder adder;
+        Check(script.RegisterFunction("Add", &adder) == WXL_OK, "a callable object registers");
+
+        wxl_script_call call;
+        call.args = {wxl::Value::String("Thorgrim"), wxl::Value::Bool(true)};
+        Check(wxltest::FakeScript::Invoke("Greet", call), "the VM reaches the function");
+        Check(call.results.size() == 3 && call.results[0].type == WXL_VALUE_STRING &&
+                  wxl::View(call.results[0].as.string) == "Thorgrim" && call.results[1].as.number == 2.0 &&
+                  call.results[2].as.boolean == WXL_TRUE,
+              "arguments read and results push through the typed call");
+
+        wxl_script_call bad;
+        bad.args = {wxl::Value::Number(1.0)};
+        wxltest::FakeScript::Invoke("Greet", bad);
+        Check(bad.results.empty() && bad.error == "Greet(name) wants a string",
+              "a wrong argument type is a miss, and Fail carries the message");
+
+        wxl_script_call add;
+        add.args = {wxl::Value::Number(2.0)};
+        wxltest::FakeScript::Invoke("Add", add);
+        wxltest::FakeScript::Invoke("Add", add);
+        Check(adder.total == 4.0, "a callable object keeps its state between calls");
+
+        Check(script.RegisterEvent("MY_EVENT") == WXL_OK, "an event registers");
+        Check(script.FireEvent("MY_EVENT", {wxl::Value::Number(1), wxl::Value::String("x"), wxl::Value::Nil()}) == WXL_OK,
+              "and fires with a list of values");
+        Check(wxltest::FakeScript::Events().back() == "MY_EVENT n s -", "which arrive typed");
+        Check(script.Run("print(1)", "chunk") == WXL_OK && wxltest::FakeScript::Chunks().back() == "chunk: print(1)",
+              "a chunk runs with its name");
+    }
+
+    Section("wxl.storage");
+    {
+        wxl::StorageService storage;
+        Check(storage.Exists("Interface\\hello.txt") && !storage.Exists("nope"), "exists answers");
+        Check(storage.Size("Interface\\hello.txt").ValueOr(0) == 5, "a size reads");
+        Check(storage.Size("nope").IsNotFound(), "a missing file is not found");
+        Check(storage.ReadText("Interface\\hello.txt").ValueOr("") == "hello", "a file reads as text");
+        Check(storage.Read("Interface\\big.bin").ValueOr(std::vector<uint8_t>{}).size() == 1000,
+              "and as bytes");
+        Check(storage.Read("nope").IsNotFound(), "reading a missing file is not found");
+
+        const std::vector<std::string> found = storage.Find("Interface\\*");
+        Check(found.size() == 2, "find lists matches, copied out");
+
+        const int opens = wxltest::FakeStorage::Opens(), closes = wxltest::FakeStorage::Closes();
+        {
+            wxl::File file = storage.Open("Interface\\hello.txt");
+            Check(static_cast<bool>(file) && wxltest::FakeStorage::Opens() == opens + 1, "a file opens");
+
+            char                     buffer[8] = {};
+            const wxl::Expected<uint64_t> read = file.ReadAt(1, buffer, sizeof(buffer));
+            Check(read && *read == 4 && std::strncmp(buffer, "ello", 4) == 0, "and reads at an offset");
+
+            wxl::File moved = std::move(file);
+            Check(!file && moved, "a move hands the handle over");
+            moved.Reset();
+            moved.Reset();
+            Check(wxltest::FakeStorage::Closes() == closes + 1, "Reset closes exactly once");
+        }
+        Check(wxltest::FakeStorage::Closes() == closes + 1, "and the destructor adds nothing");
+        {
+            wxl::File scoped = storage.Open("Interface\\hello.txt");
+        }
+        Check(wxltest::FakeStorage::Closes() == closes + 2, "a scoped file closes at the end of its scope");
+        Check(!storage.Open("nope"), "a missing file opens as an empty File");
+    }
+
+    Section("wxl.net");
+    {
+        wxl::NetService netService;
+        Check(netService.State() == WXL_NET_AUTHENTICATED, "the state reads");
+        Check(netService.ReservedOpcodeLimit().ValueOr(0) == 0x51F, "the reserved limit reads");
+
+        struct Body
+        {
+            uint32_t a;
+            uint16_t b;
+        } body{1, 2};
+        Check(netService.Send(0x600, body) == WXL_OK && wxltest::FakeNet::Sent().back().second == sizeof(Body),
+              "a struct sends with its size");
+
+        const int releases = wxltest::FakeNet::Releases();
+        {
+            wxl::Expected<wxl::OpcodeClaim> claim = netService.Claim(0x601);
+            Check(claim && *claim && claim->Opcode() == 0x601, "an opcode claims");
+            Check(netService.Claim(0x601).IsInvalid(), "a second claim is refused");
+
+            wxl::OpcodeClaim moved = std::move(*claim);
+            Check(moved && !*claim, "a move hands the claim over");
+            moved.Reset();
+            moved.Reset();
+            Check(wxltest::FakeNet::Releases() == releases + 1, "Reset releases exactly once");
+        }
+        Check(wxltest::FakeNet::Releases() == releases + 1, "and the destructor adds nothing");
+        {
+            wxl::Expected<wxl::OpcodeClaim> scoped = netService.Claim(0x602);
+        }
+        Check(wxltest::FakeNet::Releases() == releases + 2 && !wxltest::FakeNet::Claimed().count(0x602),
+              "a scoped claim is given back at the end of its scope");
+    }
+
+    Section("wxl.ui");
+    {
+        wxl::UiService ui;
+        Check(static_cast<bool>(ui) && ui.IsOpen() && ui.CanRemovePanels(), "the facade sees the overlay");
+
+        const int removes = wxltest::FakeUi::Removes();
+        {
+            wxl::Expected<wxl::Panel> panel = ui.AddPanel<&DrawPanel>("Example");
+            Check(panel && *panel && panel->Title() == "Example", "a panel registers");
+            Check(ui.AddPanel<&DrawPanel>("Example").IsInvalid(), "a taken title is refused");
+
+            wxltest::FakeUi::DrawAll();
+            Check(g_panelDraws == 1 && wxltest::FakeUi::Drawn().back() == "hello", "the overlay draws it");
+
+            wxl::Panel moved = std::move(*panel);
+            Check(moved && !*panel, "a move hands the panel over");
+            Check(moved.Reset() == WXL_OK && moved.Reset() == WXL_OK, "Reset removes it");
+            Check(wxltest::FakeUi::Removes() == removes + 1, "exactly once");
+        }
+        Check(wxltest::FakeUi::Removes() == removes + 1, "and the destructor adds nothing");
+        {
+            struct Body
+            {
+                int draws = 0;
+                void operator()() { ++draws; }
+            } body;
+            wxl::Expected<wxl::Panel> scoped = ui.AddPanel("Scoped", &body);
+            wxltest::FakeUi::DrawAll();
+            Check(scoped && body.draws == 1, "a callable object draws");
+        }
+        Check(wxltest::FakeUi::Removes() == removes + 2 && wxltest::FakeUi::Panels().empty(),
+              "a scoped panel is removed at the end of its scope");
+
+        {
+            wxl::Panel older(wxltest::FakeUi::OlderTable(), "Old");
+            Check(older.Reset() == WXL_E_UNSUPPORTED && wxltest::FakeUi::Removes() == removes + 2,
+                  "a table that predates remove_panel is left alone and says so");
+        }
+
+        bool    flag  = false;
+        float   f     = 0.0f;
+        int32_t i     = 0;
+        float   rgba[4] = {};
+        char    text[8] = {};
+        const char* const items[] = {"a", "b", "c"};
+        Check(ui.Checkbox("c", flag) && flag, "a checkbox binds a bool");
+        Check(ui.SliderFloat("f", f, 0.0f, 2.0f) && f == 2.0f, "a float slider binds");
+        Check(ui.SliderInt("i", i, 0, 9) && i == 9, "an int slider binds");
+        Check(ui.ColorEdit("rgba", rgba) && rgba[3] == 0.5f, "a colour binds");
+        Check(ui.Combo("combo", i, items) && i == 2, "a combo sizes its items");
+        Check(ui.InputText("t", text) && std::strcmp(text, "typed") == 0, "a text field sizes its buffer");
+        Check(ui.Button("go") && ui.CollapsingHeader("h"), "the rest answer");
+    }
+
+    Section("wxl.hook");
+    {
+        wxl::HookService hooks;
+        const std::vector<wxl::HookPoint> points = hooks.Points();
+        Check(points.size() == 1 && points[0].name == "Thing" && points[0].signature == "int(int)",
+              "the named points list, copied out");
+        Check(hooks.HasPoint("Thing") && !hooks.HasPoint("Other"), "has_point answers");
+
+        const int detaches = wxltest::FakeHooks::Detaches();
+        {
+            ThingFn   original = nullptr;
+            wxl::Hook hook     = hooks.Attach("Thing", &ThingDetour, &original);
+            Check(static_cast<bool>(hook), "a typed detour attaches");
+            Check(reinterpret_cast<void*>(original) == reinterpret_cast<void*>(&wxltest::FakeHooks::Engine),
+                  "and receives the next link, typed");
+
+            Check(!hooks.Attach("Other", &ThingDetour, &original), "an unnamed point attaches nothing");
+
+            wxl::Hook moved = std::move(hook);
+            Check(moved && !hook, "a move hands the hook over");
+            moved.Reset();
+            moved.Reset();
+            Check(wxltest::FakeHooks::Detaches() == detaches + 1, "Reset detaches exactly once");
+        }
+        Check(wxltest::FakeHooks::Detaches() == detaches + 1, "and the destructor adds nothing");
+        {
+            ThingFn   original = nullptr;
+            wxl::Hook scoped   = hooks.Attach("Thing", &ThingDetour, &original);
+        }
+        Check(wxltest::FakeHooks::Detaches() == detaches + 2 && wxltest::FakeHooks::Live().empty(),
+              "a scoped hook detaches at the end of its scope");
+
+        wxl_hook raw = WXL_HOOK_NONE;
+        {
+            ThingFn   original = nullptr;
+            wxl::Hook kept     = hooks.Attach("Thing", &ThingDetour, &original);
+            raw                = kept.Release();
+        }
+        Check(raw != WXL_HOOK_NONE && wxltest::FakeHooks::Live().count(raw) == 1,
+              "Release disowns: the hook outlives the wrapper");
+        wxltest::FakeHooks::Table()->detach(raw);
+
+        wxl::RawHookService rawHooks;
+        Check(rawHooks.ImageBase().ValueOr(0) == 0x400000 && rawHooks.ImageBuild().ValueOr(0) == 12340,
+              "the raw service describes the image");
+        {
+            ThingFn   original = nullptr;
+            wxl::Hook at       = rawHooks.AttachAt("Thing", 0x401000, &ThingDetour, &original);
+            Check(static_cast<bool>(at) && original != nullptr, "a detour attaches at an address");
+        }
+        Check(wxltest::FakeHooks::Live().empty(), "and detaches with its wrapper");
+    }
+
+    Section("wxl.patch");
+    {
+        using wxltest::FakePatch;
+        wxl::PatchService patches;
+
+        const uint8_t nop[1] = {0x90}, ret[1] = {0xC3}, two[2] = {0x90, 0x90}, jmp[2] = {0xEB, 0x00};
+        Check(patches.Matches(FakePatch::kBase, nop) && !patches.Matches(FakePatch::kBase, ret),
+              "matches reads without writing");
+        Check(patches.Find(two, 2) == FakePatch::kBase && patches.Find(two, 2, FakePatch::kBase) == FakePatch::kBase + 1,
+              "find walks the image");
+        Check(patches.FindLiteral("zz") == 0, "a literal that is not there finds nothing");
+
+        {
+            wxl::Patch patch = patches.Apply("ret", FakePatch::kBase, nop, ret);
+            Check(static_cast<bool>(patch) && FakePatch::Image()[0] == 0xC3, "a patch writes");
+            Check(!patches.Apply("again", FakePatch::kBase, nop, ret), "a mismatch is refused");
+
+            wxl::Patch moved = std::move(patch);
+            Check(moved && !patch, "a move hands the patch over");
+            moved.Reset();
+            moved.Reset();
+            Check(FakePatch::Image()[0] == 0x90 && FakePatch::RestoreOrder().size() == 1,
+                  "Reset restores exactly once");
+        }
+        Check(FakePatch::RestoreOrder().size() == 1, "and the destructor adds nothing");
+
+        FakePatch::RestoreOrder().clear();
+        {
+            wxl::PatchSet set;
+            Check(set.Apply("a", FakePatch::kBase, nop, ret), "a set applies one");
+            Check(set.Apply("b", FakePatch::kBase + 2, two, jmp), "and another");
+            Check(!set.Apply("c", FakePatch::kBase + 2, two, jmp) && set.Size() == 2,
+                  "a refused one is not kept");
+            Check(FakePatch::Image()[0] == 0xC3 && FakePatch::Image()[2] == 0xEB, "both are in place");
+        }
+        Check(FakePatch::RestoreOrder() == std::vector<wxl_patch>{3, 2} && FakePatch::Image()[0] == 0x90 &&
+                  FakePatch::Image()[2] == 0x90,
+              "a set restores in reverse order of apply");
+
+        {
+            wxl::PatchSet kept;
+            kept.Apply("a", FakePatch::kBase, nop, ret);
+            kept.Release();
+        }
+        Check(FakePatch::Image()[0] == 0xC3, "Release leaves the bytes in place");
+        FakePatch::Image()[0] = 0x90;
+        FakePatch::Live().clear();
     }
 
     Section("a runtime that cannot raise an event");
@@ -267,6 +855,9 @@ int main()
         Check(host.Table()->subscribe(WXL_EV_Update, nullptr, nullptr, WXL_PRIORITY_DEFAULT) ==
                   WXL_SUBSCRIPTION_NONE,
               "a null handler is refused");
+        host.Withhold(WXL_EV_SoundPlay);
+        wxl::Subscription none = wxl::Subscribe(WXL_EV_SoundPlay, [](void*, const void*) {}, nullptr);
+        Check(!none, "a withheld event yields an empty subscription, which is an answer");
     }
 
     Section("log");
@@ -274,6 +865,8 @@ int main()
         wxl::Log(WXL_LOG_INFO, "contract", "hello");
         Check(host.LogLines().size() == 1 && host.LogLines().back() == "[contract] hello",
               "a log line crosses with its tag and its length");
+        wxl::Log(WXL_LOG_INFO, "contract", std::string_view("sliced", 5));
+        Check(host.LogLines().back() == "[contract] slice", "a view crosses with its own length");
     }
 
     if (g_failures == 0)

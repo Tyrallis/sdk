@@ -5,7 +5,7 @@
 **The contract a WarcraftXL mod is written against**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![ABI](https://img.shields.io/badge/ABI-0.1-blue.svg)](include/wxl/abi.h)
+[![ABI](https://img.shields.io/badge/ABI-0.2-blue.svg)](include/wxl/abi.h)
 [![C++](https://img.shields.io/badge/C%2B%2B-17%20and%20up-blue.svg)](#-getting-started)
 [![Header only](https://img.shields.io/badge/header--only-yes-lightgrey.svg)](include/wxl)
 
@@ -27,7 +27,13 @@ and the rules of the boundary between them. There is nothing to link and nothing
 
 - **One source, every target.** `wxl_add_mod()` builds a mod for each architecture in one command.
 - **Object-oriented.** Derive from `wxl::Mod` and the script families; world objects are C++
-  objects, not handles you dereference by hand.
+  values you can compare, hash and iterate, not handles you dereference by hand.
+- **A read that can fail says so.** Every read answers `wxl::Expected<T>`: the value, or the
+  `wxl_result` that stood in for it. A dead unit, a gone one and a runtime without the service
+  are three different answers.
+- **Resources release themselves.** A subscription, a hook, a patch, an open file, a claimed
+  opcode, a panel: each comes back as a move-only object that releases in its destructor, so
+  nothing the runtime calls into outlives the code it points at.
 - **A plain-C boundary.** No std type, vtable or exception crosses it, so a mod and the runtime
   that loads it may be built with different toolchains.
 - **A missing service is an answer.** A mod declares what it requires and is refused before it
@@ -83,13 +89,16 @@ ctest --test-dir build -C Debug
 ## 🧩 A mod
 
 ```cpp
+#include "wxl/objects.hpp"
 #include "wxl/sdk.hpp"
 
 class Greeter final : public wxl::WorldScript
 {
-    void OnWorldEnter(const wxl_world_args& args) override
+    void OnWorldEnter(const wxl_world_args&) override
     {
-        wxl::Log(WXL_LOG_INFO, "greeter", "hello, world");
+        const wxl::Player me = wxl::Player::Local();
+        if (wxl::Expected<std::string> name = me.Name())
+            wxl::Log(WXL_LOG_INFO, "greeter", "hello, " + *name);
     }
 };
 
@@ -102,6 +111,8 @@ class GreeterMod final : public wxl::Mod
         wxl::ScriptMgr::Add(&g_greeter);
         return WXL_OK;
     }
+
+    void OnReady() override { wxl::Log(WXL_LOG_INFO, "greeter", "client is up"); }
 };
 
 WXL_MOD(GreeterMod, "wxl.greeter", "Greeter", 1)
@@ -127,9 +138,15 @@ Beyond events, a runtime publishes services, and a mod asks for the ones it need
 | `wxl.hook.raw` | a detour at a raw address | no: runtimes that load into a shipped binary |
 | `wxl.patch` | bytes written into the image | no: runtimes that load into a shipped binary |
 
-**Portable means a runtime may serve it, not that yours does.** Ask with `wxl::Service<T>()` and
-be ready for nothing; require it in your manifest and be refused early instead. Which services a
-given runtime publishes today is in that runtime's own README.
+Each service has a typed facade with its name and version sealed in -- `wxl::ObjectService`,
+`wxl::ScriptService`, `wxl::StorageService`, `wxl::NetService`, `wxl::UiService`,
+`wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService` -- taking and returning C++ types.
+`wxl::Service<T>` is still there for the raw table.
+
+**Portable means a runtime may serve it, not that yours does.** A facade tests false and every
+call through it answers `WXL_E_UNSUPPORTED` while the service is absent; require it in your
+manifest and be refused early instead. Which services a given runtime publishes today is in
+that runtime's own README.
 
 A mod that requires a service a runtime does not have is refused, with the reason, before it loads.
 
@@ -142,9 +159,11 @@ include/wxl/
     events.h       the event enum and the argument structs
     host.h         what a runtime offers a mod
     mod.h          what a mod exposes to a runtime
-    sdk.hpp        the C++ layer: Mod, the script families, Service, WXL_MOD
-    objects.hpp    world objects as C++ objects
-    services/      one header per service
+    expected.hpp   Expected<T>: a value or the wxl_result that stood in for it
+    sdk.hpp        the C++ layer: Mod, the script families, Subscription, Service, WXL_MOD
+    objects.hpp    world objects as C++ values, ObjectService, ObjectView
+    services.hpp   every typed facade at once
+    services/      one C header per service, and one .hpp with its typed facade
 host/              the mod host: discovery, manifests, load order, registry, event bus
 runtime/           service scaffolding every runtime shares: handles, enumeration, gating
 cmake/             wxl_add_mod(), which builds a mod for every target at once
@@ -169,7 +188,7 @@ Event ids and stage numbers are appended, never renumbered, never removed.
 
 ## 📚 Documentation
 
-- [Building a mod](docs/building-a-mod.md) -- the manifest, the targets, the services
+- [Building a mod](docs/building-a-mod.md) -- the manifest, the targets, the C++ layer
 - [`schema/mod.json`](schema/mod.json) -- the manifest schema, for your editor
 - [`template/`](template/) -- a working mod to copy
 

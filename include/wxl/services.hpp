@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
+//
+// Every typed facade at once. A mod that uses one service includes its own header instead.
+
+#ifndef WXL_SERVICES_HPP
+#define WXL_SERVICES_HPP
+
+#include "wxl/objects.hpp"
+#include "wxl/sdk.hpp"
+#include "wxl/services/hook.hpp"
+#include "wxl/services/net.hpp"
+#include "wxl/services/patch.hpp"
+#include "wxl/services/script.hpp"
+#include "wxl/services/storage.hpp"
+#include "wxl/services/ui.hpp"
+
+#endif // WXL_SERVICES_HPP

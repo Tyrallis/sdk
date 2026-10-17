@@ -23,14 +23,16 @@ namespace
 
     FixtureApi g_api{sizeof(FixtureApi), &Answer};
 
-    void WXL_CALL OnUpdate(void* user, const void* args)
+    /// Logs every tick it sees.
+    struct TickLogger
     {
-        const wxl_update_args* update = static_cast<const wxl_update_args*>(args);
-        char                   line[64];
-        std::snprintf(line, sizeof(line), "update %.3f", static_cast<double>(update->delta));
-        wxl::Log(WXL_LOG_INFO, kTag, line);
-        (void)user;
-    }
+        void operator()(const wxl_update_args& update) const
+        {
+            char line[64];
+            std::snprintf(line, sizeof(line), "update %.3f", static_cast<double>(update.delta));
+            wxl::Log(WXL_LOG_INFO, kTag, line);
+        }
+    };
 
     class FixtureMod final : public wxl::Mod
     {
@@ -39,12 +41,12 @@ namespace
         {
             wxl::Log(WXL_LOG_INFO, kTag, "load");
             if (wxl::Host()->publish_service("fixture.api", 1, &g_api) != WXL_OK) return WXL_E_FAILED;
-            if (wxl::Host()->subscribe(WXL_EV_Update, &OnUpdate, nullptr, WXL_PRIORITY_DEFAULT) ==
-                WXL_SUBSCRIPTION_NONE)
-                return WXL_E_FAILED;
+            tick_ = wxl::Subscribe<WXL_EV_Update>(&tickLogger_);
+            if (!tick_) return WXL_E_FAILED;
             return WXL_OK;
         }
 
+        /// Every stage, by number, so the test can see each one arrive.
         void OnStage(wxl_stage stage) override
         {
             char line[32];
@@ -53,6 +55,10 @@ namespace
         }
 
         void OnUnload() override { wxl::Log(WXL_LOG_INFO, kTag, "unload"); }
+
+    private:
+        TickLogger        tickLogger_;
+        wxl::Subscription tick_;
     };
 } // namespace
 

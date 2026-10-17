@@ -133,6 +133,98 @@ anything that differs per architecture.
 
 The mod is compiled as C++17 with `/W4 /permissive-` (MSVC) or `-Wall -Wextra`.
 
+## The C++ layer
+
+Everything under `include/wxl/*.hpp` compiles into the mod and resolves to the C tables in
+`host.h` and `services/*.h`. Nothing of it crosses the boundary.
+
+### The mod
+
+Derive from `wxl::Mod`, declare it once with `WXL_MOD`. Each boot stage has a named virtual:
+`OnEarly`, `OnStorageReady`, `OnGraphicsReady`, `OnScriptReady`, `OnReady`, `OnShutdown`.
+`OnStage(wxl_stage)` still runs after each of them, for every stage, including one appended to
+the contract after this SDK was built. `OnLoad` runs before any stage and may refuse to load;
+`OnUnload` runs last, and `wxl::ScriptMgr` is cleared right after it so no handler outlives the
+code it points into.
+
+### Events
+
+Derive from a script family (`WorldScript`, `RenderScript`, `ObjectScript`, `AssetScript`,
+`NetScript`, `LuaScript`), override the events you want, `wxl::ScriptMgr::Add(&script)`. For one
+event outside a family, `wxl::Subscribe<WXL_EV_TargetChanged>(&handler)` calls
+`(*handler)(const wxl_target_args&)` and returns a `wxl::Subscription` that unsubscribes in its
+destructor. `wxl::EventArgsOf<WXL_EV_...>` names the args struct of any event.
+
+### Reads that can fail
+
+Every read through a service answers `wxl::Expected<T>` (`include/wxl/expected.hpp`): the value,
+or the `wxl_result` that stood in for it.
+
+```cpp
+wxl::Expected<uint32_t> hp = unit.Health();
+if (hp)                        // a value; 0 means the unit is dead
+else if (hp.IsNotFound())      // the handle is stale: the unit is gone
+else if (hp.IsUnsupported())   // this runtime has no object service
+```
+
+`*hp`, `hp->`, `hp.Value()` need `hp` to hold a value; `hp.ValueOr(0)` never does.
+`hp.ToOptional()` drops the reason for code that does not care.
+
+### Objects
+
+`wxl::Object`, `wxl::Unit`, `wxl::Player`, `wxl::GameObject` are values over a handle: copy them,
+compare them, order them, hash them, keep them across frames. `if (unit)` asks whether the unit
+is still there (one call); `unit.HasHandle()` asks whether there is a handle at all (free).
+`object.As<wxl::Unit>()` is a checked downcast returning `std::optional`.
+
+Finders answer with an object that may be null -- `wxl::Player::Local()`,
+`wxl::ObjectService().FromGuid(guid)` -- and reads answer with an `Expected`.
+
+```cpp
+wxl::ObjectService objects;
+for (wxl::Unit unit : objects.InView<wxl::Unit>())        // a snapshot of what is in view
+    ...
+auto view  = objects.InView<wxl::Unit>();
+auto alive = std::count_if(view.begin(), view.end(),
+                           [](const wxl::Unit& u) { return u.Health().ValueOr(0) > 0; });
+```
+
+`ObjectView<T>` holds handles and builds a `T` on access, so a unit that left between the
+snapshot and the visit reads as gone. `objects.Positions(view)` reads every position in one call.
+
+### Services
+
+Each service has a typed facade with its name and version sealed in: `wxl::ObjectService`,
+`wxl::ScriptService`, `wxl::StorageService`, `wxl::NetService`, `wxl::UiService`,
+`wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService` (`include/wxl/services/*.hpp`,
+or all of them through `include/wxl/services.hpp`). A facade is stateless -- construct one
+wherever it is needed -- and resolves its table on first use. It tests false while the runtime
+does not publish the service, and every call through it then answers `WXL_E_UNSUPPORTED` or the
+empty object.
+
+```cpp
+wxl::ScriptService script;
+script.RegisterFunction<&Greet>("Greet");       // void Greet(wxl::ScriptCall&)
+script.RegisterFunction("Add", &adder);          // (*adder)(wxl::ScriptCall&)
+script.FireEvent("MY_EVENT", {wxl::Value::Number(1), wxl::Value::String("x")});
+
+wxl::StorageService storage;
+if (wxl::Expected<std::string> text = storage.ReadText("Interface\\x.lua")) ...
+```
+
+`wxl::Service<T>(name, version)` still gives the raw table, for a service these do not cover.
+
+### Resources
+
+Whatever the C boundary hands back as a token comes back as a move-only object that releases in
+its destructor: `wxl::Subscription`, `wxl::Hook`, `wxl::Patch`, `wxl::File`, `wxl::OpcodeClaim`,
+`wxl::Panel`. Each has `Reset()` to release early (safe to repeat) and `Release()` to disown the
+token for code that manages it by hand. Keep them as members of the mod or of a script, and they
+go when it goes -- before the DLL does.
+
+`wxl::PatchSet` holds several patches and restores them last-applied-first; `Apply` answers
+false when a write is refused, so a mod can stop and let what went before undo itself.
+
 ## When it fails
 
 **`the 32-bit (x86) MSVC toolchain is not installed`** -- Visual Studio has no x86 compiler. Visual

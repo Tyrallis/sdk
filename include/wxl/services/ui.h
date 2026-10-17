@@ -87,6 +87,18 @@ typedef struct wxl_ui_api
      * @param capacity  bytes available, terminator included.
      */
     wxl_bool(WXL_CALL* input_text)(const char* label, char* buffer, uint32_t capacity);
+
+    // --- appended after the controls; check struct_size before reading ----------------------
+
+    /**
+     * @brief Removes a panel by its title, so its callback is never called again.
+     *
+     * A mod removes its panels before it unloads: a panel left registered points into code that
+     * is gone. Safe to call from inside the panel's own callback; it stops after that call
+     * returns.
+     * @return WXL_E_NOT_FOUND when no panel has that title.
+     */
+    wxl_result(WXL_CALL* remove_panel)(const char* title);
 } wxl_ui_api;
 
 #ifdef __cplusplus

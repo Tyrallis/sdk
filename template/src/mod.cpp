@@ -1,5 +1,6 @@
 // A WarcraftXL mod: derive, override, register.
 
+#include <algorithm>
 #include <cstdio>
 
 #include "wxl/objects.hpp"
@@ -15,20 +16,34 @@ namespace
     public:
         void OnWorldEnter(const wxl_world_args& args) override
         {
-            char line[128];
+            char line[160];
             std::snprintf(line, sizeof(line), "entered map %u at %.1f %.1f %.1f", args.map_id,
                           args.position.x, args.position.y, args.position.z);
             wxl::Log(WXL_LOG_INFO, kTag, line);
 
             // The object service is optional here: on a runtime that does not publish it, the mod
             // keeps working and simply says less.
-            if (!wxl::HasObjects()) return;
-
             const wxl::Player me = wxl::Player::Local();
             if (!me) return;
 
-            std::snprintf(line, sizeof(line), "local player %s, %u/%u hp", me.Name().c_str(),
-                          me.Health(), me.MaxHealth());
+            // A read answers with the value or with why there is none: a dead unit reads as 0,
+            // a gone one as not found, a runtime without the service as unsupported.
+            const wxl::Expected<std::string> name   = me.Name();
+            const wxl::Expected<uint32_t>    health = me.Health();
+            if (name && health)
+            {
+                std::snprintf(line, sizeof(line), "local player %s, %u/%u hp", name->c_str(), *health,
+                              me.MaxHealth().ValueOr(0));
+                wxl::Log(WXL_LOG_INFO, kTag, line);
+            }
+
+            // Everything alive in view, as a range.
+            const wxl::ObjectService            objects;
+            const wxl::ObjectView<wxl::Unit>    units = objects.InView<wxl::Unit>();
+            const auto                          alive = std::count_if(
+                units.begin(), units.end(), [](const wxl::Unit& unit) { return unit.Health().ValueOr(0) > 0; });
+            std::snprintf(line, sizeof(line), "%zu unit(s) in view, %lld alive", units.size(),
+                          static_cast<long long>(alive));
             wxl::Log(WXL_LOG_INFO, kTag, line);
         }
     };
@@ -48,6 +63,17 @@ namespace
         }
     };
 
+    /// One event outside the script families, held as a subscription that releases itself.
+    struct TargetWatcher
+    {
+        void operator()(const wxl_target_args& args) const
+        {
+            const wxl::Unit                  target(args.current);
+            const wxl::Expected<std::string> name = target.Name();
+            wxl::Log(WXL_LOG_INFO, kTag, name ? "target: " + *name : "target cleared");
+        }
+    };
+
     ExampleWorld  g_world;
     ExampleRender g_render;
 
@@ -58,6 +84,7 @@ namespace
         {
             wxl::ScriptMgr::Add(&g_world);
             wxl::ScriptMgr::Add(&g_render);
+            targets_ = wxl::Subscribe<WXL_EV_TargetChanged>(&targetWatcher_);
 
             const wxl_runtime_info* runtime = wxl::Host()->runtime();
             char                    line[128];
@@ -67,12 +94,15 @@ namespace
             return WXL_OK;
         }
 
-        void OnStage(wxl_stage stage) override
-        {
-            if (stage == WXL_STAGE_READY) wxl::Log(WXL_LOG_INFO, kTag, "client is up");
-        }
+        void OnReady() override { wxl::Log(WXL_LOG_INFO, kTag, "client is up"); }
+
+        void OnShutdown() override { wxl::Log(WXL_LOG_INFO, kTag, "client is coming down"); }
 
         void OnUnload() override { wxl::Log(WXL_LOG_INFO, kTag, "going away"); }
+
+    private:
+        TargetWatcher     targetWatcher_;
+        wxl::Subscription targets_; // released when the mod is destroyed, before its code is gone
     };
 } // namespace
 
