@@ -257,6 +257,11 @@ A watcher does nothing until you register it, which happens once, in `OnLoad`:
 wxl::ScriptMgr::Add(&world_);
 ```
 
+`Add` looks at which handlers you actually wrote and listens for those events only. `WorldWatch`
+overrides three of the six World events, so the other three never reach it, and never cost the
+game a thing. You do not have to do anything to get that -- just hand it the watcher itself, as
+above.
+
 ---
 
 ## 🗒️ 4. Remember things

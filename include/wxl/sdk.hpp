@@ -277,7 +277,8 @@ namespace wxl
     // --- Scripts -------------------------------------------------------------------------
     //
     // One class per family, one virtual per event, generated from events.def. Override what
-    // matters and ignore the rest; an empty override costs nothing.
+    // matters and ignore the rest: an event a script does not override is not subscribed, so
+    // the client never crosses into the mod for it.
     //
     // An override a runtime never calls is not an error. Declare the event's service in the
     // manifest when a hook is load-bearing, so the mod is refused with a reason instead of
@@ -353,7 +354,7 @@ namespace wxl
         {
             std::vector<Script*>      scripts;
             std::vector<Subscription> subscriptions;
-            bool                      subscribed = false;
+            bool                      fed[WXL_EV_COUNT] = {}; ///< per event: already subscribed
         };
 
         template <class Script>
@@ -378,86 +379,163 @@ namespace wxl
             }
         };
 
-        template <class>
-        struct NotAFamily : std::false_type
-        {
-        };
+        // --- What a script handles --------------------------------------------------------
+        //
+        // A family declares an empty handler for each of its events, and a script overrides the
+        // ones it wants. Subscribing the whole family the moment one of its scripts is added
+        // would charge a mod that handles one texture event a guarded crossing for every file
+        // the client opens, and one that wants the connection a crossing for every packet. So a
+        // script subscribes only the events it handles.
+        //
+        // That is decided at compile time from the type of &D::OnName. It names D's own member
+        // when D, or a class between D and the family, declares one, and the family's member
+        // when D only inherits it. The comparison is between types, which is well defined for
+        // virtual functions; comparing the pointers themselves would not be.
+        //
+        // The rule errs one way only, because leaving out an event a script handles is a mod
+        // that compiles and silently does nothing. An event is left out only when its handler is
+        // provably the family's empty default. A handler the trait cannot see -- an override
+        // declared private or protected, which C++ allows -- is subscribed, and so is every
+        // event of a script added through its family's pointer, which hides what it overrides.
 
-        /// Subscribes one thunk per event of a family. Specialised per family below.
+        /// Whether D's handler for one event is, provably, the family's empty default.
+#define WXL_SDK_DEFAULT_TRAIT(name, args)                                                      \
+        template <class D, class F, class = void>                                             \
+        struct InheritsDefault_##name : std::false_type                                       \
+        {                                                                                     \
+        };                                                                                    \
+        template <class D, class F>                                                           \
+        struct InheritsDefault_##name<D, F, std::void_t<decltype(&D::On##name)>>              \
+            : std::is_same<decltype(&D::On##name), void (F::*)(const args&)>                  \
+        {                                                                                     \
+        };
+#define WXL_EVENT(family, name, id, args) WXL_SDK_DEFAULT_TRAIT(name, args)
+#include "wxl/events.def"
+#undef WXL_EVENT
+#undef WXL_SDK_DEFAULT_TRAIT
+
+        /// One family's events, subscribed for a script of type D. Specialised per family below.
         template <class Script>
-        void SubscribeFamily()
-        {
-            static_assert(NotAFamily<Script>::value,
-                          "ScriptMgr::Add takes a WorldScript, RenderScript, ObjectScript, "
-                          "AssetScript, NetScript or LuaScript");
-        }
+        struct Rows;
 
 #define WXL_SDK_SUBSCRIBE_ROW(Script, name, args)                                              \
-    FamilyOf<Script>().subscriptions.push_back(                                                \
-        Subscribe(WXL_EV_##name, &Thunk<Script, args, &Script::On##name>::Dispatch, nullptr, \
-                  WXL_PRIORITY_DEFAULT));
+    if constexpr (std::is_same_v<D, Script> || !InheritsDefault_##name<D, Script>::value)      \
+    {                                                                                          \
+        if (!family.fed[WXL_EV_##name])                                                        \
+        {                                                                                      \
+            family.fed[WXL_EV_##name] = true;                                                  \
+            family.subscriptions.push_back(Subscribe(                                          \
+                WXL_EV_##name, &Thunk<Script, args, &Script::On##name>::Dispatch, nullptr,     \
+                WXL_PRIORITY_DEFAULT));                                                        \
+        }                                                                                      \
+    }
 
         template <>
-        inline void SubscribeFamily<WorldScript>()
+        struct Rows<WorldScript>
         {
+            template <class D>
+            static void For(Family<WorldScript>& family)
+            {
+                (void)family; // a script may handle none of its family's events
 #define WXL_EVENT_World(name, id, args) WXL_SDK_SUBSCRIBE_ROW(WorldScript, name, args)
 #include "wxl/events.def"
 #undef WXL_EVENT_World
-        }
+            }
+        };
 
         template <>
-        inline void SubscribeFamily<RenderScript>()
+        struct Rows<RenderScript>
         {
+            template <class D>
+            static void For(Family<RenderScript>& family)
+            {
+                (void)family;
 #define WXL_EVENT_Render(name, id, args) WXL_SDK_SUBSCRIBE_ROW(RenderScript, name, args)
 #include "wxl/events.def"
 #undef WXL_EVENT_Render
-        }
+            }
+        };
 
         template <>
-        inline void SubscribeFamily<ObjectScript>()
+        struct Rows<ObjectScript>
         {
+            template <class D>
+            static void For(Family<ObjectScript>& family)
+            {
+                (void)family;
 #define WXL_EVENT_Object(name, id, args) WXL_SDK_SUBSCRIBE_ROW(ObjectScript, name, args)
 #include "wxl/events.def"
 #undef WXL_EVENT_Object
-        }
+            }
+        };
 
         template <>
-        inline void SubscribeFamily<AssetScript>()
+        struct Rows<AssetScript>
         {
+            template <class D>
+            static void For(Family<AssetScript>& family)
+            {
+                (void)family;
 #define WXL_EVENT_Asset(name, id, args) WXL_SDK_SUBSCRIBE_ROW(AssetScript, name, args)
 #include "wxl/events.def"
 #undef WXL_EVENT_Asset
-        }
+            }
+        };
 
         template <>
-        inline void SubscribeFamily<NetScript>()
+        struct Rows<NetScript>
         {
+            template <class D>
+            static void For(Family<NetScript>& family)
+            {
+                (void)family;
 #define WXL_EVENT_Net(name, id, args) WXL_SDK_SUBSCRIBE_ROW(NetScript, name, args)
 #include "wxl/events.def"
 #undef WXL_EVENT_Net
-        }
+            }
+        };
 
         template <>
-        inline void SubscribeFamily<LuaScript>()
+        struct Rows<LuaScript>
         {
+            template <class D>
+            static void For(Family<LuaScript>& family)
+            {
+                (void)family;
 #define WXL_EVENT_Lua(name, id, args) WXL_SDK_SUBSCRIBE_ROW(LuaScript, name, args)
 #include "wxl/events.def"
 #undef WXL_EVENT_Lua
-        }
+            }
+        };
 
 #undef WXL_SDK_SUBSCRIBE_ROW
 
-        /// Keeps one script, and subscribes its family the first time that family is used.
-        template <class Script>
-        void Register(Script* script)
+        /// How many of the six families a script derives from.
+        template <class D>
+        constexpr int kFamilies =
+            int(std::is_base_of_v<WorldScript, D>) + int(std::is_base_of_v<RenderScript, D>) +
+            int(std::is_base_of_v<ObjectScript, D>) + int(std::is_base_of_v<AssetScript, D>) +
+            int(std::is_base_of_v<NetScript, D>) + int(std::is_base_of_v<LuaScript, D>);
+
+        /// The family a script belongs to, for one that belongs to exactly one.
+        template <class D>
+        using FamilyFor = std::conditional_t<
+            std::is_base_of_v<WorldScript, D>, WorldScript,
+            std::conditional_t<
+                std::is_base_of_v<RenderScript, D>, RenderScript,
+                std::conditional_t<
+                    std::is_base_of_v<ObjectScript, D>, ObjectScript,
+                    std::conditional_t<std::is_base_of_v<AssetScript, D>, AssetScript,
+                                       std::conditional_t<std::is_base_of_v<NetScript, D>,
+                                                          NetScript, LuaScript>>>>>;
+
+        /// Keeps one script, and subscribes what it handles that its family does not have yet.
+        template <class Script, class D>
+        void Register(D* script)
         {
             if (!script) return;
             Family<Script>& family = FamilyOf<Script>();
-            if (!family.subscribed)
-            {
-                family.subscribed = true;
-                SubscribeFamily<Script>();
-            }
+            Rows<Script>::template For<D>(family);
             family.scripts.push_back(script);
         }
 
@@ -480,36 +558,54 @@ namespace wxl
             Family<Script>& family = FamilyOf<Script>();
             family.scripts.clear();
             family.subscriptions.clear();
-            family.subscribed = false;
+            for (bool& fed : family.fed) fed = false;
         }
     } // namespace detail
 
     /**
      * @brief Registers scripts.
      *
-     * A family subscribes once, the first time one of its scripts is added, so a mod pays only for
-     * the families it uses. The subscriptions are owned here and dropped by Clear(), which WXL_MOD
-     * runs at unload so no handler outlives the code it points into.
+     * Adding a script subscribes the events it handles, and only those: a script that overrides
+     * OnWorldEnter costs the client nothing on any other World event. A second script of the same
+     * family subscribes what it handles that the first did not, and nothing twice. The
+     * subscriptions are owned here and dropped by Clear(), which WXL_MOD runs at unload so no
+     * handler outlives the code it points into.
      *
-     * The overloads take the family, not the derived type: a script that belongs to two families
-     * is added twice, once per family, which says plainly what it is doing.
+     * Pass the script itself, as `Add(&script)`: that is what lets Add see what it overrides. A
+     * script passed through its family's pointer still works, but Add can no longer tell which
+     * events it handles, so it subscribes every event of the family, as if all were overridden.
+     *
+     * A script belongs to one family. One that derives from two is added once per family, through
+     * each family's pointer, which says plainly what it is doing.
      */
     class ScriptMgr
     {
     public:
-        static void Add(WorldScript* script) { detail::Register(script); }
-        static void Add(RenderScript* script) { detail::Register(script); }
-        static void Add(ObjectScript* script) { detail::Register(script); }
-        static void Add(AssetScript* script) { detail::Register(script); }
-        static void Add(NetScript* script) { detail::Register(script); }
-        static void Add(LuaScript* script) { detail::Register(script); }
+        template <class D>
+        static void Add(D* script)
+        {
+            static_assert(detail::kFamilies<D> != 0,
+                          "ScriptMgr::Add takes a script: a class deriving from WorldScript, "
+                          "RenderScript, ObjectScript, AssetScript, NetScript or LuaScript");
+            static_assert(detail::kFamilies<D> < 2,
+                          "this script derives from more than one family; add it once per family, "
+                          "through that family: ScriptMgr::Add(static_cast<wxl::WorldScript*>("
+                          "&script)), and so on");
+            if constexpr (detail::kFamilies<D> == 1) detail::Register<detail::FamilyFor<D>>(script);
+        }
 
-        static void Remove(WorldScript* script) { detail::Unregister(script); }
-        static void Remove(RenderScript* script) { detail::Unregister(script); }
-        static void Remove(ObjectScript* script) { detail::Unregister(script); }
-        static void Remove(AssetScript* script) { detail::Unregister(script); }
-        static void Remove(NetScript* script) { detail::Unregister(script); }
-        static void Remove(LuaScript* script) { detail::Unregister(script); }
+        template <class D>
+        static void Remove(D* script)
+        {
+            static_assert(detail::kFamilies<D> != 0,
+                          "ScriptMgr::Remove takes a script: a class deriving from WorldScript, "
+                          "RenderScript, ObjectScript, AssetScript, NetScript or LuaScript");
+            static_assert(detail::kFamilies<D> < 2,
+                          "this script derives from more than one family; remove it once per "
+                          "family, through that family");
+            if constexpr (detail::kFamilies<D> == 1)
+                detail::Unregister<detail::FamilyFor<D>>(script);
+        }
 
         /// Drops every script and every family subscription.
         static void Clear()

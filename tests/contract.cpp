@@ -132,6 +132,44 @@ namespace
         }
     };
 
+    // What a script handles. Each is a way an override could hide from the check that decides
+    // what to subscribe; each must still be subscribed, and must still run.
+    struct NothingWorldScript final : wxl::WorldScript
+    {
+    };
+
+    struct LeaveWorldScript final : wxl::WorldScript
+    {
+        int leaves = 0;
+        void OnWorldLeave(const wxl_world_args&) override { ++leaves; }
+    };
+
+    struct PrivateWorldScript final : wxl::WorldScript
+    {
+        int clicks = 0;
+
+    private:
+        void OnWorldClick(const wxl_world_click_args&) override { ++clicks; }
+    };
+
+    struct ProtectedWorldScript final : wxl::WorldScript
+    {
+        int sounds = 0;
+
+    protected:
+        void OnSoundPlay(const wxl_sound_args&) override { ++sounds; }
+    };
+
+    struct MidWorldScript : wxl::WorldScript
+    {
+        int updates = 0;
+        void OnUpdate(const wxl_update_args&) override { ++updates; }
+    };
+
+    struct LeafWorldScript final : MidWorldScript
+    {
+    };
+
     struct CountingLuaScript final : wxl::LuaScript
     {
         int      ready       = 0;
@@ -315,8 +353,9 @@ int main()
         const size_t before = host.LiveSubscriptions();
         wxl::ScriptMgr::Add(&world);
         const size_t afterWorld = host.LiveSubscriptions();
-        Check(afterWorld - before == CountFamilyWorld(),
-              "a family subscribes its own events, and only those");
+        // CountingWorldScript overrides Update, WorldEnter and Input: three of its family's six.
+        Check(afterWorld - before == 3 && afterWorld - before < CountFamilyWorld(),
+              "a script subscribes the events it overrides, not its whole family");
 
         wxl::ScriptMgr::Add(&secondWorld);
         Check(host.LiveSubscriptions() == afterWorld,
@@ -371,6 +410,68 @@ int main()
         wxl::ScriptMgr::Clear();
     }
 
+    Section("what a script handles");
+    {
+        wxl::ScriptMgr::Clear();
+        const size_t before = host.LiveSubscriptions();
+
+        NothingWorldScript nothing;
+        wxl::ScriptMgr::Add(&nothing);
+        Check(host.LiveSubscriptions() == before, "a script that overrides nothing subscribes nothing");
+
+        LeaveWorldScript leave;
+        wxl::ScriptMgr::Add(&leave);
+        Check(host.LiveSubscriptions() == before + 1, "one that overrides one event subscribes it");
+
+        LeaveWorldScript secondLeave;
+        wxl::ScriptMgr::Add(&secondLeave);
+        Check(host.LiveSubscriptions() == before + 1,
+              "a second script handling the same event subscribes nothing more");
+
+        const wxl_world_args left{};
+        host.Raise(WXL_EV_WorldLeave, &left);
+        Check(leave.leaves == 1 && secondLeave.leaves == 1, "and both of them run");
+
+        // The cases that would be a mod compiling and silently doing nothing, if the check that
+        // decides what to subscribe could be fooled. Each is counted, and each is raised.
+        PrivateWorldScript hidden;
+        wxl::ScriptMgr::Add(&hidden);
+        Check(host.LiveSubscriptions() == before + 2,
+              "an override declared private is still found and subscribed");
+        const wxl_world_click_args click{};
+        host.Raise(WXL_EV_WorldClick, &click);
+        Check(hidden.clicks == 1, "and it runs: a private override is not a silent one");
+
+        ProtectedWorldScript guarded;
+        wxl::ScriptMgr::Add(&guarded);
+        Check(host.LiveSubscriptions() == before + 3, "so is one declared protected");
+        const wxl_sound_args sound{};
+        host.Raise(WXL_EV_SoundPlay, &sound);
+        Check(guarded.sounds == 1, "and it runs too");
+
+        LeafWorldScript leaf;
+        wxl::ScriptMgr::Add(&leaf);
+        Check(host.LiveSubscriptions() == before + 4,
+              "an override made in a class between the script and its family is found");
+        const wxl_update_args tick{0.016f};
+        host.Raise(WXL_EV_Update, &tick);
+        Check(leaf.updates == 1, "and runs on the script that only inherits it");
+
+        wxl::ScriptMgr::Clear();
+        Check(host.LiveSubscriptions() == before, "Clear releases what each of them subscribed");
+
+        // A script handed over as its family hides what it overrides, so it costs the family.
+        LeaveWorldScript erased;
+        wxl::ScriptMgr::Add(static_cast<wxl::WorldScript*>(&erased));
+        Check(host.LiveSubscriptions() == before + CountFamilyWorld(),
+              "a script passed as its family subscribes every event of it, to be safe");
+        host.Raise(WXL_EV_WorldLeave, &left);
+        Check(erased.leaves == 1, "and its override still runs");
+
+        wxl::ScriptMgr::Clear();
+        Check(host.LiveSubscriptions() == before, "and Clear gives all of it back");
+    }
+
     Section("cancellation");
     {
         wxl::ScriptMgr::Add(&world);
@@ -397,8 +498,8 @@ int main()
                   std::strcmp(wxl_mod_query()->id, "wxl.contract") == 0,
               "WXL_MOD reports the mod");
         Check(wxl_mod_load(host.Table()) == WXL_OK, "load runs OnLoad");
-        Check(host.LiveSubscriptions() == before + CountFamilyWorld(),
-              "a script added in OnLoad subscribes its family");
+        Check(host.LiveSubscriptions() == before + 3,
+              "a script added in OnLoad subscribes what it overrides");
 
         for (int stage = WXL_STAGE_EARLY; stage <= WXL_STAGE_SHUTDOWN; ++stage)
             wxl_mod_stage(static_cast<wxl_stage>(stage));
