@@ -372,6 +372,11 @@ namespace wxl::host
     {
         for (size_t i = binaries_.size(); i-- > 0;)
         {
+            // Before anything frees the code a handler points at. The client keeps raising
+            // events while it takes itself apart -- window messages do not stop because the
+            // mods are gone -- so a subscription left behind is a call into a freed binary.
+            events_.DropOwner(static_cast<uint32_t>(i + 1));
+
             if (loaded_[i].disabled)
             {
                 logger_.Info(kHostTag, "left " + loaded_[i].id + " mapped: it is disabled");
