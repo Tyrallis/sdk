@@ -679,10 +679,9 @@ When you need more than that, wait for the stage that brings it up:
 | `OnUnload` | you are being removed |
 
 > ⚠️ A runtime reports the stages it can recognise and no others. Today both of them report
-> every stage above except `OnGraphicsReady`, which neither can honestly answer for. An
-> override that is never called is not an error -- it is that runtime saying it cannot tell
-> you. Write your mod so that nothing it does depends on a stage it has not been given, and
-> it will work everywhere.
+> every stage above. An override that is never called is still not an error -- it is a runtime
+> saying it cannot tell you -- so write your mod so that nothing it does depends on a stage it
+> has not been given, and it will keep working on a runtime that knows fewer.
 
 And the declaration, once, in one file:
 

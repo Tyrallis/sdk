@@ -78,8 +78,7 @@ you ask for it by number.
 | | stock `Wow.exe` 3.3.5a | the recompiled client |
 |---|---|---|
 | everything Scout watches, and the whole journal | yes | yes |
-| every stage but one | yes | yes |
-| `OnGraphicsReady` | not reported by either runtime yet | the same |
+| every stage, `OnGraphicsReady` included | yes | yes |
 
 Four of the functions these events sit on take their argument in a register rather than on the
 stack on the stock client -- the tick and the three of the object manager. The compiler chose
