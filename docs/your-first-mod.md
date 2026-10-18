@@ -245,17 +245,11 @@ void WorldWatch::OnUpdate(const wxl_update_args& args)
 Scout does every frame, and it does almost nothing -- which is the right instinct. Work in a
 per-frame hook is work the player pays for sixty times a second.
 
-One caveat, and it is an honest one: **on the stock `Wow.exe` the tick does not reach a mod
-today.** The client's dispatch function takes its context in a register rather than on the
-stack, so the runtime cannot stand in front of it without handing it back a context it no
-longer has. `OnUpdate` and `OnReady` therefore run on the recompiled client only.
-
-The same is true of the object manager, which costs `OnObjectCreate`, `OnObjectDestroy` and
-every object handle on the stock client -- see *What depends on the runtime* in Scout's README
-for the whole list. Write these handlers anyway: the contract is the same on both, and a mod
-written against it is correct on the runtime that can serve it. Just do not make a mod *depend*
-on one until you know which runtime it will meet, which is exactly what `requires` in the
-manifest is for.
+Worth knowing, though you never have to act on it: on the stock client this one function takes
+its context in a register rather than on the stack, so the runtime reaches it through a thunk
+written by hand rather than a generated detour. The contract is the same either way. It is the
+kind of thing the runtime is for -- `requires` in your manifest is where you say what you
+cannot work without, and the runtime answers at the door.
 
 A watcher does nothing until you register it, which happens once, in `OnLoad`:
 

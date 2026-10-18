@@ -77,23 +77,16 @@ you ask for it by number.
 
 | | stock `Wow.exe` 3.3.5a | the recompiled client |
 |---|---|---|
-| the journal, the Lua API, the traffic counters, `OnWorldEnter`/`OnWorldLeave` | yes | yes |
-| `OnLoad`, `OnStorageReady`, `OnScriptReady`, `OnShutdown`, `OnUnload` | yes | yes |
-| `OnUpdate` and `OnReady` | no | yes |
-| `OnObjectCreate`, `OnObjectDestroy`, and every handle `OnUnitDeath` and `OnTargetChanged` carry | no | yes |
+| everything Scout watches, and the whole journal | yes | yes |
+| every stage but one | yes | yes |
 | `OnGraphicsReady` | not reported by either runtime yet | the same |
 
-Two gaps, one cause. On the stock client four of the functions these events sit on take their
-argument in a register rather than on the stack -- the compiler's own choice, because each has
-internal linkage and one caller. A detour cannot hold a register across its own body and give
-it back, so the runtime declares those seams and refuses to attach them rather than hand the
-client a pointer it computed from nothing.
-
-The tick is one of them, which is why the journal's clock never advances on `Wow.exe`. The
-object manager is the other three, so nothing is ever tracked there: `wxl.object` answers for
-an empty world, and the handle in a death or a target change reads as absent. The watchers
-still run and the journal still fills from what does arrive -- the world, the traffic, the Lua
-side -- but an object-shaped entry is a recompiled-client entry today.
+Four of the functions these events sit on take their argument in a register rather than on the
+stack on the stock client -- the tick and the three of the object manager. The compiler chose
+that, because each has internal linkage and one or two callers, and a generated detour cannot
+hold a register across its own body. The runtime carries a thunk written by hand for each of
+the four, so they are seams like any other on both runtimes; what that costs is in the core's
+`src/seams/RegparmX86.cpp`, not in anything a mod writes.
 
 `mod.json` requires `wxl.object` -- without it there is nothing to watch, and a runtime that
 lacks it refuses the mod with a reason instead of loading it to do nothing.
