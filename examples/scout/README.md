@@ -78,9 +78,15 @@ you ask for it by number.
 | | stock `Wow.exe` 3.3.5a | the recompiled client |
 |---|---|---|
 | the journal, the Lua API, the traffic counters | yes | yes |
-| `OnLoad`, `OnStorageReady`, `OnScriptReady`, `OnReady`, `OnShutdown`, `OnUnload` | yes | yes |
+| `OnLoad`, `OnStorageReady`, `OnScriptReady`, `OnShutdown`, `OnUnload` | yes | yes |
+| `OnUpdate` and `OnReady` | no | yes |
 | `OnGraphicsReady` | not reported by either runtime yet | the same |
 
-Nothing Scout does is load-bearing on a stage, which is why it works on both. `mod.json`
-requires `wxl.object` -- without it there is nothing to watch, and a runtime that lacks it
-refuses the mod with a reason instead of loading it to do nothing.
+`OnUpdate` and `OnReady` both come from the client's tick, and on the stock client that
+function takes its context in a register: no detour can stand in front of it and give it back
+what it was holding. So on `Wow.exe` the journal's clock never advances and the entries carry
+the time of the last tick the mod did see, which is none. Everything else -- the watchers, the
+Lua API, the counters -- works the same on both.
+
+`mod.json` requires `wxl.object` -- without it there is nothing to watch, and a runtime that
+lacks it refuses the mod with a reason instead of loading it to do nothing.

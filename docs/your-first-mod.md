@@ -245,6 +245,13 @@ void WorldWatch::OnUpdate(const wxl_update_args& args)
 Scout does every frame, and it does almost nothing -- which is the right instinct. Work in a
 per-frame hook is work the player pays for sixty times a second.
 
+One caveat, and it is an honest one: **on the stock `Wow.exe` the tick does not reach a mod
+today.** The client's dispatch function takes its context in a register rather than on the
+stack, so the runtime cannot stand in front of it without handing it back a context it no
+longer has. `OnUpdate` and `OnReady` therefore run on the recompiled client only. Write them
+anyway -- the contract is the same on both -- but do not make a mod depend on them until you
+know which runtime it will meet.
+
 A watcher does nothing until you register it, which happens once, in `OnLoad`:
 
 ```cpp
