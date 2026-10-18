@@ -3,7 +3,7 @@
   "id": "wxl.lua-hello",
   "name": "Lua hello",
   "version": "1.0.0",
-  "abi": "0.4",
+  "abi": "0.5",
   "description": "A Lua mod: it watches the world, answers two events and reloads when edited.",
   "lua": "init.lua",
   "optional": [

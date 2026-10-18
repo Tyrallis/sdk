@@ -267,6 +267,11 @@ WXL_ARGS_FIELD(wxl_spell_cast_args, target_flags, u32) ///< the server's target 
 WXL_ARGS_FIELD(wxl_spell_cast_args, cast_time, u32)    ///< milliseconds; SpellCastStart only, 0 on SpellCastGo
 WXL_ARGS_FIELD(wxl_spell_cast_args, hit_count, u32)    ///< units the cast hit; SpellCastGo only, 0 on SpellCastStart
 WXL_ARGS_FIELD(wxl_spell_cast_args, miss_count, u32)   ///< units it missed; SpellCastGo only, 0 on SpellCastStart
+WXL_ARGS_BYTES(wxl_spell_cast_args, hits, hits_size)   ///< the guids hit, @ref hit_count of 8 bytes each, little-endian; NULL when none
+WXL_ARGS_FIELD(wxl_spell_cast_args, hits_size, u32)    ///< bytes in @ref hits
+WXL_ARGS_BYTES(wxl_spell_cast_args, misses, misses_size) ///< the guids missed, @ref miss_count of 8 bytes each, little-endian; NULL when none
+WXL_ARGS_FIELD(wxl_spell_cast_args, misses_size, u32)  ///< bytes in @ref misses
+WXL_ARGS_BYTES(wxl_spell_cast_args, miss_reasons, miss_count) ///< one byte per miss, the server's SPELL_MISS_* code, in the order of @ref misses; NULL when none
 WXL_ARGS_END(wxl_spell_cast_args)
 
 /**
@@ -342,6 +347,148 @@ WXL_ARGS(wxl_script_error_args)
 WXL_ARGS_FIELD(wxl_script_error_args, context, u32) ///< a wxl_script_context value: which interface raised it
 WXL_ARGS_FIELD(wxl_script_error_args, message, str) ///< the error value as text; "UNKNOWN ERROR" when it is not text
 WXL_ARGS_END(wxl_script_error_args)
+
+/**
+ * @brief A cast or a channel in progress, as the server reports it for a unit in view.
+ *
+ * SpellChannelStart carries the channel's length in both @ref duration and @ref remaining;
+ * SpellChannelUpdate what is left, with @ref duration 0; SpellChannelStop both 0.
+ * SpellCastResume, a cast already running when its caster came into view, carries both and the
+ * cast's object target. Read off the message before the client parses it; the spell of a
+ * channel update is the one the client holds for the unit, 0 when the unit is not in view.
+ */
+WXL_ARGS(wxl_spell_progress_args)
+WXL_ARGS_FIELD(wxl_spell_progress_args, caster, handle)    ///< WXL_HANDLE_NONE when the caster is not in view
+WXL_ARGS_FIELD(wxl_spell_progress_args, caster_guid, guid)
+WXL_ARGS_FIELD(wxl_spell_progress_args, target, handle)    ///< SpellCastResume only; WXL_HANDLE_NONE otherwise, or when not in view
+WXL_ARGS_FIELD(wxl_spell_progress_args, target_guid, guid) ///< SpellCastResume only; 0 otherwise, or when the cast has no object target
+WXL_ARGS_FIELD(wxl_spell_progress_args, spell_id, u32)
+WXL_ARGS_FIELD(wxl_spell_progress_args, duration, u32)     ///< milliseconds; 0 when the message does not say
+WXL_ARGS_FIELD(wxl_spell_progress_args, remaining, u32)    ///< milliseconds left; 0 when the channel ended
+WXL_ARGS_END(wxl_spell_progress_args)
+
+/// A cast in progress pushed back by the server (SMSG_SPELL_DELAYED), for a unit in view.
+WXL_ARGS(wxl_spell_delay_args)
+WXL_ARGS_FIELD(wxl_spell_delay_args, caster, handle)    ///< WXL_HANDLE_NONE when the caster is not in view
+WXL_ARGS_FIELD(wxl_spell_delay_args, caster_guid, guid)
+WXL_ARGS_FIELD(wxl_spell_delay_args, spell_id, u32)     ///< the cast the client holds for the unit; 0 when the unit is not in view
+WXL_ARGS_FIELD(wxl_spell_delay_args, delay, i32)        ///< milliseconds added to the cast
+WXL_ARGS_END(wxl_spell_delay_args)
+
+/**
+ * @brief A cooldown the server put on a spell of the local player's or its pet's, or on an item.
+ *
+ * SMSG_SPELL_COOLDOWN names the unit and lists spells, one event each; SMSG_ITEM_COOLDOWN names
+ * the item and the spell it casts, with no duration of its own. A duration of 0 is the spell's
+ * own recovery time, which the client reads from its database.
+ */
+WXL_ARGS(wxl_spell_cooldown_args)
+WXL_ARGS_FIELD(wxl_spell_cooldown_args, unit, handle)    ///< the player or the pet; WXL_HANDLE_NONE for an item's cooldown
+WXL_ARGS_FIELD(wxl_spell_cooldown_args, unit_guid, guid) ///< 0 for an item's cooldown
+WXL_ARGS_FIELD(wxl_spell_cooldown_args, item, handle)    ///< the item; WXL_HANDLE_NONE for a spell's cooldown
+WXL_ARGS_FIELD(wxl_spell_cooldown_args, item_guid, guid) ///< 0 for a spell's cooldown
+WXL_ARGS_FIELD(wxl_spell_cooldown_args, spell_id, u32)
+WXL_ARGS_FIELD(wxl_spell_cooldown_args, duration, u32)   ///< milliseconds; 0 for the spell's own recovery time
+WXL_ARGS_FIELD(wxl_spell_cooldown_args, flags, u32)      ///< the server's flags: 1 starts the global cooldown too, 2 ignores the on-event hold
+WXL_ARGS_END(wxl_spell_cooldown_args)
+
+/**
+ * @brief A cooldown the server changed after putting it on: released from its hold
+ * (SMSG_COOLDOWN_EVENT), cleared (SMSG_CLEAR_COOLDOWN) or shifted (SMSG_MODIFY_COOLDOWN).
+ */
+WXL_ARGS(wxl_spell_cooldown_change_args)
+WXL_ARGS_FIELD(wxl_spell_cooldown_change_args, unit, handle)    ///< the player or the pet; WXL_HANDLE_NONE when not in view
+WXL_ARGS_FIELD(wxl_spell_cooldown_change_args, unit_guid, guid)
+WXL_ARGS_FIELD(wxl_spell_cooldown_change_args, spell_id, u32)
+WXL_ARGS_FIELD(wxl_spell_cooldown_change_args, change, u32)     ///< 0 the held cooldown starts now, 1 cleared, 2 shifted by @ref delay
+WXL_ARGS_FIELD(wxl_spell_cooldown_change_args, delay, i32)      ///< milliseconds, for a shift; 0 otherwise
+WXL_ARGS_END(wxl_spell_cooldown_change_args)
+
+/**
+ * @brief The local player cancelling a cast of its own, before the client tells the server.
+ *
+ * Every cancel ends here: the escape key, moving, SpellStopCasting, a dialog refused, the
+ * client dropping a cast it cannot finish. The server is told (CMSG_CANCEL_CAST) only when
+ * @ref notify_server is set and the cast had a cast time or was channelled.
+ */
+WXL_ARGS(wxl_spell_cancel_args)
+WXL_ARGS_FIELD(wxl_spell_cancel_args, caster, handle)       ///< the player, or the pet or charmed unit it casts through
+WXL_ARGS_FIELD(wxl_spell_cancel_args, caster_guid, guid)
+WXL_ARGS_FIELD(wxl_spell_cancel_args, spell_id, u32)
+WXL_ARGS_FIELD(wxl_spell_cancel_args, cast_count, u32)
+WXL_ARGS_FIELD(wxl_spell_cancel_args, reason, u32)          ///< the client's SPELL_FAILED_* code it fails the cast with; 27 (interrupted) for the player's own cancel
+WXL_ARGS_FIELD(wxl_spell_cancel_args, notify_server, bool)  ///< WXL_TRUE when the client may tell the server
+WXL_ARGS_END(wxl_spell_cancel_args)
+
+/// A unit starting or stopping its auto-attack on another, as the server reports it.
+WXL_ARGS(wxl_combat_attack_args)
+WXL_ARGS_FIELD(wxl_combat_attack_args, attacker, handle)    ///< WXL_HANDLE_NONE when not in view
+WXL_ARGS_FIELD(wxl_combat_attack_args, attacker_guid, guid)
+WXL_ARGS_FIELD(wxl_combat_attack_args, victim, handle)      ///< WXL_HANDLE_NONE when not in view, or when the stop names none
+WXL_ARGS_FIELD(wxl_combat_attack_args, victim_guid, guid)   ///< 0 when the stop names no victim
+WXL_ARGS_END(wxl_combat_attack_args)
+
+/**
+ * @brief Damage the server reported: a melee swing, a spell, a periodic tick or the environment.
+ *
+ * Read off the message before the client parses it. @ref kind says which message: 0 a melee
+ * round (SMSG_ATTACKERSTATEUPDATE; @ref spell_id is the swing's spell, 0 for a plain swing),
+ * 1 a spell (SMSG_SPELLNONMELEEDAMAGELOG), 2 a periodic tick (SMSG_PERIODICAURALOG), 3 the
+ * environment (SMSG_ENVIRONMENTALDAMAGELOG; no source, @ref environment names the cause).
+ * @ref amount is what landed, after absorbs, resists and blocks. A melee round that missed
+ * entirely is a CombatMiss, not a CombatDamage.
+ */
+WXL_ARGS(wxl_combat_damage_args)
+WXL_ARGS_FIELD(wxl_combat_damage_args, source, handle)      ///< WXL_HANDLE_NONE when not in view, or for the environment
+WXL_ARGS_FIELD(wxl_combat_damage_args, source_guid, guid)   ///< 0 for the environment
+WXL_ARGS_FIELD(wxl_combat_damage_args, target, handle)      ///< WXL_HANDLE_NONE when not in view
+WXL_ARGS_FIELD(wxl_combat_damage_args, target_guid, guid)
+WXL_ARGS_FIELD(wxl_combat_damage_args, spell_id, u32)       ///< 0 for a plain melee swing and for the environment
+WXL_ARGS_FIELD(wxl_combat_damage_args, kind, u32)           ///< 0 melee, 1 spell, 2 periodic, 3 environment
+WXL_ARGS_FIELD(wxl_combat_damage_args, environment, u32)    ///< kind 3 only: 0 exhaustion, 1 drowning, 2 fall, 3 lava, 4 slime, 5 fire
+WXL_ARGS_FIELD(wxl_combat_damage_args, amount, u32)         ///< damage dealt
+WXL_ARGS_FIELD(wxl_combat_damage_args, overkill, u32)       ///< damage past the target's health; 0 when it survived
+WXL_ARGS_FIELD(wxl_combat_damage_args, school, u32)         ///< the school mask: 1 physical, 2 holy, 4 fire, 8 nature, 16 frost, 32 shadow, 64 arcane
+WXL_ARGS_FIELD(wxl_combat_damage_args, absorbed, u32)
+WXL_ARGS_FIELD(wxl_combat_damage_args, resisted, u32)
+WXL_ARGS_FIELD(wxl_combat_damage_args, blocked, u32)
+WXL_ARGS_FIELD(wxl_combat_damage_args, crit, bool)
+WXL_ARGS_FIELD(wxl_combat_damage_args, hit_info, u32)       ///< the server's hit flags for a melee round or a spell; 0 for a tick or the environment
+WXL_ARGS_END(wxl_combat_damage_args)
+
+/// A heal the server reported, direct (SMSG_SPELLHEALLOG) or a periodic tick (SMSG_PERIODICAURALOG).
+WXL_ARGS(wxl_combat_heal_args)
+WXL_ARGS_FIELD(wxl_combat_heal_args, source, handle)      ///< WXL_HANDLE_NONE when not in view
+WXL_ARGS_FIELD(wxl_combat_heal_args, source_guid, guid)
+WXL_ARGS_FIELD(wxl_combat_heal_args, target, handle)      ///< WXL_HANDLE_NONE when not in view
+WXL_ARGS_FIELD(wxl_combat_heal_args, target_guid, guid)
+WXL_ARGS_FIELD(wxl_combat_heal_args, spell_id, u32)
+WXL_ARGS_FIELD(wxl_combat_heal_args, amount, u32)         ///< health restored, overheal included
+WXL_ARGS_FIELD(wxl_combat_heal_args, overheal, u32)       ///< the part past full health
+WXL_ARGS_FIELD(wxl_combat_heal_args, absorbed, u32)
+WXL_ARGS_FIELD(wxl_combat_heal_args, crit, bool)
+WXL_ARGS_FIELD(wxl_combat_heal_args, periodic, bool)      ///< WXL_TRUE for a tick
+WXL_ARGS_END(wxl_combat_heal_args)
+
+/**
+ * @brief An attack that did not land: a spell on one of its targets (SMSG_SPELLLOGMISS, one
+ * event per target) or a melee round (SMSG_ATTACKERSTATEUPDATE).
+ *
+ * @ref reason is the server's SPELL_MISS_* code for a spell (1 miss, 2 resist, 3 dodge, 4
+ * parry, 5 block, 6 evade, 7 immune, 8 immune, 9 deflect, 10 absorb, 11 reflect) and the
+ * victim's state for a melee round (2 dodge, 3 parry, 6 evade, 7 immune, 8 deflect; 0 with the
+ * miss flag in @ref hit_info for a plain miss).
+ */
+WXL_ARGS(wxl_combat_miss_args)
+WXL_ARGS_FIELD(wxl_combat_miss_args, source, handle)      ///< WXL_HANDLE_NONE when not in view
+WXL_ARGS_FIELD(wxl_combat_miss_args, source_guid, guid)
+WXL_ARGS_FIELD(wxl_combat_miss_args, target, handle)      ///< WXL_HANDLE_NONE when not in view
+WXL_ARGS_FIELD(wxl_combat_miss_args, target_guid, guid)
+WXL_ARGS_FIELD(wxl_combat_miss_args, spell_id, u32)       ///< 0 for a plain melee swing
+WXL_ARGS_FIELD(wxl_combat_miss_args, melee, bool)         ///< WXL_TRUE for a melee round
+WXL_ARGS_FIELD(wxl_combat_miss_args, reason, u32)
+WXL_ARGS_FIELD(wxl_combat_miss_args, hit_info, u32)       ///< the server's hit flags for a melee round; 0 for a spell
+WXL_ARGS_END(wxl_combat_miss_args)
 
 #ifdef WXL_ARGS_BYTES_DEFAULTED
     #undef WXL_ARGS_BYTES

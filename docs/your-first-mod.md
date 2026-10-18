@@ -127,7 +127,7 @@ target, a link line or an install rule.
   "id": "wxl.scout",
   "name": "Scout",
   "version": "1.0.0",
-  "abi": "0.4",
+  "abi": "0.5",
   "description": "Keeps a journal of what happens around you and hands it to the interface.",
   "binaries": {
     "win-x64": "bin/x64/scout.dll",
@@ -770,7 +770,7 @@ print(ScoutNearby(), "units in view")
 |---|---|
 | nothing at all in the log | the folder shape is wrong. It must be `Mods/<id>/mod.json` and `Mods/<id>/bin/<arch>/<name>.dll` |
 | `refused ...: requires service ... which this runtime does not have` | your `requires` cannot be met here. Move it to `optional` if you can work without it |
-| `refused ...: abi 0.4, this runtime serves 0.3` | you built against a newer SDK than the runtime. Rebuild, or update the runtime |
+| `refused ...: abi 0.5, this runtime serves 0.4` | you built against a newer SDK than the runtime. Rebuild, or update the runtime |
 | the build fails on the `abi` field | `mod.json` and the SDK headers disagree. Set `abi` to what the error names |
 | the client does not start at all | the DLL beside the executable is the wrong architecture |
 | the mod loads but nothing happens | an event that runtime does not raise. Its README lists what it raises today |

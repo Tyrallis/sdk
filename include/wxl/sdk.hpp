@@ -347,6 +347,16 @@ namespace wxl
 #undef WXL_EVENT_Lua
     };
 
+    /// What the server reports of fights: attacks, damage, heals, misses.
+    class CombatScript
+    {
+    public:
+        virtual ~CombatScript() = default;
+#define WXL_EVENT_Combat(name, id, args) virtual void On##name(const args&) {}
+#include "wxl/events.def"
+#undef WXL_EVENT_Combat
+    };
+
     namespace detail
     {
         /// One family's registered scripts and the subscriptions that feed them. Lives in the mod.
@@ -530,14 +540,28 @@ namespace wxl
             }
         };
 
+        template <>
+        struct Rows<CombatScript>
+        {
+            template <class D>
+            static void For(Family<CombatScript>& family)
+            {
+                (void)family;
+#define WXL_EVENT_Combat(name, id, args) WXL_SDK_SUBSCRIBE_ROW(CombatScript, name, args)
+#include "wxl/events.def"
+#undef WXL_EVENT_Combat
+            }
+        };
+
 #undef WXL_SDK_SUBSCRIBE_ROW
 
-        /// How many of the six families a script derives from.
+        /// How many of the seven families a script derives from.
         template <class D>
         constexpr int kFamilies =
             int(std::is_base_of_v<WorldScript, D>) + int(std::is_base_of_v<RenderScript, D>) +
             int(std::is_base_of_v<ObjectScript, D>) + int(std::is_base_of_v<AssetScript, D>) +
-            int(std::is_base_of_v<NetScript, D>) + int(std::is_base_of_v<LuaScript, D>);
+            int(std::is_base_of_v<NetScript, D>) + int(std::is_base_of_v<LuaScript, D>) +
+            int(std::is_base_of_v<CombatScript, D>);
 
         /// The family a script belongs to, for one that belongs to exactly one.
         template <class D>
@@ -547,9 +571,11 @@ namespace wxl
                 std::is_base_of_v<RenderScript, D>, RenderScript,
                 std::conditional_t<
                     std::is_base_of_v<ObjectScript, D>, ObjectScript,
-                    std::conditional_t<std::is_base_of_v<AssetScript, D>, AssetScript,
-                                       std::conditional_t<std::is_base_of_v<NetScript, D>,
-                                                          NetScript, LuaScript>>>>>;
+                    std::conditional_t<
+                        std::is_base_of_v<AssetScript, D>, AssetScript,
+                        std::conditional_t<std::is_base_of_v<NetScript, D>, NetScript,
+                                           std::conditional_t<std::is_base_of_v<LuaScript, D>,
+                                                              LuaScript, CombatScript>>>>>>;
 
         /// Keeps one script, and subscribes what it handles that its family does not have yet.
         template <class Script, class D>
@@ -615,7 +641,8 @@ namespace wxl
         {
             static_assert(detail::kFamilies<D> != 0,
                           "ScriptMgr::Add takes a script: a class deriving from WorldScript, "
-                          "RenderScript, ObjectScript, AssetScript, NetScript or LuaScript");
+                          "RenderScript, ObjectScript, AssetScript, NetScript, LuaScript or "
+                          "CombatScript");
             static_assert(detail::kFamilies<D> < 2,
                           "this script derives from more than one family; add it once per family, "
                           "through that family: ScriptMgr::Add(static_cast<wxl::WorldScript*>("
@@ -628,7 +655,8 @@ namespace wxl
         {
             static_assert(detail::kFamilies<D> != 0,
                           "ScriptMgr::Remove takes a script: a class deriving from WorldScript, "
-                          "RenderScript, ObjectScript, AssetScript, NetScript or LuaScript");
+                          "RenderScript, ObjectScript, AssetScript, NetScript, LuaScript or "
+                          "CombatScript");
             static_assert(detail::kFamilies<D> < 2,
                           "this script derives from more than one family; remove it once per "
                           "family, through that family");
@@ -645,6 +673,7 @@ namespace wxl
             detail::ClearFamily<AssetScript>();
             detail::ClearFamily<NetScript>();
             detail::ClearFamily<LuaScript>();
+            detail::ClearFamily<CombatScript>();
         }
     };
 

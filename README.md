@@ -5,7 +5,7 @@
 **The contract a WarcraftXL mod is written against**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![ABI](https://img.shields.io/badge/ABI-0.4-blue.svg)](include/wxl/abi.h)
+[![ABI](https://img.shields.io/badge/ABI-0.5-blue.svg)](include/wxl/abi.h)
 [![C++](https://img.shields.io/badge/C%2B%2B-17%20and%20up-blue.svg)](#-getting-started)
 [![Header only](https://img.shields.io/badge/header--only-yes-lightgrey.svg)](include/wxl)
 
@@ -129,8 +129,9 @@ serves the client's own Lua and watches the server traffic -- and
 
 ## 🔌 What a runtime offers
 
-Events are grouped into six script families: `WorldScript`, `RenderScript`, `ObjectScript`,
-`AssetScript`, `NetScript` and `LuaScript`. Override the hooks you want; the rest cost nothing.
+Events are grouped into seven script families: `WorldScript`, `RenderScript`, `ObjectScript`,
+`AssetScript`, `NetScript`, `LuaScript` and `CombatScript`. Override the hooks you want; the rest
+cost nothing.
 
 Beyond events, a runtime publishes services, and a mod asks for the ones it needs:
 

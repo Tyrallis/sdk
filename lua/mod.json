@@ -3,7 +3,7 @@
   "id": "wxl.lua",
   "name": "Lua",
   "version": "0.1.0",
-  "abi": "0.4",
+  "abi": "0.5",
   "description": "Runs the Lua mods: every folder under Mods/ whose manifest names a \"lua\" entry.",
   "binaries": {
     "win-x64": "bin/x64/wxl-lua.dll",

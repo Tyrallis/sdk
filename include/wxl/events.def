@@ -27,7 +27,7 @@
 
 #if !defined(WXL_EVENT) && !defined(WXL_EVENT_World) && !defined(WXL_EVENT_Render) && \
     !defined(WXL_EVENT_Object) && !defined(WXL_EVENT_Asset) && !defined(WXL_EVENT_Net) && \
-    !defined(WXL_EVENT_Lua)
+    !defined(WXL_EVENT_Lua) && !defined(WXL_EVENT_Combat)
     #error "define WXL_EVENT(family, name, id, args) or a WXL_EVENT_<family> before events.def"
 #endif
 
@@ -58,6 +58,10 @@
 #ifndef WXL_EVENT_Lua
     #define WXL_EVENT_Lua(name, id, args)
     #define WXL_EVENT_Lua_DEFAULTED
+#endif
+#ifndef WXL_EVENT_Combat
+    #define WXL_EVENT_Combat(name, id, args)
+    #define WXL_EVENT_Combat_DEFAULTED
 #endif
 
 // --- World: the game's own facts -----------------------------------------------------------
@@ -184,6 +188,41 @@ WXL_EVENT(Lua, UiEvent,     40, wxl_ui_event_args)
 /** The interface's Lua raised an error, before the client's error handler sees it. */
 WXL_EVENT(Lua, ScriptError, 41, wxl_script_error_args)
 
+// --- Object, continued: casts in progress, cooldowns, the player's own cancel ------------
+
+/** A unit in view started channelling: MSG_CHANNEL_START, with the channel's length. */
+WXL_EVENT(Object, SpellChannelStart,    42, wxl_spell_progress_args)
+/** A channel in progress was updated: MSG_CHANNEL_UPDATE with time left. */
+WXL_EVENT(Object, SpellChannelUpdate,   43, wxl_spell_progress_args)
+/** A channel ended: MSG_CHANNEL_UPDATE with no time left. */
+WXL_EVENT(Object, SpellChannelStop,     44, wxl_spell_progress_args)
+/** A cast already running when its caster came into view: SMSG_UNIT_SPELLCAST_START. */
+WXL_EVENT(Object, SpellCastResume,      45, wxl_spell_progress_args)
+/** A cast in progress was pushed back: SMSG_SPELL_DELAYED, for any caster in view. */
+WXL_EVENT(Object, SpellCastDelayed,     46, wxl_spell_delay_args)
+/** A cooldown was put on a spell or an item: SMSG_SPELL_COOLDOWN, one per spell, or SMSG_ITEM_COOLDOWN. */
+WXL_EVENT(Object, SpellCooldown,        47, wxl_spell_cooldown_args)
+/** A cooldown was released, cleared or shifted: SMSG_COOLDOWN_EVENT, SMSG_CLEAR_COOLDOWN, SMSG_MODIFY_COOLDOWN. */
+WXL_EVENT(Object, SpellCooldownChanged, 48, wxl_spell_cooldown_change_args)
+/** The local player cancels a cast of its own, before the client tells the server. */
+WXL_EVENT(Object, SpellCastCancel,      49, wxl_spell_cancel_args)
+
+// --- Combat: what the server reports of fights -------------------------------------------
+//
+// Read off the server's messages before the client parses them, for any unit in view. The
+// amounts are the server's; the client adds nothing to them.
+
+/** A unit started auto-attacking another: SMSG_ATTACKSTART. */
+WXL_EVENT(Combat, CombatAttackStart, 50, wxl_combat_attack_args)
+/** A unit stopped auto-attacking: SMSG_ATTACKSTOP, or SMSG_COMBAT_EVENT_FAILED, which the client treats the same. */
+WXL_EVENT(Combat, CombatAttackStop,  51, wxl_combat_attack_args)
+/** Damage landed: a melee round, a spell, a periodic tick or the environment. */
+WXL_EVENT(Combat, CombatDamage,      52, wxl_combat_damage_args)
+/** A heal landed, direct or a periodic tick. */
+WXL_EVENT(Combat, CombatHeal,        53, wxl_combat_heal_args)
+/** An attack did not land: a spell on one of its targets, or a melee round. */
+WXL_EVENT(Combat, CombatMiss,        54, wxl_combat_miss_args)
+
 // Give back whatever was defaulted above, so the file can be included again right after with a
 // different selector. What the consumer defined itself is left alone: undefining it here would
 // break the consumer that includes the table twice on purpose.
@@ -215,4 +254,8 @@ WXL_EVENT(Lua, ScriptError, 41, wxl_script_error_args)
 #ifdef WXL_EVENT_Lua_DEFAULTED
     #undef WXL_EVENT_Lua
     #undef WXL_EVENT_Lua_DEFAULTED
+#endif
+#ifdef WXL_EVENT_Combat_DEFAULTED
+    #undef WXL_EVENT_Combat
+    #undef WXL_EVENT_Combat_DEFAULTED
 #endif

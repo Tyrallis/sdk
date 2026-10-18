@@ -128,6 +128,11 @@
 ---@field cast_time integer
 ---@field hit_count integer
 ---@field miss_count integer
+---@field hits string the bytes, valid for the handler
+---@field hits_size integer
+---@field misses string the bytes, valid for the handler
+---@field misses_size integer
+---@field miss_reasons string the bytes, valid for the handler
 
 ---@class wxl.SpellFailArgs
 ---@field caster wxl.Object|nil
@@ -164,6 +169,90 @@
 ---@class wxl.ScriptErrorArgs
 ---@field context integer
 ---@field message string
+
+---@class wxl.SpellProgressArgs
+---@field caster wxl.Object|nil
+---@field caster_guid string a guid, as "0x" and sixteen hex digits
+---@field target wxl.Object|nil
+---@field target_guid string a guid, as "0x" and sixteen hex digits
+---@field spell_id integer
+---@field duration integer
+---@field remaining integer
+
+---@class wxl.SpellDelayArgs
+---@field caster wxl.Object|nil
+---@field caster_guid string a guid, as "0x" and sixteen hex digits
+---@field spell_id integer
+---@field delay integer
+
+---@class wxl.SpellCooldownArgs
+---@field unit wxl.Object|nil
+---@field unit_guid string a guid, as "0x" and sixteen hex digits
+---@field item wxl.Object|nil
+---@field item_guid string a guid, as "0x" and sixteen hex digits
+---@field spell_id integer
+---@field duration integer
+---@field flags integer
+
+---@class wxl.SpellCooldownChangeArgs
+---@field unit wxl.Object|nil
+---@field unit_guid string a guid, as "0x" and sixteen hex digits
+---@field spell_id integer
+---@field change integer
+---@field delay integer
+
+---@class wxl.SpellCancelArgs
+---@field caster wxl.Object|nil
+---@field caster_guid string a guid, as "0x" and sixteen hex digits
+---@field spell_id integer
+---@field cast_count integer
+---@field reason integer
+---@field notify_server boolean
+
+---@class wxl.CombatAttackArgs
+---@field attacker wxl.Object|nil
+---@field attacker_guid string a guid, as "0x" and sixteen hex digits
+---@field victim wxl.Object|nil
+---@field victim_guid string a guid, as "0x" and sixteen hex digits
+
+---@class wxl.CombatDamageArgs
+---@field source wxl.Object|nil
+---@field source_guid string a guid, as "0x" and sixteen hex digits
+---@field target wxl.Object|nil
+---@field target_guid string a guid, as "0x" and sixteen hex digits
+---@field spell_id integer
+---@field kind integer
+---@field environment integer
+---@field amount integer
+---@field overkill integer
+---@field school integer
+---@field absorbed integer
+---@field resisted integer
+---@field blocked integer
+---@field crit boolean
+---@field hit_info integer
+
+---@class wxl.CombatHealArgs
+---@field source wxl.Object|nil
+---@field source_guid string a guid, as "0x" and sixteen hex digits
+---@field target wxl.Object|nil
+---@field target_guid string a guid, as "0x" and sixteen hex digits
+---@field spell_id integer
+---@field amount integer
+---@field overheal integer
+---@field absorbed integer
+---@field crit boolean
+---@field periodic boolean
+
+---@class wxl.CombatMissArgs
+---@field source wxl.Object|nil
+---@field source_guid string a guid, as "0x" and sixteen hex digits
+---@field target wxl.Object|nil
+---@field target_guid string a guid, as "0x" and sixteen hex digits
+---@field spell_id integer
+---@field melee boolean
+---@field reason integer
+---@field hit_info integer
 
 ---@class wxl.Vec3
 ---@field x number
@@ -208,6 +297,14 @@ RenderScript = {}
 ---@field OnSpellCastInterrupted fun(self: ObjectScript, args: wxl.SpellFailArgs)
 ---@field OnSpellCastRequest fun(self: ObjectScript, args: wxl.SpellRequestArgs): boolean|nil
 ---@field OnItemUseRequest fun(self: ObjectScript, args: wxl.ItemUseArgs): boolean|nil
+---@field OnSpellChannelStart fun(self: ObjectScript, args: wxl.SpellProgressArgs)
+---@field OnSpellChannelUpdate fun(self: ObjectScript, args: wxl.SpellProgressArgs)
+---@field OnSpellChannelStop fun(self: ObjectScript, args: wxl.SpellProgressArgs)
+---@field OnSpellCastResume fun(self: ObjectScript, args: wxl.SpellProgressArgs)
+---@field OnSpellCastDelayed fun(self: ObjectScript, args: wxl.SpellDelayArgs)
+---@field OnSpellCooldown fun(self: ObjectScript, args: wxl.SpellCooldownArgs)
+---@field OnSpellCooldownChanged fun(self: ObjectScript, args: wxl.SpellCooldownChangeArgs)
+---@field OnSpellCastCancel fun(self: ObjectScript, args: wxl.SpellCancelArgs)
 ObjectScript = {}
 
 ---@class AssetScript
@@ -234,7 +331,15 @@ NetScript = {}
 ---@field OnScriptError fun(self: LuaScript, args: wxl.ScriptErrorArgs)
 LuaScript = {}
 
----@alias wxl.Family "WorldScript"|"RenderScript"|"ObjectScript"|"AssetScript"|"NetScript"|"LuaScript"
+---@class CombatScript
+---@field OnCombatAttackStart fun(self: CombatScript, args: wxl.CombatAttackArgs)
+---@field OnCombatAttackStop fun(self: CombatScript, args: wxl.CombatAttackArgs)
+---@field OnCombatDamage fun(self: CombatScript, args: wxl.CombatDamageArgs)
+---@field OnCombatHeal fun(self: CombatScript, args: wxl.CombatHealArgs)
+---@field OnCombatMiss fun(self: CombatScript, args: wxl.CombatMissArgs)
+CombatScript = {}
+
+---@alias wxl.Family "WorldScript"|"RenderScript"|"ObjectScript"|"AssetScript"|"NetScript"|"LuaScript"|"CombatScript"
 
 ---Calls `handler(args)` whenever the event is raised. Returns the handler's id.
 ---@overload fun(family: "WorldScript", method: "OnUpdate", handler: fun(args: wxl.UpdateArgs)): integer
@@ -279,6 +384,19 @@ LuaScript = {}
 ---@overload fun(family: "ObjectScript", method: "OnItemUseRequest", handler: fun(args: wxl.ItemUseArgs)): integer
 ---@overload fun(family: "LuaScript", method: "OnUiEvent", handler: fun(args: wxl.UiEventArgs)): integer
 ---@overload fun(family: "LuaScript", method: "OnScriptError", handler: fun(args: wxl.ScriptErrorArgs)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellChannelStart", handler: fun(args: wxl.SpellProgressArgs)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellChannelUpdate", handler: fun(args: wxl.SpellProgressArgs)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellChannelStop", handler: fun(args: wxl.SpellProgressArgs)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellCastResume", handler: fun(args: wxl.SpellProgressArgs)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellCastDelayed", handler: fun(args: wxl.SpellDelayArgs)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellCooldown", handler: fun(args: wxl.SpellCooldownArgs)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellCooldownChanged", handler: fun(args: wxl.SpellCooldownChangeArgs)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellCastCancel", handler: fun(args: wxl.SpellCancelArgs)): integer
+---@overload fun(family: "CombatScript", method: "OnCombatAttackStart", handler: fun(args: wxl.CombatAttackArgs)): integer
+---@overload fun(family: "CombatScript", method: "OnCombatAttackStop", handler: fun(args: wxl.CombatAttackArgs)): integer
+---@overload fun(family: "CombatScript", method: "OnCombatDamage", handler: fun(args: wxl.CombatDamageArgs)): integer
+---@overload fun(family: "CombatScript", method: "OnCombatHeal", handler: fun(args: wxl.CombatHealArgs)): integer
+---@overload fun(family: "CombatScript", method: "OnCombatMiss", handler: fun(args: wxl.CombatMissArgs)): integer
 ---@param family wxl.Family
 ---@param method string
 ---@param handler function
