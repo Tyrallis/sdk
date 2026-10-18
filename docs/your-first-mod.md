@@ -668,11 +668,10 @@ When you need more than that, wait for the stage that brings it up:
 | `OnUnload` | you are being removed |
 
 > ⚠️ A runtime reports the stages it can recognise and no others. Today both of them report
-> `OnLoad`, `OnStorageReady`, `OnScriptReady` and `OnReady`; neither reports
-> `OnGraphicsReady`, `OnShutdown` or `OnUnload`. An override that is never called is not an
-> error -- it is that runtime saying it cannot tell you. Scout's one `OnReady` override only
-> writes a line in the log, so nothing it does depends on a stage. Write your mod the same way
-> and it will work everywhere.
+> every stage above except `OnGraphicsReady`, which neither can honestly answer for. An
+> override that is never called is not an error -- it is that runtime saying it cannot tell
+> you. Write your mod so that nothing it does depends on a stage it has not been given, and
+> it will work everywhere.
 
 And the declaration, once, in one file:
 
