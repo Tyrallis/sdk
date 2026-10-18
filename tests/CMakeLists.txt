@@ -12,6 +12,18 @@ endif()
 
 add_test(NAME contract COMMAND wxl-contract)
 
+# The field table against the args structs it describes.
+add_executable(wxl-reflect reflect.cpp)
+target_link_libraries(wxl-reflect PRIVATE wxl::sdk)
+
+if(MSVC)
+    target_compile_options(wxl-reflect PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(wxl-reflect PRIVATE -Wall -Wextra)
+endif()
+
+add_test(NAME reflect COMMAND wxl-reflect)
+
 # The shared runtime scaffolding, against a binding backed by a table instead of a client.
 add_executable(wxl-runtime-tests runtime.cpp)
 target_link_libraries(wxl-runtime-tests PRIVATE wxl::runtime)

@@ -160,6 +160,8 @@ include/wxl/
     abi.h          the rules of the boundary: types, versioning, export
     events.def     the event table -- the single source of ids, names and args
     events.h       the event enum and the argument structs
+    fields.def     every member of every argument struct, with what it carries
+    reflect.hpp    the events and their members as data, for a runtime that is not C++
     host.h         what a runtime offers a mod
     mod.h          what a mod exposes to a runtime
     expected.hpp   Expected<T>: a value or the wxl_result that stood in for it

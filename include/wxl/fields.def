@@ -1,0 +1,149 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
+//
+// The field table: every member of every args struct of events.h, in declaration order, with
+// what it carries. A runtime that hands events to something other than C -- a script VM, a log,
+// a recorder -- reads an args struct through these rows instead of a binding written per event.
+//
+//   WXL_FIELD(args, member, kind)              a value, read as it is
+//   WXL_FIELD_BYTES(args, member, size)        `const void*` to `size` bytes, valid for the call
+//   WXL_FIELD_ANSWER(args, member)             `wxl_bool*` a handler writes WXL_TRUE through
+//   WXL_FIELD_BUFFER(args, member, capacity)   `char*` a handler writes a NUL-terminated string
+//                                              into, at most `capacity` bytes with the terminator
+//
+// Columns:
+//
+//   args    the struct, as events.def names it
+//   member  the member's name in that struct
+//   kind    what the value means, not only its C type:
+//             u32 i32 u64 i64 f32   the integer or float of that width
+//             bool                  a wxl_bool
+//             handle                a wxl_handle: a client object, through wxl.object
+//             guid                  a wxl_guid: the server's id for an object
+//             vec3                  a wxl_vec3
+//             str                   a wxl_str, valid for the call
+//             ptr                   an address only native code can use; never dereferenced
+//   size, capacity   the member of the same struct holding the length
+//
+// Every member is listed, so a struct is fully described: the SDK's contract test rebuilds each
+// struct's layout from these rows and fails when a member is missing, out of order or of another
+// type than its kind. A struct added to events.h gets its rows here in the same change.
+//
+// Include with WXL_FIELD defined. The other shapes default to WXL_FIELD with their own kind --
+// bytes, answer, buffer -- for a consumer that only wants the members.
+
+#ifndef WXL_FIELD
+#error "define WXL_FIELD(args, member, kind) before including fields.def"
+#endif
+
+#ifndef WXL_FIELD_BYTES
+    #define WXL_FIELD_BYTES(args, member, size) WXL_FIELD(args, member, bytes)
+    #define WXL_FIELD_BYTES_DEFAULTED
+#endif
+#ifndef WXL_FIELD_ANSWER
+    #define WXL_FIELD_ANSWER(args, member) WXL_FIELD(args, member, answer)
+    #define WXL_FIELD_ANSWER_DEFAULTED
+#endif
+#ifndef WXL_FIELD_BUFFER
+    #define WXL_FIELD_BUFFER(args, member, capacity) WXL_FIELD(args, member, buffer)
+    #define WXL_FIELD_BUFFER_DEFAULTED
+#endif
+
+WXL_FIELD(wxl_frame_args, index, u64)
+WXL_FIELD(wxl_frame_args, delta, f32)
+
+WXL_FIELD(wxl_update_args, delta, f32)
+
+WXL_FIELD(wxl_world_args, map_id, u32)
+WXL_FIELD(wxl_world_args, position, vec3)
+
+WXL_FIELD(wxl_world_click_args, point, vec3)
+WXL_FIELD(wxl_world_click_args, object, handle)
+WXL_FIELD(wxl_world_click_args, button, u32)
+
+WXL_FIELD(wxl_input_args, message, u32)
+WXL_FIELD(wxl_input_args, wparam, u64)
+WXL_FIELD(wxl_input_args, lparam, i64)
+WXL_FIELD_ANSWER(wxl_input_args, handled)
+
+WXL_FIELD(wxl_sound_args, sound_id, u32)
+WXL_FIELD(wxl_sound_args, path, str)
+WXL_FIELD_ANSWER(wxl_sound_args, suppressed)
+
+WXL_FIELD(wxl_swapchain_args, width, u32)
+WXL_FIELD(wxl_swapchain_args, height, u32)
+
+WXL_FIELD(wxl_object_args, object, handle)
+WXL_FIELD(wxl_object_args, guid, guid)
+WXL_FIELD(wxl_object_args, type, u32)
+
+WXL_FIELD(wxl_target_args, previous, handle)
+WXL_FIELD(wxl_target_args, current, handle)
+
+WXL_FIELD(wxl_doodad_args, doodad, handle)
+WXL_FIELD(wxl_doodad_args, path, str)
+WXL_FIELD(wxl_doodad_args, position, vec3)
+
+WXL_FIELD(wxl_equipment_args, unit, handle)
+WXL_FIELD(wxl_equipment_args, slot, u32)
+WXL_FIELD(wxl_equipment_args, item_id, u32)
+
+WXL_FIELD(wxl_model_load_args, path, str)
+WXL_FIELD_BYTES(wxl_model_load_args, data, size)
+WXL_FIELD(wxl_model_load_args, size, u32)
+WXL_FIELD(wxl_model_load_args, replacement, ptr)
+WXL_FIELD(wxl_model_load_args, replacement_size, ptr)
+
+WXL_FIELD(wxl_texture_load_args, path, str)
+
+WXL_FIELD(wxl_terrain_chunk_args, map_id, u32)
+WXL_FIELD(wxl_terrain_chunk_args, tile_x, i32)
+WXL_FIELD(wxl_terrain_chunk_args, tile_y, i32)
+WXL_FIELD(wxl_terrain_chunk_args, chunk_x, i32)
+WXL_FIELD(wxl_terrain_chunk_args, chunk_y, i32)
+
+WXL_FIELD(wxl_map_object_args, path, str)
+WXL_FIELD_BYTES(wxl_map_object_args, data, size)
+WXL_FIELD(wxl_map_object_args, size, u32)
+
+WXL_FIELD(wxl_file_open_args, path, str)
+WXL_FIELD_BUFFER(wxl_file_open_args, redirect, redirect_capacity)
+WXL_FIELD(wxl_file_open_args, redirect_capacity, u32)
+
+WXL_FIELD(wxl_file_opened_args, path, str)
+WXL_FIELD(wxl_file_opened_args, found, bool)
+WXL_FIELD(wxl_file_opened_args, size, u32)
+
+WXL_FIELD(wxl_client_db_args, name, str)
+WXL_FIELD(wxl_client_db_args, records, ptr)
+WXL_FIELD(wxl_client_db_args, record_count, u32)
+WXL_FIELD(wxl_client_db_args, record_size, u32)
+
+WXL_FIELD(wxl_message_args, opcode, u32)
+WXL_FIELD_BYTES(wxl_message_args, data, size)
+WXL_FIELD(wxl_message_args, size, u32)
+WXL_FIELD_ANSWER(wxl_message_args, suppressed)
+
+WXL_FIELD(wxl_connection_args, address, str)
+
+WXL_FIELD(wxl_script_vm_args, context, u32)
+WXL_FIELD(wxl_script_vm_args, native_state, ptr)
+
+WXL_FIELD(wxl_unit_args, unit, handle)
+
+WXL_FIELD(wxl_unit_aura_args, unit, handle)
+WXL_FIELD(wxl_unit_aura_args, spell_id, u32)
+WXL_FIELD(wxl_unit_aura_args, removed, bool)
+
+#ifdef WXL_FIELD_BYTES_DEFAULTED
+    #undef WXL_FIELD_BYTES
+    #undef WXL_FIELD_BYTES_DEFAULTED
+#endif
+#ifdef WXL_FIELD_ANSWER_DEFAULTED
+    #undef WXL_FIELD_ANSWER
+    #undef WXL_FIELD_ANSWER_DEFAULTED
+#endif
+#ifdef WXL_FIELD_BUFFER_DEFAULTED
+    #undef WXL_FIELD_BUFFER
+    #undef WXL_FIELD_BUFFER_DEFAULTED
+#endif
