@@ -135,6 +135,50 @@ WXL_FIELD(wxl_unit_aura_args, unit, handle)
 WXL_FIELD(wxl_unit_aura_args, spell_id, u32)
 WXL_FIELD(wxl_unit_aura_args, removed, bool)
 
+WXL_FIELD(wxl_spell_cast_args, caster, handle)
+WXL_FIELD(wxl_spell_cast_args, caster_guid, guid)
+WXL_FIELD(wxl_spell_cast_args, target, handle)
+WXL_FIELD(wxl_spell_cast_args, target_guid, guid)
+WXL_FIELD(wxl_spell_cast_args, cast_item, guid)
+WXL_FIELD(wxl_spell_cast_args, spell_id, u32)
+WXL_FIELD(wxl_spell_cast_args, cast_count, u32)
+WXL_FIELD(wxl_spell_cast_args, cast_flags, u32)
+WXL_FIELD(wxl_spell_cast_args, target_flags, u32)
+WXL_FIELD(wxl_spell_cast_args, cast_time, u32)
+WXL_FIELD(wxl_spell_cast_args, hit_count, u32)
+WXL_FIELD(wxl_spell_cast_args, miss_count, u32)
+
+WXL_FIELD(wxl_spell_fail_args, caster, handle)
+WXL_FIELD(wxl_spell_fail_args, caster_guid, guid)
+WXL_FIELD(wxl_spell_fail_args, spell_id, u32)
+WXL_FIELD(wxl_spell_fail_args, cast_count, u32)
+WXL_FIELD(wxl_spell_fail_args, reason, u32)
+WXL_FIELD(wxl_spell_fail_args, custom_error, i32)
+WXL_FIELD(wxl_spell_fail_args, custom_arg, i32)
+
+WXL_FIELD(wxl_spell_request_args, caster, handle)
+WXL_FIELD(wxl_spell_request_args, spell_id, u32)
+WXL_FIELD(wxl_spell_request_args, item, handle)
+WXL_FIELD(wxl_spell_request_args, target_guid, guid)
+WXL_FIELD(wxl_spell_request_args, confirmed, bool)
+WXL_FIELD_ANSWER(wxl_spell_request_args, refused)
+
+WXL_FIELD(wxl_item_use_args, item, handle)
+WXL_FIELD(wxl_item_use_args, item_guid, guid)
+WXL_FIELD(wxl_item_use_args, target_guid, guid)
+WXL_FIELD(wxl_item_use_args, confirmed, bool)
+WXL_FIELD_ANSWER(wxl_item_use_args, refused)
+
+WXL_FIELD(wxl_ui_event_args, index, u32)
+WXL_FIELD(wxl_ui_event_args, name, str)
+WXL_FIELD(wxl_ui_event_args, format, str)
+WXL_FIELD_BYTES(wxl_ui_event_args, values, values_size)
+WXL_FIELD(wxl_ui_event_args, values_size, u32)
+WXL_FIELD(wxl_ui_event_args, value_count, u32)
+
+WXL_FIELD(wxl_script_error_args, context, u32)
+WXL_FIELD(wxl_script_error_args, message, str)
+
 #ifdef WXL_FIELD_BYTES_DEFAULTED
     #undef WXL_FIELD_BYTES
     #undef WXL_FIELD_BYTES_DEFAULTED

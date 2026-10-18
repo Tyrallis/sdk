@@ -161,6 +161,29 @@ WXL_EVENT(Object, UnitDeath,       32, wxl_unit_args)
 /** An aura was applied to or removed from a unit. */
 WXL_EVENT(Object, UnitAuraChanged, 33, wxl_unit_aura_args)
 
+// Casts, as the server tells the client about them (any caster in view) and as the local player
+// asks for them. The two requests carry an answer a handler writes to refuse the request.
+
+/** A unit in view started a cast: the server's SMSG_SPELL_START, before the client parses it. */
+WXL_EVENT(Object, SpellCastStart,       34, wxl_spell_cast_args)
+/** A cast went off: SMSG_SPELL_GO, with the hits and misses counted. */
+WXL_EVENT(Object, SpellCastGo,          35, wxl_spell_cast_args)
+/** A cast of the local player's failed, with the client's reason; the client's own refusals too. */
+WXL_EVENT(Object, SpellCastFailed,      36, wxl_spell_fail_args)
+/** A cast in progress was stopped by the server: SMSG_SPELL_FAILURE, for any caster in view. */
+WXL_EVENT(Object, SpellCastInterrupted, 37, wxl_spell_fail_args)
+/** The local player asks to cast a spell. A handler may refuse it. */
+WXL_EVENT(Object, SpellCastRequest,     38, wxl_spell_request_args)
+/** The local player asks to use an item. A handler may refuse it. */
+WXL_EVENT(Object, ItemUseRequest,       39, wxl_item_use_args)
+
+// --- Lua, continued ----------------------------------------------------------------------
+
+/** The client fires an event to its interface, with the values it passes along. */
+WXL_EVENT(Lua, UiEvent,     40, wxl_ui_event_args)
+/** The interface's Lua raised an error, before the client's error handler sees it. */
+WXL_EVENT(Lua, ScriptError, 41, wxl_script_error_args)
+
 // Give back whatever was defaulted above, so the file can be included again right after with a
 // different selector. What the consumer defined itself is left alone: undefining it here would
 // break the consumer that includes the table twice on purpose.

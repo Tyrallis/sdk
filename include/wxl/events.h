@@ -242,6 +242,107 @@ typedef struct wxl_unit_aura_args
     wxl_bool   removed; ///< WXL_TRUE when the aura left, WXL_FALSE when it was applied
 } wxl_unit_aura_args;
 
+/**
+ * @brief A cast a unit in view started (SpellCastStart) or released (SpellCastGo).
+ *
+ * Read off the server's message before the client parses it. A handle resolves only for an
+ * object the client holds; the guids are what the server sent whether or not it does.
+ */
+typedef struct wxl_spell_cast_args
+{
+    wxl_handle caster;       ///< WXL_HANDLE_NONE when the caster is not in view
+    wxl_guid   caster_guid;
+    wxl_handle target;       ///< the object target; WXL_HANDLE_NONE when none, or not in view
+    wxl_guid   target_guid;  ///< 0 when the cast has no object target
+    wxl_guid   cast_item;    ///< the item the cast came from, 0 when none
+    uint32_t   spell_id;
+    uint32_t   cast_count;   ///< the caster's count of the cast, as the server echoes it
+    uint32_t   cast_flags;   ///< the server's cast flags
+    uint32_t   target_flags; ///< the server's target flags
+    uint32_t   cast_time;    ///< milliseconds; SpellCastStart only, 0 on SpellCastGo
+    uint32_t   hit_count;    ///< units the cast hit; SpellCastGo only, 0 on SpellCastStart
+    uint32_t   miss_count;   ///< units it missed; SpellCastGo only, 0 on SpellCastStart
+} wxl_spell_cast_args;
+
+/**
+ * @brief A cast that did not go through.
+ *
+ * SpellCastFailed is the local player's own cast, refused by the server (SMSG_CAST_FAILED) or
+ * by the client before it asked; SpellCastInterrupted is a cast in progress that the server
+ * stopped (SMSG_SPELL_FAILURE), for any caster in view. @ref reason is the client's
+ * SPELL_FAILED_* code in both.
+ */
+typedef struct wxl_spell_fail_args
+{
+    wxl_handle caster;       ///< WXL_HANDLE_NONE when the caster is not in view
+    wxl_guid   caster_guid;
+    uint32_t   spell_id;
+    uint32_t   cast_count;
+    uint32_t   reason;
+    int32_t    custom_error; ///< the error sent with SPELL_FAILED_CUSTOM_ERROR, -1 for none
+    int32_t    custom_arg;   ///< its argument, -1 for none
+} wxl_spell_fail_args;
+
+/**
+ * @brief The local player asking to cast a spell, before the client checks or sends anything.
+ *
+ * Writing WXL_TRUE through @ref refused answers the client as a cast it could not make, and
+ * nothing is sent. Raised at every ask, including the client's own second ask once a target
+ * has been picked or a dialog confirmed, which @ref confirmed tells apart.
+ */
+typedef struct wxl_spell_request_args
+{
+    wxl_handle caster;      ///< the player, or the pet or charmed unit it casts through
+    uint32_t   spell_id;
+    wxl_handle item;        ///< the item the cast comes from, WXL_HANDLE_NONE for none
+    wxl_guid   target_guid; ///< 0 when the client is to pick the target
+    wxl_bool   confirmed;   ///< WXL_TRUE on the client's own second ask
+    wxl_bool*  refused;     ///< write WXL_TRUE to keep the client from casting
+} wxl_spell_request_args;
+
+/**
+ * @brief The local player asking to use an item, before the client checks or sends anything.
+ *
+ * Writing WXL_TRUE through @ref refused answers the client as an item it could not use.
+ */
+typedef struct wxl_item_use_args
+{
+    wxl_handle item;
+    wxl_guid   item_guid;
+    wxl_guid   target_guid; ///< 0 when the use has no target
+    wxl_bool   confirmed;   ///< WXL_TRUE on the client's own second ask, after a dialog
+    wxl_bool*  refused;     ///< write WXL_TRUE to keep the client from using it
+} wxl_item_use_args;
+
+/**
+ * @brief An event the client fires to its interface, with the arguments it passes along.
+ *
+ * The client formats its arguments from a C format string ("%d%s", ...) and pushes each as a
+ * Lua value. They cross here already rendered, because a va_list has no layout a mod or a
+ * script runtime could read: @ref values holds one entry per argument, back to back, each a
+ * kind byte followed by the text and a NUL. The kind is the format letter the client used --
+ * 'd' and 'u' an integer in decimal, 'f' a double printed with %.17g, 'b' a boolean as 1 or 0,
+ * 's' a string as it is -- or 'n' for a string argument the client passed as null, which it
+ * pushes as nil. Integers and doubles round-trip exactly; a runtime that wants typed values
+ * parses them back by kind. Valid for the call only.
+ */
+typedef struct wxl_ui_event_args
+{
+    uint32_t    index;       ///< the event's index in the client's table
+    wxl_str     name;        ///< the event's name, "PLAYER_ENTERING_WORLD"
+    wxl_str     format;      ///< the client's format string; empty for an event without arguments
+    const void* values;      ///< the entries described above, NULL when there are none
+    uint32_t    values_size; ///< bytes in @ref values
+    uint32_t    value_count; ///< entries in @ref values
+} wxl_ui_event_args;
+
+/// An error the interface's Lua raised, as the VM reports it, before the client's handler sees it.
+typedef struct wxl_script_error_args
+{
+    uint32_t context; ///< a wxl_script_context value: which interface raised it
+    wxl_str  message; ///< the error value as text; "UNKNOWN ERROR" when it is not text
+} wxl_script_error_args;
+
 // --- The enum ------------------------------------------------------------------------------
 
 /// Event ids. The numbers are the ABI; see events.def.
