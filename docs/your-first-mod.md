@@ -127,7 +127,7 @@ target, a link line or an install rule.
   "id": "wxl.scout",
   "name": "Scout",
   "version": "1.0.0",
-  "abi": "0.2",
+  "abi": "0.3",
   "description": "Keeps a journal of what happens around you and hands it to the interface.",
   "binaries": {
     "win-x64": "bin/x64/scout.dll",
