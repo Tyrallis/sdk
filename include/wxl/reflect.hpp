@@ -77,21 +77,21 @@ namespace wxl::reflect
         constexpr Kind kind_buffer  = Kind::buffer;
 
         inline constexpr Field kFields[] = {
-#define WXL_FIELD(args, member, kind) \
+#define WXL_ARGS_FIELD(args, member, kind) \
     { #args, #member, uint32_t(offsetof(args, member)), detail::kind_##kind, nullptr, 0 },
-#define WXL_FIELD_BYTES(args, member, size)                                              \
+#define WXL_ARGS_BYTES(args, member, size)                                              \
     { #args, #member, uint32_t(offsetof(args, member)), Kind::bytes, #size,              \
       uint32_t(offsetof(args, size)) },
-#define WXL_FIELD_ANSWER(args, member) \
+#define WXL_ARGS_ANSWER(args, member) \
     { #args, #member, uint32_t(offsetof(args, member)), Kind::answer, nullptr, 0 },
-#define WXL_FIELD_BUFFER(args, member, capacity)                                         \
+#define WXL_ARGS_BUFFER(args, member, capacity)                                         \
     { #args, #member, uint32_t(offsetof(args, member)), Kind::buffer, #capacity,         \
       uint32_t(offsetof(args, capacity)) },
 #include "wxl/fields.def"
-#undef WXL_FIELD_BUFFER
-#undef WXL_FIELD_ANSWER
-#undef WXL_FIELD_BYTES
-#undef WXL_FIELD
+#undef WXL_ARGS_BUFFER
+#undef WXL_ARGS_ANSWER
+#undef WXL_ARGS_BYTES
+#undef WXL_ARGS_FIELD
         };
 
         constexpr bool Same(const char* a, const char* b)

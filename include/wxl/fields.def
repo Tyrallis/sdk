@@ -1,193 +1,369 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 WarcraftXL
 //
-// The field table: every member of every args struct of events.h, in declaration order, with
-// what it carries. A runtime that hands events to something other than C -- a script VM, a log,
-// a recorder -- reads an args struct through these rows instead of a binding written per event.
+// The args table: every struct an event of events.def carries, member by member, with what each
+// member holds. events.h declares the structs from these rows, and a runtime that hands events to
+// something other than C -- a script VM, a log, a recorder -- reads them through the same rows
+// (wxl/reflect.hpp), so the struct and its description are one text.
 //
-//   WXL_FIELD(args, member, kind)              a value, read as it is
-//   WXL_FIELD_BYTES(args, member, size)        `const void*` to `size` bytes, valid for the call
-//   WXL_FIELD_ANSWER(args, member)             `wxl_bool*` a handler writes WXL_TRUE through
-//   WXL_FIELD_BUFFER(args, member, capacity)   `char*` a handler writes a NUL-terminated string
-//                                              into, at most `capacity` bytes with the terminator
+//   WXL_ARGS(args)                            opens a struct
+//   WXL_ARGS_FIELD(args, member, kind)        a value, read as it is
+//   WXL_ARGS_BYTES(args, member, size)        `const void*` to `size` bytes, valid for the call
+//   WXL_ARGS_ANSWER(args, member)             `wxl_bool*` a handler writes WXL_TRUE through
+//   WXL_ARGS_BUFFER(args, member, capacity)   `char*` a handler writes a NUL-terminated string
+//                                             into, at most `capacity` bytes with the terminator
+//   WXL_ARGS_PTR(args, member, type)          an address of C type `type`, for native code only
+//   WXL_ARGS_END(args)                        closes it
 //
 // Columns:
 //
-//   args    the struct, as events.def names it
-//   member  the member's name in that struct
-//   kind    what the value means, not only its C type:
-//             u32 i32 u64 i64 f32   the integer or float of that width
-//             bool                  a wxl_bool
-//             handle                a wxl_handle: a client object, through wxl.object
-//             guid                  a wxl_guid: the server's id for an object
-//             vec3                  a wxl_vec3
-//             str                   a wxl_str, valid for the call
-//             ptr                   an address only native code can use; never dereferenced
+//   args    the struct's name, as events.def names it
+//   member  the member's name
+//   kind    what the value means, which also gives its C type:
+//             u32 i32 u64 i64 f32   uint32_t int32_t uint64_t int64_t float
+//             bool                  wxl_bool
+//             handle                wxl_handle: a client object, through wxl.object
+//             guid                  wxl_guid: the server's id for an object
+//             vec3                  wxl_vec3
+//             str                   wxl_str, valid for the call
 //   size, capacity   the member of the same struct holding the length
 //
-// Every member is listed, so a struct is fully described: the SDK's contract test rebuilds each
-// struct's layout from these rows and fails when a member is missing, out of order or of another
-// type than its kind. A struct added to events.h gets its rows here in the same change.
+// The rows of a struct are its members in declaration order, so a member is appended at the end
+// of its struct and never moved: the struct is part of the ABI. A new struct gets its block here,
+// the event that carries it its row in events.def.
 //
-// Include with WXL_FIELD defined. The other shapes default to WXL_FIELD with their own kind --
-// bytes, answer, buffer -- for a consumer that only wants the members.
+// Include with WXL_ARGS_FIELD defined. WXL_ARGS and WXL_ARGS_END default to nothing; the other
+// shapes default to WXL_ARGS_FIELD with their own kind -- bytes, answer, buffer, ptr -- for a
+// consumer that only wants the members.
 
-#ifndef WXL_FIELD
-#error "define WXL_FIELD(args, member, kind) before including fields.def"
+#ifndef WXL_ARGS_FIELD
+#error "define WXL_ARGS_FIELD(args, member, kind) before including fields.def"
 #endif
 
-#ifndef WXL_FIELD_BYTES
-    #define WXL_FIELD_BYTES(args, member, size) WXL_FIELD(args, member, bytes)
-    #define WXL_FIELD_BYTES_DEFAULTED
+#ifndef WXL_ARGS_BYTES
+    #define WXL_ARGS_BYTES(args, member, size) WXL_ARGS_FIELD(args, member, bytes)
+    #define WXL_ARGS_BYTES_DEFAULTED
 #endif
-#ifndef WXL_FIELD_ANSWER
-    #define WXL_FIELD_ANSWER(args, member) WXL_FIELD(args, member, answer)
-    #define WXL_FIELD_ANSWER_DEFAULTED
+#ifndef WXL_ARGS_ANSWER
+    #define WXL_ARGS_ANSWER(args, member) WXL_ARGS_FIELD(args, member, answer)
+    #define WXL_ARGS_ANSWER_DEFAULTED
 #endif
-#ifndef WXL_FIELD_BUFFER
-    #define WXL_FIELD_BUFFER(args, member, capacity) WXL_FIELD(args, member, buffer)
-    #define WXL_FIELD_BUFFER_DEFAULTED
+#ifndef WXL_ARGS_BUFFER
+    #define WXL_ARGS_BUFFER(args, member, capacity) WXL_ARGS_FIELD(args, member, buffer)
+    #define WXL_ARGS_BUFFER_DEFAULTED
+#endif
+#ifndef WXL_ARGS_PTR
+    #define WXL_ARGS_PTR(args, member, type) WXL_ARGS_FIELD(args, member, ptr)
+    #define WXL_ARGS_PTR_DEFAULTED
+#endif
+#ifndef WXL_ARGS
+    #define WXL_ARGS(args)
+    #define WXL_ARGS_DEFAULTED
+#endif
+#ifndef WXL_ARGS_END
+    #define WXL_ARGS_END(args)
+    #define WXL_ARGS_END_DEFAULTED
 #endif
 
-WXL_FIELD(wxl_frame_args, index, u64)
-WXL_FIELD(wxl_frame_args, delta, f32)
+/// A frame's identity and length. Shared by every slot in the frame.
+WXL_ARGS(wxl_frame_args)
+WXL_ARGS_FIELD(wxl_frame_args, index, u64) ///< monotonic frame counter since startup
+WXL_ARGS_FIELD(wxl_frame_args, delta, f32) ///< seconds since the previous frame
+WXL_ARGS_END(wxl_frame_args)
 
-WXL_FIELD(wxl_update_args, delta, f32)
+/// The logic tick.
+WXL_ARGS(wxl_update_args)
+WXL_ARGS_FIELD(wxl_update_args, delta, f32) ///< seconds since the previous tick
+WXL_ARGS_END(wxl_update_args)
 
-WXL_FIELD(wxl_world_args, map_id, u32)
-WXL_FIELD(wxl_world_args, position, vec3)
+/// Entering or leaving a map.
+WXL_ARGS(wxl_world_args)
+WXL_ARGS_FIELD(wxl_world_args, map_id, u32)
+WXL_ARGS_FIELD(wxl_world_args, position, vec3) ///< where the player is, or was
+WXL_ARGS_END(wxl_world_args)
 
-WXL_FIELD(wxl_world_click_args, point, vec3)
-WXL_FIELD(wxl_world_click_args, object, handle)
-WXL_FIELD(wxl_world_click_args, button, u32)
+/// A click that landed in the world.
+WXL_ARGS(wxl_world_click_args)
+WXL_ARGS_FIELD(wxl_world_click_args, point, vec3)    ///< where the ray met the world
+WXL_ARGS_FIELD(wxl_world_click_args, object, handle) ///< what was hit, or WXL_HANDLE_NONE for bare ground
+WXL_ARGS_FIELD(wxl_world_click_args, button, u32)    ///< 0 left, 1 right, 2 middle
+WXL_ARGS_END(wxl_world_click_args)
 
-WXL_FIELD(wxl_input_args, message, u32)
-WXL_FIELD(wxl_input_args, wparam, u64)
-WXL_FIELD(wxl_input_args, lparam, i64)
-WXL_FIELD_ANSWER(wxl_input_args, handled)
+/// A platform input message, before the client sees it.
+WXL_ARGS(wxl_input_args)
+WXL_ARGS_FIELD(wxl_input_args, message, u32) ///< platform message id
+WXL_ARGS_FIELD(wxl_input_args, wparam, u64)
+WXL_ARGS_FIELD(wxl_input_args, lparam, i64)
+WXL_ARGS_ANSWER(wxl_input_args, handled)     ///< write WXL_TRUE to keep the client from seeing it
+WXL_ARGS_END(wxl_input_args)
 
-WXL_FIELD(wxl_sound_args, sound_id, u32)
-WXL_FIELD(wxl_sound_args, path, str)
-WXL_FIELD_ANSWER(wxl_sound_args, suppressed)
+/// A sound about to play.
+WXL_ARGS(wxl_sound_args)
+WXL_ARGS_FIELD(wxl_sound_args, sound_id, u32) ///< client sound id, 0 when the sound was named by path
+WXL_ARGS_FIELD(wxl_sound_args, path, str)     ///< source path, empty when the sound came from an id
+WXL_ARGS_ANSWER(wxl_sound_args, suppressed)   ///< write WXL_TRUE to drop it
+WXL_ARGS_END(wxl_sound_args)
 
-WXL_FIELD(wxl_swapchain_args, width, u32)
-WXL_FIELD(wxl_swapchain_args, height, u32)
+/// Swapchain resources going away and coming back.
+WXL_ARGS(wxl_swapchain_args)
+WXL_ARGS_FIELD(wxl_swapchain_args, width, u32)
+WXL_ARGS_FIELD(wxl_swapchain_args, height, u32)
+WXL_ARGS_END(wxl_swapchain_args)
 
-WXL_FIELD(wxl_object_args, object, handle)
-WXL_FIELD(wxl_object_args, guid, guid)
-WXL_FIELD(wxl_object_args, type, u32)
+/// An object appearing, changing or leaving.
+WXL_ARGS(wxl_object_args)
+WXL_ARGS_FIELD(wxl_object_args, object, handle)
+WXL_ARGS_FIELD(wxl_object_args, guid, guid)
+WXL_ARGS_FIELD(wxl_object_args, type, u32)      ///< a wxl_object_type value
+WXL_ARGS_END(wxl_object_args)
 
-WXL_FIELD(wxl_target_args, previous, handle)
-WXL_FIELD(wxl_target_args, current, handle)
+/// The player's target moving from one object to another.
+WXL_ARGS(wxl_target_args)
+WXL_ARGS_FIELD(wxl_target_args, previous, handle) ///< WXL_HANDLE_NONE when nothing was targeted
+WXL_ARGS_FIELD(wxl_target_args, current, handle)  ///< WXL_HANDLE_NONE when the target was cleared
+WXL_ARGS_END(wxl_target_args)
 
-WXL_FIELD(wxl_doodad_args, doodad, handle)
-WXL_FIELD(wxl_doodad_args, path, str)
-WXL_FIELD(wxl_doodad_args, position, vec3)
+/// A doodad placed by the map.
+WXL_ARGS(wxl_doodad_args)
+WXL_ARGS_FIELD(wxl_doodad_args, doodad, handle)
+WXL_ARGS_FIELD(wxl_doodad_args, path, str)      ///< the model it was built from
+WXL_ARGS_FIELD(wxl_doodad_args, position, vec3)
+WXL_ARGS_END(wxl_doodad_args)
 
-WXL_FIELD(wxl_equipment_args, unit, handle)
-WXL_FIELD(wxl_equipment_args, slot, u32)
-WXL_FIELD(wxl_equipment_args, item_id, u32)
+/// A unit's visible equipment changing.
+WXL_ARGS(wxl_equipment_args)
+WXL_ARGS_FIELD(wxl_equipment_args, unit, handle)
+WXL_ARGS_FIELD(wxl_equipment_args, slot, u32)
+WXL_ARGS_FIELD(wxl_equipment_args, item_id, u32) ///< 0 when the slot was cleared
+WXL_ARGS_END(wxl_equipment_args)
 
-WXL_FIELD(wxl_model_load_args, path, str)
-WXL_FIELD_BYTES(wxl_model_load_args, data, size)
-WXL_FIELD(wxl_model_load_args, size, u32)
-WXL_FIELD(wxl_model_load_args, replacement, ptr)
-WXL_FIELD(wxl_model_load_args, replacement_size, ptr)
+/// A model's bytes, before the parse.
+WXL_ARGS(wxl_model_load_args)
+WXL_ARGS_FIELD(wxl_model_load_args, path, str)
+WXL_ARGS_BYTES(wxl_model_load_args, data, size)                ///< the bytes as read; valid for the call only
+WXL_ARGS_FIELD(wxl_model_load_args, size, u32)
+WXL_ARGS_PTR(wxl_model_load_args, replacement, const void**)   ///< write a buffer here to parse it instead of @ref data
+WXL_ARGS_PTR(wxl_model_load_args, replacement_size, uint32_t*) ///< its length; the writer keeps it alive until the next load
+WXL_ARGS_END(wxl_model_load_args)
 
-WXL_FIELD(wxl_texture_load_args, path, str)
+/// A texture requested by name.
+WXL_ARGS(wxl_texture_load_args)
+WXL_ARGS_FIELD(wxl_texture_load_args, path, str)
+WXL_ARGS_END(wxl_texture_load_args)
 
-WXL_FIELD(wxl_terrain_chunk_args, map_id, u32)
-WXL_FIELD(wxl_terrain_chunk_args, tile_x, i32)
-WXL_FIELD(wxl_terrain_chunk_args, tile_y, i32)
-WXL_FIELD(wxl_terrain_chunk_args, chunk_x, i32)
-WXL_FIELD(wxl_terrain_chunk_args, chunk_y, i32)
+/// A terrain chunk being built.
+WXL_ARGS(wxl_terrain_chunk_args)
+WXL_ARGS_FIELD(wxl_terrain_chunk_args, map_id, u32)
+WXL_ARGS_FIELD(wxl_terrain_chunk_args, tile_x, i32)  ///< the tile the chunk belongs to
+WXL_ARGS_FIELD(wxl_terrain_chunk_args, tile_y, i32)  ///< the tile the chunk belongs to
+WXL_ARGS_FIELD(wxl_terrain_chunk_args, chunk_x, i32) ///< the chunk inside that tile
+WXL_ARGS_FIELD(wxl_terrain_chunk_args, chunk_y, i32) ///< the chunk inside that tile
+WXL_ARGS_END(wxl_terrain_chunk_args)
 
-WXL_FIELD(wxl_map_object_args, path, str)
-WXL_FIELD_BYTES(wxl_map_object_args, data, size)
-WXL_FIELD(wxl_map_object_args, size, u32)
+/// A map object's root, before its sub-chunks are walked.
+WXL_ARGS(wxl_map_object_args)
+WXL_ARGS_FIELD(wxl_map_object_args, path, str)
+WXL_ARGS_BYTES(wxl_map_object_args, data, size) ///< the root bytes; valid for the call only
+WXL_ARGS_FIELD(wxl_map_object_args, size, u32)
+WXL_ARGS_END(wxl_map_object_args)
 
-WXL_FIELD(wxl_file_open_args, path, str)
-WXL_FIELD_BUFFER(wxl_file_open_args, redirect, redirect_capacity)
-WXL_FIELD(wxl_file_open_args, redirect_capacity, u32)
+/**
+ * @brief A file about to be opened by name.
+ *
+ * Writing a NUL-terminated path into @ref redirect opens that instead. This is how a mod replaces
+ * an asset without touching an archive. The last handler to write wins, so a handler that cares
+ * reads @ref redirect first to see whether another already answered.
+ */
+WXL_ARGS(wxl_file_open_args)
+WXL_ARGS_FIELD(wxl_file_open_args, path, str)                    ///< what was asked for
+WXL_ARGS_BUFFER(wxl_file_open_args, redirect, redirect_capacity) ///< empty on entry; write a path here to answer with another file
+WXL_ARGS_FIELD(wxl_file_open_args, redirect_capacity, u32)       ///< bytes available in @ref redirect, terminator included
+WXL_ARGS_END(wxl_file_open_args)
 
-WXL_FIELD(wxl_file_opened_args, path, str)
-WXL_FIELD(wxl_file_opened_args, found, bool)
-WXL_FIELD(wxl_file_opened_args, size, u32)
+/// The result of an open.
+WXL_ARGS(wxl_file_opened_args)
+WXL_ARGS_FIELD(wxl_file_opened_args, path, str)   ///< the path actually opened, after any redirect
+WXL_ARGS_FIELD(wxl_file_opened_args, found, bool)
+WXL_ARGS_FIELD(wxl_file_opened_args, size, u32)   ///< bytes, 0 when not found
+WXL_ARGS_END(wxl_file_opened_args)
 
-WXL_FIELD(wxl_client_db_args, name, str)
-WXL_FIELD(wxl_client_db_args, records, ptr)
-WXL_FIELD(wxl_client_db_args, record_count, u32)
-WXL_FIELD(wxl_client_db_args, record_size, u32)
+/**
+ * @brief A client database that finished loading.
+ *
+ * The records are the file's own rows, a flat array of @ref record_size bytes each -- a file
+ * format, not a client structure, so reading them is portable. They stay valid until the database
+ * is unloaded.
+ */
+WXL_ARGS(wxl_client_db_args)
+WXL_ARGS_FIELD(wxl_client_db_args, name, str)          ///< the file it came from, e.g. "Spell.dbc"
+WXL_ARGS_PTR(wxl_client_db_args, records, const void*)
+WXL_ARGS_FIELD(wxl_client_db_args, record_count, u32)
+WXL_ARGS_FIELD(wxl_client_db_args, record_size, u32)
+WXL_ARGS_END(wxl_client_db_args)
 
-WXL_FIELD(wxl_message_args, opcode, u32)
-WXL_FIELD_BYTES(wxl_message_args, data, size)
-WXL_FIELD(wxl_message_args, size, u32)
-WXL_FIELD_ANSWER(wxl_message_args, suppressed)
+/**
+ * @brief A message crossing to or from the server.
+ *
+ * @ref data is the wire body, positioned after the opcode and before any client parsing. It is
+ * valid for the call only. Suppressing an incoming message hides it from the client entirely,
+ * which is how a mod serves an opcode the client does not know; suppressing an outgoing one stops
+ * it being sent.
+ */
+WXL_ARGS(wxl_message_args)
+WXL_ARGS_FIELD(wxl_message_args, opcode, u32)
+WXL_ARGS_BYTES(wxl_message_args, data, size)
+WXL_ARGS_FIELD(wxl_message_args, size, u32)
+WXL_ARGS_ANSWER(wxl_message_args, suppressed) ///< write WXL_TRUE to stop it going any further
+WXL_ARGS_END(wxl_message_args)
 
-WXL_FIELD(wxl_connection_args, address, str)
+/// The connection to the world server coming up or going away.
+WXL_ARGS(wxl_connection_args)
+WXL_ARGS_FIELD(wxl_connection_args, address, str) ///< what was connected to; empty when the runtime does not expose it
+WXL_ARGS_END(wxl_connection_args)
 
-WXL_FIELD(wxl_script_vm_args, context, u32)
-WXL_FIELD(wxl_script_vm_args, native_state, ptr)
+/**
+ * @brief A script context coming up or going down.
+ *
+ * Both contexts are created and destroyed more than once in a session, so anything registered on
+ * one has to be registered again on the next.
+ *
+ * @ref native_state is the VM's own state pointer, for a mod that wants to talk to the VM
+ * directly. Using it ties the mod to that VM and to that runtime; the script service is the
+ * portable way to register a function.
+ */
+WXL_ARGS(wxl_script_vm_args)
+WXL_ARGS_FIELD(wxl_script_vm_args, context, u32)      ///< a wxl_script_context value
+WXL_ARGS_PTR(wxl_script_vm_args, native_state, void*) ///< the VM's state, or NULL when the runtime does not expose one
+WXL_ARGS_END(wxl_script_vm_args)
 
-WXL_FIELD(wxl_unit_args, unit, handle)
+/// Something that happened to a unit.
+WXL_ARGS(wxl_unit_args)
+WXL_ARGS_FIELD(wxl_unit_args, unit, handle)
+WXL_ARGS_END(wxl_unit_args)
 
-WXL_FIELD(wxl_unit_aura_args, unit, handle)
-WXL_FIELD(wxl_unit_aura_args, spell_id, u32)
-WXL_FIELD(wxl_unit_aura_args, removed, bool)
+/// An aura appearing on or leaving a unit.
+WXL_ARGS(wxl_unit_aura_args)
+WXL_ARGS_FIELD(wxl_unit_aura_args, unit, handle)
+WXL_ARGS_FIELD(wxl_unit_aura_args, spell_id, u32)
+WXL_ARGS_FIELD(wxl_unit_aura_args, removed, bool) ///< WXL_TRUE when the aura left, WXL_FALSE when it was applied
+WXL_ARGS_END(wxl_unit_aura_args)
 
-WXL_FIELD(wxl_spell_cast_args, caster, handle)
-WXL_FIELD(wxl_spell_cast_args, caster_guid, guid)
-WXL_FIELD(wxl_spell_cast_args, target, handle)
-WXL_FIELD(wxl_spell_cast_args, target_guid, guid)
-WXL_FIELD(wxl_spell_cast_args, cast_item, guid)
-WXL_FIELD(wxl_spell_cast_args, spell_id, u32)
-WXL_FIELD(wxl_spell_cast_args, cast_count, u32)
-WXL_FIELD(wxl_spell_cast_args, cast_flags, u32)
-WXL_FIELD(wxl_spell_cast_args, target_flags, u32)
-WXL_FIELD(wxl_spell_cast_args, cast_time, u32)
-WXL_FIELD(wxl_spell_cast_args, hit_count, u32)
-WXL_FIELD(wxl_spell_cast_args, miss_count, u32)
+/**
+ * @brief A cast a unit in view started (SpellCastStart) or released (SpellCastGo).
+ *
+ * Read off the server's message before the client parses it. A handle resolves only for an
+ * object the client holds; the guids are what the server sent whether or not it does.
+ */
+WXL_ARGS(wxl_spell_cast_args)
+WXL_ARGS_FIELD(wxl_spell_cast_args, caster, handle)    ///< WXL_HANDLE_NONE when the caster is not in view
+WXL_ARGS_FIELD(wxl_spell_cast_args, caster_guid, guid)
+WXL_ARGS_FIELD(wxl_spell_cast_args, target, handle)    ///< the object target; WXL_HANDLE_NONE when none, or not in view
+WXL_ARGS_FIELD(wxl_spell_cast_args, target_guid, guid) ///< 0 when the cast has no object target
+WXL_ARGS_FIELD(wxl_spell_cast_args, cast_item, guid)   ///< the item the cast came from, 0 when none
+WXL_ARGS_FIELD(wxl_spell_cast_args, spell_id, u32)
+WXL_ARGS_FIELD(wxl_spell_cast_args, cast_count, u32)   ///< the caster's count of the cast, as the server echoes it
+WXL_ARGS_FIELD(wxl_spell_cast_args, cast_flags, u32)   ///< the server's cast flags
+WXL_ARGS_FIELD(wxl_spell_cast_args, target_flags, u32) ///< the server's target flags
+WXL_ARGS_FIELD(wxl_spell_cast_args, cast_time, u32)    ///< milliseconds; SpellCastStart only, 0 on SpellCastGo
+WXL_ARGS_FIELD(wxl_spell_cast_args, hit_count, u32)    ///< units the cast hit; SpellCastGo only, 0 on SpellCastStart
+WXL_ARGS_FIELD(wxl_spell_cast_args, miss_count, u32)   ///< units it missed; SpellCastGo only, 0 on SpellCastStart
+WXL_ARGS_END(wxl_spell_cast_args)
 
-WXL_FIELD(wxl_spell_fail_args, caster, handle)
-WXL_FIELD(wxl_spell_fail_args, caster_guid, guid)
-WXL_FIELD(wxl_spell_fail_args, spell_id, u32)
-WXL_FIELD(wxl_spell_fail_args, cast_count, u32)
-WXL_FIELD(wxl_spell_fail_args, reason, u32)
-WXL_FIELD(wxl_spell_fail_args, custom_error, i32)
-WXL_FIELD(wxl_spell_fail_args, custom_arg, i32)
+/**
+ * @brief A cast that did not go through.
+ *
+ * SpellCastFailed is the local player's own cast, refused by the server (SMSG_CAST_FAILED) or
+ * by the client before it asked; SpellCastInterrupted is a cast in progress that the server
+ * stopped (SMSG_SPELL_FAILURE), for any caster in view. @ref reason is the client's
+ * SPELL_FAILED_* code in both.
+ */
+WXL_ARGS(wxl_spell_fail_args)
+WXL_ARGS_FIELD(wxl_spell_fail_args, caster, handle)    ///< WXL_HANDLE_NONE when the caster is not in view
+WXL_ARGS_FIELD(wxl_spell_fail_args, caster_guid, guid)
+WXL_ARGS_FIELD(wxl_spell_fail_args, spell_id, u32)
+WXL_ARGS_FIELD(wxl_spell_fail_args, cast_count, u32)
+WXL_ARGS_FIELD(wxl_spell_fail_args, reason, u32)
+WXL_ARGS_FIELD(wxl_spell_fail_args, custom_error, i32) ///< the error sent with SPELL_FAILED_CUSTOM_ERROR, -1 for none
+WXL_ARGS_FIELD(wxl_spell_fail_args, custom_arg, i32)   ///< its argument, -1 for none
+WXL_ARGS_END(wxl_spell_fail_args)
 
-WXL_FIELD(wxl_spell_request_args, caster, handle)
-WXL_FIELD(wxl_spell_request_args, spell_id, u32)
-WXL_FIELD(wxl_spell_request_args, item, handle)
-WXL_FIELD(wxl_spell_request_args, target_guid, guid)
-WXL_FIELD(wxl_spell_request_args, confirmed, bool)
-WXL_FIELD_ANSWER(wxl_spell_request_args, refused)
+/**
+ * @brief The local player asking to cast a spell, before the client checks or sends anything.
+ *
+ * Writing WXL_TRUE through @ref refused answers the client as a cast it could not make, and
+ * nothing is sent. Raised at every ask, including the client's own second ask once a target
+ * has been picked or a dialog confirmed, which @ref confirmed tells apart.
+ */
+WXL_ARGS(wxl_spell_request_args)
+WXL_ARGS_FIELD(wxl_spell_request_args, caster, handle)    ///< the player, or the pet or charmed unit it casts through
+WXL_ARGS_FIELD(wxl_spell_request_args, spell_id, u32)
+WXL_ARGS_FIELD(wxl_spell_request_args, item, handle)      ///< the item the cast comes from, WXL_HANDLE_NONE for none
+WXL_ARGS_FIELD(wxl_spell_request_args, target_guid, guid) ///< 0 when the client is to pick the target
+WXL_ARGS_FIELD(wxl_spell_request_args, confirmed, bool)   ///< WXL_TRUE on the client's own second ask
+WXL_ARGS_ANSWER(wxl_spell_request_args, refused)          ///< write WXL_TRUE to keep the client from casting
+WXL_ARGS_END(wxl_spell_request_args)
 
-WXL_FIELD(wxl_item_use_args, item, handle)
-WXL_FIELD(wxl_item_use_args, item_guid, guid)
-WXL_FIELD(wxl_item_use_args, target_guid, guid)
-WXL_FIELD(wxl_item_use_args, confirmed, bool)
-WXL_FIELD_ANSWER(wxl_item_use_args, refused)
+/**
+ * @brief The local player asking to use an item, before the client checks or sends anything.
+ *
+ * Writing WXL_TRUE through @ref refused answers the client as an item it could not use.
+ */
+WXL_ARGS(wxl_item_use_args)
+WXL_ARGS_FIELD(wxl_item_use_args, item, handle)
+WXL_ARGS_FIELD(wxl_item_use_args, item_guid, guid)
+WXL_ARGS_FIELD(wxl_item_use_args, target_guid, guid) ///< 0 when the use has no target
+WXL_ARGS_FIELD(wxl_item_use_args, confirmed, bool)   ///< WXL_TRUE on the client's own second ask, after a dialog
+WXL_ARGS_ANSWER(wxl_item_use_args, refused)          ///< write WXL_TRUE to keep the client from using it
+WXL_ARGS_END(wxl_item_use_args)
 
-WXL_FIELD(wxl_ui_event_args, index, u32)
-WXL_FIELD(wxl_ui_event_args, name, str)
-WXL_FIELD(wxl_ui_event_args, format, str)
-WXL_FIELD_BYTES(wxl_ui_event_args, values, values_size)
-WXL_FIELD(wxl_ui_event_args, values_size, u32)
-WXL_FIELD(wxl_ui_event_args, value_count, u32)
+/**
+ * @brief An event the client fires to its interface, with the arguments it passes along.
+ *
+ * The client formats its arguments from a C format string ("%d%s", ...) and pushes each as a
+ * Lua value. They cross here already rendered, because a va_list has no layout a mod or a
+ * script runtime could read: @ref values holds one entry per argument, back to back, each a
+ * kind byte followed by the text and a NUL. The kind is the format letter the client used --
+ * 'd' and 'u' an integer in decimal, 'f' a double printed with %.17g, 'b' a boolean as 1 or 0,
+ * 's' a string as it is -- or 'n' for a string argument the client passed as null, which it
+ * pushes as nil. Integers and doubles round-trip exactly; a runtime that wants typed values
+ * parses them back by kind. Valid for the call only.
+ */
+WXL_ARGS(wxl_ui_event_args)
+WXL_ARGS_FIELD(wxl_ui_event_args, index, u32)          ///< the event's index in the client's table
+WXL_ARGS_FIELD(wxl_ui_event_args, name, str)           ///< the event's name, "PLAYER_ENTERING_WORLD"
+WXL_ARGS_FIELD(wxl_ui_event_args, format, str)         ///< the client's format string; empty for an event without arguments
+WXL_ARGS_BYTES(wxl_ui_event_args, values, values_size) ///< the entries described above, NULL when there are none
+WXL_ARGS_FIELD(wxl_ui_event_args, values_size, u32)    ///< bytes in @ref values
+WXL_ARGS_FIELD(wxl_ui_event_args, value_count, u32)    ///< entries in @ref values
+WXL_ARGS_END(wxl_ui_event_args)
 
-WXL_FIELD(wxl_script_error_args, context, u32)
-WXL_FIELD(wxl_script_error_args, message, str)
+/// An error the interface's Lua raised, as the VM reports it, before the client's handler sees it.
+WXL_ARGS(wxl_script_error_args)
+WXL_ARGS_FIELD(wxl_script_error_args, context, u32) ///< a wxl_script_context value: which interface raised it
+WXL_ARGS_FIELD(wxl_script_error_args, message, str) ///< the error value as text; "UNKNOWN ERROR" when it is not text
+WXL_ARGS_END(wxl_script_error_args)
 
-#ifdef WXL_FIELD_BYTES_DEFAULTED
-    #undef WXL_FIELD_BYTES
-    #undef WXL_FIELD_BYTES_DEFAULTED
+#ifdef WXL_ARGS_BYTES_DEFAULTED
+    #undef WXL_ARGS_BYTES
+    #undef WXL_ARGS_BYTES_DEFAULTED
 #endif
-#ifdef WXL_FIELD_ANSWER_DEFAULTED
-    #undef WXL_FIELD_ANSWER
-    #undef WXL_FIELD_ANSWER_DEFAULTED
+#ifdef WXL_ARGS_ANSWER_DEFAULTED
+    #undef WXL_ARGS_ANSWER
+    #undef WXL_ARGS_ANSWER_DEFAULTED
 #endif
-#ifdef WXL_FIELD_BUFFER_DEFAULTED
-    #undef WXL_FIELD_BUFFER
-    #undef WXL_FIELD_BUFFER_DEFAULTED
+#ifdef WXL_ARGS_BUFFER_DEFAULTED
+    #undef WXL_ARGS_BUFFER
+    #undef WXL_ARGS_BUFFER_DEFAULTED
+#endif
+#ifdef WXL_ARGS_PTR_DEFAULTED
+    #undef WXL_ARGS_PTR
+    #undef WXL_ARGS_PTR_DEFAULTED
+#endif
+#ifdef WXL_ARGS_DEFAULTED
+    #undef WXL_ARGS
+    #undef WXL_ARGS_DEFAULTED
+#endif
+#ifdef WXL_ARGS_END_DEFAULTED
+    #undef WXL_ARGS_END
+    #undef WXL_ARGS_END_DEFAULTED
 #endif

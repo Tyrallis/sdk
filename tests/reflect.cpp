@@ -46,19 +46,19 @@ namespace
         return false;
     }
 
-#define WXL_FIELD(args, member, kind)                                                       \
+#define WXL_ARGS_FIELD(args, member, kind)                                                       \
     static_assert(Fits<wxl::reflect::detail::kind_##kind, decltype(args::member)>(),        \
                   #args "." #member " is not of kind " #kind);
-#define WXL_FIELD_BYTES(args, member, size)                                                 \
+#define WXL_ARGS_BYTES(args, member, size)                                                 \
     static_assert(Fits<Kind::bytes, decltype(args::member)>(), #args "." #member);          \
     static_assert(std::is_same_v<decltype(args::size), uint32_t>, #args "." #size);
-#define WXL_FIELD_BUFFER(args, member, capacity)                                            \
+#define WXL_ARGS_BUFFER(args, member, capacity)                                            \
     static_assert(Fits<Kind::buffer, decltype(args::member)>(), #args "." #member);         \
     static_assert(std::is_same_v<decltype(args::capacity), uint32_t>, #args "." #capacity);
 #include "wxl/fields.def"
-#undef WXL_FIELD_BUFFER
-#undef WXL_FIELD_BYTES
-#undef WXL_FIELD
+#undef WXL_ARGS_BUFFER
+#undef WXL_ARGS_BYTES
+#undef WXL_ARGS_FIELD
 
     /// The size and alignment of each row's member, in the order of the field table.
     struct Shape
@@ -68,10 +68,10 @@ namespace
     };
 
     constexpr Shape kShapes[] = {
-#define WXL_FIELD(args, member, kind) \
+#define WXL_ARGS_FIELD(args, member, kind) \
     { uint32_t(sizeof(decltype(args::member))), uint32_t(alignof(decltype(args::member))) },
 #include "wxl/fields.def"
-#undef WXL_FIELD
+#undef WXL_ARGS_FIELD
     };
 
     uint32_t AlignUp(uint32_t value, uint32_t align) { return (value + align - 1) / align * align; }

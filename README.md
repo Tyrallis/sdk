@@ -163,8 +163,8 @@ A mod that requires a service a runtime does not have is refused, with the reaso
 include/wxl/
     abi.h          the rules of the boundary: types, versioning, export
     events.def     the event table -- the single source of ids, names and args
-    events.h       the event enum and the argument structs
-    fields.def     every member of every argument struct, with what it carries
+    events.h       the event enum, and the argument structs fields.def declares
+    fields.def     every argument struct, member by member, with what each member carries
     reflect.hpp    the events and their members as data, for a runtime that is not C++
     host.h         what a runtime offers a mod
     mod.h          what a mod exposes to a runtime
