@@ -5,7 +5,7 @@
 **The contract a WarcraftXL mod is written against**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![ABI](https://img.shields.io/badge/ABI-0.2-blue.svg)](include/wxl/abi.h)
+[![ABI](https://img.shields.io/badge/ABI-0.3-blue.svg)](include/wxl/abi.h)
 [![C++](https://img.shields.io/badge/C%2B%2B-17%20and%20up-blue.svg)](#-getting-started)
 [![Header only](https://img.shields.io/badge/header--only-yes-lightgrey.svg)](include/wxl)
 
@@ -38,8 +38,8 @@ and the rules of the boundary between them. There is nothing to link and nothing
   that loads it may be built with different toolchains.
 - **A missing service is an answer.** A mod declares what it requires and is refused before it
   loads if a runtime cannot meet it -- never halfway in.
-- **Conformance tests included.** Every runtime passes the same file, which is how several
-  implementations stay one contract instead of becoming dialects.
+- **Contract tests included.** `tests/contract.cpp` checks every promise of the C++ layer against
+  a fake host, and `tests/host` checks the mod host every runtime links.
 
 ## 📋 Table of contents
 
@@ -135,8 +135,8 @@ Beyond events, a runtime publishes services, and a mod asks for the ones it need
 | `wxl.object` | units, players, game objects | yes |
 | `wxl.script` | the client's Lua | yes |
 | `wxl.storage` | archives and files | yes |
-| `wxl.net` | messages to and from the server | yes |
-| `wxl.ui` | frames and the interface | yes |
+| `wxl.net` | messages to and from the server | yes; no runtime publishes it yet |
+| `wxl.ui` | frames and the interface | yes; no runtime publishes it yet |
 | `wxl.hook` | hook points a runtime names and keeps working | yes |
 | `wxl.hook.raw` | a detour at a raw address | no: runtimes that load into a shipped binary |
 | `wxl.patch` | bytes written into the image | no: runtimes that load into a shipped binary |
@@ -170,12 +170,13 @@ include/wxl/
     services.hpp   every typed facade at once
     services/      one C header per service, and one .hpp with its typed facade
 host/              the mod host: discovery, manifests, load order, registry, event bus
-runtime/           service scaffolding every runtime shares: handles, enumeration, gating
+runtime/           service scaffolding every runtime shares: handles, wxl.object over a table of
+                   reads (object_reads.def) each runtime implements
 cmake/             wxl_add_mod(), which builds a mod for every target at once
 schema/mod.json    the manifest, as a JSON Schema
 template/          a buildable mod to start from
 examples/scout/    a worked example: the world, the client's Lua, the server traffic
-tests/             the conformance checks every runtime has to pass
+tests/             the contract, the mod host and the shared runtime, each against fakes
 ```
 
 A mod links `wxl::sdk` and nothing else. A runtime links `wxl::host` and `wxl::runtime` too, and
