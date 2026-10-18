@@ -17,9 +17,10 @@ extern "C" {
 /**
  * @brief How far the client has booted.
  *
- * Stages run in the order below and are reported to every mod. Shutdown runs mods in reverse load
- * order. Stages are appended over time, never renumbered, and a runtime that cannot reach one
- * simply never reports it.
+ * Stages run in the order listed below and are reported to every mod, on the main thread.
+ * Shutdown runs mods in reverse load order. A stage added later gets the next free number and
+ * takes its place in the list wherever it falls in the boot, so the order is the list's, not the
+ * numbers'. A runtime that cannot reach a stage never reports it.
  */
 typedef enum wxl_stage
 {

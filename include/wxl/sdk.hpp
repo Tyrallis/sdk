@@ -11,6 +11,8 @@
 #ifndef WXL_SDK_HPP
 #define WXL_SDK_HPP
 
+#include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <string_view>
 #include <type_traits>
@@ -280,9 +282,8 @@ namespace wxl
     // matters and ignore the rest: an event a script does not override is not subscribed, so
     // the client never crosses into the mod for it.
     //
-    // An override a runtime never calls is not an error. Declare the event's service in the
-    // manifest when a hook is load-bearing, so the mod is refused with a reason instead of
-    // running half-dead.
+    // An override for an event the runtime never raises is not an error, but it never runs, and
+    // the runtime logs a warning naming the mod and the event.
     //
     // Each block names only its own family: events.def defaults the rest to nothing.
 
@@ -352,9 +353,17 @@ namespace wxl
         template <class Script>
         struct Family
         {
-            std::vector<Script*>      scripts;
+            std::vector<Script*>      scripts; ///< null where a script was removed mid-dispatch
             std::vector<Subscription> subscriptions;
             bool                      fed[WXL_EV_COUNT] = {}; ///< per event: already subscribed
+            std::atomic<int>          walking{0}; ///< dispatches walking `scripts` right now
+
+            /// Drops the null slots, when nothing is walking the list.
+            void Compact()
+            {
+                if (walking.load() != 0) return;
+                scripts.erase(std::remove(scripts.begin(), scripts.end(), nullptr), scripts.end());
+            }
         };
 
         template <class Script>
@@ -374,8 +383,21 @@ namespace wxl
         {
             static void WXL_CALL Dispatch(void*, const void* args)
             {
-                const Args& typed = *static_cast<const Args*>(args);
-                for (Script* script : FamilyOf<Script>().scripts) (script->*Method)(typed);
+                const Args&     typed  = *static_cast<const Args*>(args);
+                Family<Script>& family = FamilyOf<Script>();
+
+                struct Walk
+                {
+                    std::atomic<int>& walking;
+                    explicit Walk(std::atomic<int>& w) : walking(w) { ++walking; }
+                    ~Walk() { --walking; }
+                } walk(family.walking);
+
+                // By index, over the scripts there were when the event arrived: a script added
+                // by a handler waits for the next event, one removed is skipped from here on.
+                const size_t count = family.scripts.size();
+                for (size_t i = 0; i < count; ++i)
+                    if (Script* script = family.scripts[i]) (script->*Method)(typed);
             }
         };
 
@@ -535,6 +557,7 @@ namespace wxl
         {
             if (!script) return;
             Family<Script>& family = FamilyOf<Script>();
+            family.Compact();
             Rows<Script>::template For<D>(family);
             family.scripts.push_back(script);
         }
@@ -542,13 +565,14 @@ namespace wxl
         template <class Script>
         void Unregister(Script* script)
         {
-            std::vector<Script*>& scripts = FamilyOf<Script>().scripts;
-            for (size_t i = 0; i < scripts.size(); ++i)
+            Family<Script>& family = FamilyOf<Script>();
+            for (Script*& slot : family.scripts)
             {
-                if (scripts[i] != script) continue;
-                scripts.erase(scripts.begin() + static_cast<std::ptrdiff_t>(i));
-                return;
+                if (slot != script) continue;
+                slot = nullptr;
+                break;
             }
+            family.Compact();
         }
 
         /// Drops a family's scripts and its subscriptions; the next Add subscribes again.
@@ -577,6 +601,11 @@ namespace wxl
      *
      * A script belongs to one family. One that derives from two is added once per family, through
      * each family's pointer, which says plainly what it is doing.
+     *
+     * Add and Remove may be called from a handler: a script added there gets the next event, one
+     * removed gets nothing more. Both are for the main thread, where OnLoad, the stages and most
+     * events run. The few events raised on other threads (see events.def) read the family's list
+     * without a lock, so a family that handles them is set up in OnLoad and left alone after.
      */
     class ScriptMgr
     {

@@ -14,6 +14,8 @@
 //
 // Only events every runtime can raise belong here. A hook that exists because of how one client
 // happens to be built is published by that runtime as a service of its own, not added below.
+//
+// Handlers run on the client's main thread, except where a row says it may be raised elsewhere.
 
 // Two ways to consume it, and nothing to remember:
 //
@@ -118,7 +120,8 @@ WXL_EVENT(Asset, TextureLoad,       20, wxl_texture_load_args)
 WXL_EVENT(Asset, TerrainChunkBuild, 21, wxl_terrain_chunk_args)
 /** A map object's root was read, before its sub-chunks are walked. */
 WXL_EVENT(Asset, MapObjectLoad,     22, wxl_map_object_args)
-/** A file is about to be opened by name. A handler may answer with another path. */
+/** A file is about to be opened by name. A handler may answer with another path. May be raised
+    on any thread that opens files. */
 WXL_EVENT(Asset, FileOpen,          29, wxl_file_open_args)
 /** A file open finished, whether or not it found anything. */
 WXL_EVENT(Asset, FileOpened,        30, wxl_file_opened_args)
@@ -133,7 +136,7 @@ WXL_EVENT(Asset, ClientDbLoaded,    31, wxl_client_db_args)
 
 /** A message arrived from the server, before the client dispatches it. */
 WXL_EVENT(Net, MessageReceived, 23, wxl_message_args)
-/** A message is about to go to the server. */
+/** A message is about to go to the server. May be raised on the connection's own thread. */
 WXL_EVENT(Net, MessageSent,     24, wxl_message_args)
 /** The connection to the world server came up. */
 WXL_EVENT(Net, Connected,       25, wxl_connection_args)

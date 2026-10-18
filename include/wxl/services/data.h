@@ -47,7 +47,8 @@ typedef struct wxl_data_api
     /// claimed it may give it back.
     wxl_result(WXL_CALL* restore_table)(wxl_str table);
 
-    /// The path a table is being served from, empty when the client's own file is used.
+    /// The path a table is being served from, empty when the client's own file is used. Valid
+    /// until the calling thread's next call to served_from.
     wxl_str(WXL_CALL* served_from)(wxl_str table);
 
     /**

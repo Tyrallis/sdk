@@ -170,6 +170,23 @@ namespace
     {
     };
 
+    /// Changes its own family from inside its handler.
+    struct RearrangingWorldScript final : wxl::WorldScript
+    {
+        int                updates    = 0;
+        SecondWorldScript* add        = nullptr;
+        SecondWorldScript* remove     = nullptr;
+        bool               removeSelf = false;
+
+        void OnUpdate(const wxl_update_args&) override
+        {
+            ++updates;
+            if (add) wxl::ScriptMgr::Add(std::exchange(add, nullptr));
+            if (remove) wxl::ScriptMgr::Remove(std::exchange(remove, nullptr));
+            if (removeSelf) wxl::ScriptMgr::Remove(this);
+        }
+    };
+
     struct CountingLuaScript final : wxl::LuaScript
     {
         int      ready       = 0;
@@ -470,6 +487,37 @@ int main()
 
         wxl::ScriptMgr::Clear();
         Check(host.LiveSubscriptions() == before, "and Clear gives all of it back");
+    }
+
+    Section("a handler that changes its family");
+    {
+        wxl::ScriptMgr::Clear();
+        const wxl_update_args tick{0.016f};
+
+        RearrangingWorldScript first;
+        SecondWorldScript      late;
+        first.add        = &late;
+        first.removeSelf = true;
+        wxl::ScriptMgr::Add(&first);
+        host.Raise(WXL_EV_Update, &tick);
+        Check(first.updates == 1 && late.updates == 0,
+              "a script added by a handler waits for the next event");
+        host.Raise(WXL_EV_Update, &tick);
+        Check(first.updates == 1 && late.updates == 1,
+              "one that removed itself gets nothing more, and the one it added runs");
+        wxl::ScriptMgr::Clear();
+
+        RearrangingWorldScript remover;
+        SecondWorldScript      victim;
+        remover.remove = &victim;
+        wxl::ScriptMgr::Add(&remover);
+        wxl::ScriptMgr::Add(&victim);
+        host.Raise(WXL_EV_Update, &tick);
+        Check(remover.updates == 1 && victim.updates == 0,
+              "a script removed by an earlier handler of the same event does not run in it");
+        host.Raise(WXL_EV_Update, &tick);
+        Check(remover.updates == 2 && victim.updates == 0, "nor afterwards");
+        wxl::ScriptMgr::Clear();
     }
 
     Section("cancellation");
