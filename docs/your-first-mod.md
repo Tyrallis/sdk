@@ -248,9 +248,14 @@ per-frame hook is work the player pays for sixty times a second.
 One caveat, and it is an honest one: **on the stock `Wow.exe` the tick does not reach a mod
 today.** The client's dispatch function takes its context in a register rather than on the
 stack, so the runtime cannot stand in front of it without handing it back a context it no
-longer has. `OnUpdate` and `OnReady` therefore run on the recompiled client only. Write them
-anyway -- the contract is the same on both -- but do not make a mod depend on them until you
-know which runtime it will meet.
+longer has. `OnUpdate` and `OnReady` therefore run on the recompiled client only.
+
+The same is true of the object manager, which costs `OnObjectCreate`, `OnObjectDestroy` and
+every object handle on the stock client -- see *What depends on the runtime* in Scout's README
+for the whole list. Write these handlers anyway: the contract is the same on both, and a mod
+written against it is correct on the runtime that can serve it. Just do not make a mod *depend*
+on one until you know which runtime it will meet, which is exactly what `requires` in the
+manifest is for.
 
 A watcher does nothing until you register it, which happens once, in `OnLoad`:
 

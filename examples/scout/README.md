@@ -77,16 +77,23 @@ you ask for it by number.
 
 | | stock `Wow.exe` 3.3.5a | the recompiled client |
 |---|---|---|
-| the journal, the Lua API, the traffic counters | yes | yes |
+| the journal, the Lua API, the traffic counters, `OnWorldEnter`/`OnWorldLeave` | yes | yes |
 | `OnLoad`, `OnStorageReady`, `OnScriptReady`, `OnShutdown`, `OnUnload` | yes | yes |
 | `OnUpdate` and `OnReady` | no | yes |
+| `OnObjectCreate`, `OnObjectDestroy`, and every handle `OnUnitDeath` and `OnTargetChanged` carry | no | yes |
 | `OnGraphicsReady` | not reported by either runtime yet | the same |
 
-`OnUpdate` and `OnReady` both come from the client's tick, and on the stock client that
-function takes its context in a register: no detour can stand in front of it and give it back
-what it was holding. So on `Wow.exe` the journal's clock never advances and the entries carry
-the time of the last tick the mod did see, which is none. Everything else -- the watchers, the
-Lua API, the counters -- works the same on both.
+Two gaps, one cause. On the stock client four of the functions these events sit on take their
+argument in a register rather than on the stack -- the compiler's own choice, because each has
+internal linkage and one caller. A detour cannot hold a register across its own body and give
+it back, so the runtime declares those seams and refuses to attach them rather than hand the
+client a pointer it computed from nothing.
+
+The tick is one of them, which is why the journal's clock never advances on `Wow.exe`. The
+object manager is the other three, so nothing is ever tracked there: `wxl.object` answers for
+an empty world, and the handle in a death or a target change reads as absent. The watchers
+still run and the journal still fills from what does arrive -- the world, the traffic, the Lua
+side -- but an object-shaped entry is a recompiled-client entry today.
 
 `mod.json` requires `wxl.object` -- without it there is nothing to watch, and a runtime that
 lacks it refuses the mod with a reason instead of loading it to do nothing.
