@@ -24,18 +24,32 @@ target_link_libraries(wxl-sdk-mod INTERFACE wxl-sdk)
 target_compile_definitions(wxl-sdk-mod INTERFACE WXL_BUILDING_MOD)
 
 option(WXL_SDK_TESTS "Build the contract tests" ${PROJECT_IS_TOP_LEVEL})
-
-add_subdirectory(runtime)
+option(WXL_SDK_LUA "Build wxl.lua, the Lua mod runtime, for this tree's architecture" ${PROJECT_IS_TOP_LEVEL})
 
 if(WXL_SDK_TESTS)
     enable_testing()
-    add_subdirectory(tests)
 endif()
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
+add_subdirectory(runtime)
 add_subdirectory(host)
+
+# wxl.lua is a mod: from here it is built for the one architecture this tree targets, as a
+# child of wxl_add_mod would be. Its own directory builds it for both.
+if(WXL_SDK_LUA)
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(WXL_MOD_ARCH win-x64)
+    else()
+        set(WXL_MOD_ARCH win-x86)
+    endif()
+    add_subdirectory(lua)
+endif()
+
+if(WXL_SDK_TESTS)
+    add_subdirectory(tests)
+endif()
 
 install(TARGETS wxl-sdk wxl-sdk-mod EXPORT wxl-sdk-targets)
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})

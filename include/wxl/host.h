@@ -53,6 +53,16 @@ typedef struct wxl_runtime_info
     uint32_t version;   ///< the runtime's own version, opaque to a mod
     uint32_t abi_major; ///< the contract it implements
     uint32_t abi_minor;
+
+    // --- appended after 0.3 ------------------------------------------------------------------
+
+    /**
+     * @brief The directory the runtime scans for mods, UTF-8; empty when it scans none.
+     *
+     * For a mod that serves other mods -- a script runtime reading the manifests the host
+     * skipped -- so that both read the same tree. Check @ref struct_size before reading it.
+     */
+    wxl_str mods_directory;
 } wxl_runtime_info;
 
 /**

@@ -118,6 +118,10 @@ class GreeterMod final : public wxl::Mod
 WXL_MOD(GreeterMod, "wxl.greeter", "Greeter", 1)
 ```
 
+Or write it in Lua, with nothing to build: a folder with an `init.lua`, run by the `wxl.lua`
+mod on both clients, with every event and object above reachable by the same names.
+[docs/lua-mods.md](docs/lua-mods.md) and [`examples/lua-hello/`](examples/lua-hello/).
+
 [`template/`](template/) is the same thing as a buildable project, with its manifest.
 [`examples/scout/`](examples/scout/) is a mod that does real work -- it reads the world,
 serves the client's own Lua and watches the server traffic -- and
@@ -176,9 +180,12 @@ runtime/           service scaffolding every runtime shares: handles, wxl.object
                    reads (object_reads.def) each runtime implements
 cmake/             wxl_add_mod(), which builds a mod for every target at once
 schema/mod.json    the manifest, as a JSON Schema
+lua/               wxl.lua: the Lua mod runtime, a mod itself (LuaJIT, one state per Lua mod);
+                   types/wxl.d.lua, the API for an editor, generated from the tables above
 template/          a buildable mod to start from
 examples/scout/    a worked example: the world, the client's Lua, the server traffic
-tests/             the contract, the mod host and the shared runtime, each against fakes
+examples/lua-hello/ the same in Lua: a folder, no build
+tests/             the contract, the mod host, the shared runtime and wxl.lua, each against fakes
 ```
 
 A mod links `wxl::sdk` and nothing else. A runtime links `wxl::host` and `wxl::runtime` too, and
@@ -199,6 +206,7 @@ Event ids and stage numbers are appended, never renumbered, never removed.
 
 - [Your first mod](docs/your-first-mod.md) -- a tutorial, from an empty folder to a mod that does real work
 - [Building a mod](docs/building-a-mod.md) -- the manifest, the targets, the C++ layer
+- [Lua mods](docs/lua-mods.md) -- a mod with nothing to build: the folder, the API, reload, the sandbox
 - [`schema/mod.json`](schema/mod.json) -- the manifest schema, for your editor
 - [`template/`](template/) -- a working mod to copy
 - [`examples/scout/`](examples/scout/) -- the worked example the tutorial builds

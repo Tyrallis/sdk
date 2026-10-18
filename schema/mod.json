@@ -4,7 +4,11 @@
   "title": "WarcraftXL mod manifest",
   "description": "Sits next to a mod's binaries as mod.json. Read before anything of the mod runs, so that a mod whose needs cannot be met is refused with a readable reason rather than failing on its first call.",
   "type": "object",
-  "required": ["id", "name", "version", "abi", "binaries"],
+  "required": ["id", "name", "version", "abi"],
+  "anyOf": [
+    { "required": ["binaries"] },
+    { "required": ["lua"] }
+  ],
   "additionalProperties": false,
   "properties": {
     "id": {
@@ -31,7 +35,7 @@
       "pattern": "^\\d+\\.\\d+$"
     },
     "binaries": {
-      "description": "One binary per target, by platform and architecture. A runtime loads the entry matching its own; a mod with no entry for it is skipped, not failed.",
+      "description": "One binary per target, by platform and architecture. A runtime loads the entry matching its own; a mod with no entry for it is skipped, not failed. A script mod leaves it out and names \"lua\" instead.",
       "type": "object",
       "minProperties": 1,
       "propertyNames": { "enum": ["win-x86", "win-x64", "linux-x64"] },
@@ -59,8 +63,9 @@
       "default": []
     },
     "lua": {
-      "description": "Script entry point, relative to the mod folder, run once the script VM exists.",
-      "type": "string"
+      "description": "The Lua entry file, relative to the mod folder, run by wxl.lua in a state of its own. A manifest with \"lua\" and no binary for the runtime is a script mod: the same folder runs on every runtime, with nothing to build.",
+      "type": "string",
+      "minLength": 1
     },
     "description": {
       "type": "string",

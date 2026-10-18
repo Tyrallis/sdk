@@ -142,9 +142,17 @@ namespace wxl::host
                 for (const json::Member& member : root_.object)
                     if (!ReadField(member)) return false;
 
-                return Require("id", seenId_) && Require("name", seenName_) &&
-                       Require("version", seenVersion_) && Require("abi", seenAbi_) &&
-                       Require("binaries", seenBinaries_);
+                if (!Require("id", seenId_) || !Require("name", seenName_) ||
+                    !Require("version", seenVersion_) || !Require("abi", seenAbi_))
+                    return false;
+
+                // A script mod has no binary: its code is the "lua" entry.
+                if (!seenBinaries_ && out_.lua.empty())
+                {
+                    error_ = "required field 'binaries' is missing (a script mod names 'lua' instead)";
+                    return false;
+                }
+                return true;
             }
 
         private:
@@ -316,7 +324,7 @@ namespace wxl::host
                 if (key == "optional") return ReadServiceRefs(value, key, out_.optional);
                 if (key == "loadAfter") return ReadStringArray(value, key, out_.load_after);
                 if (key == "lua")
-                    return ReadString(value, key, out_.lua, 0, std::numeric_limits<size_t>::max());
+                    return ReadString(value, key, out_.lua, 1, std::numeric_limits<size_t>::max());
                 if (key == "description") return ReadString(value, key, out_.description, 0, 512);
                 if (key == "authors") return ReadStringArray(value, key, out_.authors);
                 if (key == "homepage")

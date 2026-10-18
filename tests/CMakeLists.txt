@@ -36,6 +36,32 @@ endif()
 
 add_test(NAME runtime COMMAND wxl-runtime-tests)
 
+# wxl.lua against the mod host: Lua mods written into a scratch tree, the lua-hello example,
+# the events raised from both threads, a handler that errors, a reload.
+if(TARGET wxl-lua)
+    add_executable(wxl-lua-tests lua_tests.cpp)
+    target_link_libraries(wxl-lua-tests PRIVATE wxl::host)
+    target_include_directories(wxl-lua-tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../lua/include)
+    add_dependencies(wxl-lua-tests wxl-lua)
+
+    if(MSVC)
+        target_compile_options(wxl-lua-tests PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(wxl-lua-tests PRIVATE -Wall -Wextra)
+    endif()
+
+    add_test(NAME lua
+        COMMAND wxl-lua-tests $<TARGET_FILE:wxl-lua>
+                ${CMAKE_CURRENT_SOURCE_DIR}/../examples/lua-hello
+                ${CMAKE_CURRENT_BINARY_DIR}/lua-scratch)
+
+    # The committed editor definitions against what the tables say now.
+    add_test(NAME lua-types
+        COMMAND wxl-lua-types --check ${CMAKE_CURRENT_SOURCE_DIR}/../lua/types/wxl.d.lua)
+endif()
+
 # The documents against the example they quote. A tutorial whose snippets have drifted still
 # builds and still reads well; only this says it is wrong.
 find_package(Python3 COMPONENTS Interpreter QUIET)

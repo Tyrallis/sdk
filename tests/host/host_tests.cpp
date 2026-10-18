@@ -537,6 +537,17 @@ int main(int argc, char** argv)
                   manifest.authors.size() == 2 && manifest.homepage == "https://example.test",
               "the descriptive fields are read");
 
+        Manifest script;
+        Check(ParseManifest("{ \"id\": \"wxl.s\", \"name\": \"S\", \"version\": \"1.0.0\", \"abi\": "
+                            "\"0.1\", \"lua\": \"init.lua\" }",
+                            script, error) &&
+                  script.binaries.empty() && script.lua == "init.lua",
+              "a manifest with lua and no binaries is a script mod and parses");
+        Check(Rejects("{ \"id\": \"wxl.s\", \"name\": \"S\", \"version\": \"1.0.0\", \"abi\": \"0.1\" }",
+                      "'binaries' is missing"),
+              "without either, binaries is still required");
+        Check(Rejects(ManifestText("wxl.x", "\"lua\": \"\""), "at least 1"), "an empty lua entry is refused");
+
         Manifest minimal;
         Check(ParseManifest(ManifestText("wxl.min"), minimal, error), "a minimal manifest parses");
         Check(minimal.required.empty() && minimal.optional.empty() && minimal.load_after.empty() &&
@@ -733,6 +744,14 @@ int main(int argc, char** argv)
         decision = AdmitManifest(manifest, "nothing-x64", services);
         Check(decision.verdict == Verdict::Skip && Contains(decision.reason, "no binary for nothing-x64"),
               "no binary for the target is a skip, not a refusal");
+
+        Manifest script = manifest;
+        script.binaries.clear();
+        script.lua = "init.lua";
+        decision   = AdmitManifest(script, CurrentTarget(), services);
+        Check(decision.verdict == Verdict::Skip && Contains(decision.reason, "script mod (lua: init.lua)") &&
+                  Contains(decision.reason, "wxl.lua serves it"),
+              "a script mod is skipped with a reason naming wxl.lua");
 
         Manifest major     = manifest;
         major.abi.major    = WXL_ABI_VERSION_MAJOR + 1;
@@ -1075,6 +1094,8 @@ int main(int argc, char** argv)
         Check(info && std::string(info->id.data, info->id.size) == "test" && info->version == 3 &&
                   info->struct_size == sizeof(wxl_runtime_info),
               "the runtime describes itself through the table");
+        Check(info && std::string(info->mods_directory.data, info->mods_directory.size) == mods.u8string(),
+              "and names the mods directory it scans");
         Check(host.Table()->has_service("wxl.runtime", 1) == WXL_TRUE &&
                   host.Table()->get_service("wxl.runtime", 1) == &runtimeService &&
                   host.Table()->has_service("wxl.runtime", 2) == WXL_FALSE,

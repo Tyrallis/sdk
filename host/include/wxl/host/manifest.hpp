@@ -94,8 +94,9 @@ namespace wxl::host
      * @brief Reads a manifest from its text.
      *
      * Every rule of schema/mod.json is applied: required fields, types, patterns, lengths, no
-     * unknown fields. The one addition is "$schema", accepted so an editor can be pointed at the
-     * schema. The first problem found is reported with its line.
+     * unknown fields. "binaries" may be absent when "lua" is present: a script mod. The one
+     * addition is "$schema", accepted so an editor can be pointed at the schema. The first
+     * problem found is reported with its line.
      * @return false with @p error set to a readable message, e.g. "line 4: 'abi' must be a string".
      */
     bool ParseManifest(std::string_view text, Manifest& out, std::string& error);

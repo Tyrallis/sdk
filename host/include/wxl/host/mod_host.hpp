@@ -231,6 +231,7 @@ namespace wxl::host
                        size_t capacity);
 
         HostConfig       config_;
+        std::string      modsDirectoryText_; ///< what info_.mods_directory points into
         Logger           logger_;
         ServiceRegistry  services_;
         EventBus         events_;

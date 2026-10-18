@@ -43,9 +43,10 @@ namespace wxl::host
     /**
      * @brief The checks a manifest alone can answer.
      *
-     * In order: a binary for @p target (none: skip), the abi major equal to this runtime's and
-     * the minor no higher, every required service published. The binary path must stay inside
-     * the mod folder: no absolute path, no ".." component.
+     * In order: a binary for @p target (none: skip; a manifest with "lua" and no binary is a
+     * script mod, skipped with a reason naming wxl.lua), the abi major equal to this runtime's
+     * and the minor no higher, every required service published. The binary path must stay
+     * inside the mod folder: no absolute path, no ".." component.
      */
     Decision AdmitManifest(const Manifest& manifest, std::string_view target,
                            const ServiceRegistry& services);

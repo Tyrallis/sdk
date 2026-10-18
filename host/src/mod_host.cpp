@@ -105,6 +105,12 @@ namespace wxl::host
         info_.version     = config_.runtime_version;
         info_.abi_major   = WXL_ABI_VERSION_MAJOR;
         info_.abi_minor   = WXL_ABI_VERSION_MINOR;
+        // Copied byte for byte: u8string() is std::string in C++17 and std::u8string in C++20,
+        // and the host is built at both levels.
+        const auto modsDirectory = config_.mods_directory.u8string();
+        modsDirectoryText_.assign(modsDirectory.begin(), modsDirectory.end());
+        info_.mods_directory = wxl_str{modsDirectoryText_.data(),
+                                       static_cast<uint32_t>(modsDirectoryText_.size())};
 
         table_.struct_size     = sizeof(table_);
         table_.abi_major       = WXL_ABI_VERSION_MAJOR;

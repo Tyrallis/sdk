@@ -69,7 +69,11 @@ namespace wxl::host
         {
             Decision decision;
             decision.verdict = Verdict::Skip;
-            decision.reason  = "no binary for " + std::string(target);
+            // A manifest with a "lua" entry and nothing to load natively is a script mod:
+            // wxl.lua finds it by the same manifest and runs it.
+            if (!manifest.lua.empty())
+                decision.reason = "script mod (lua: " + manifest.lua + "): wxl.lua serves it";
+            else decision.reason = "no binary for " + std::string(target);
             return decision;
         }
         if (!StaysInside(*binary))
