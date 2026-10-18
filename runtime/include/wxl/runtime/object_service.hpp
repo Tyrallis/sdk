@@ -91,6 +91,9 @@ namespace wxl::runtime
         /// Stops tracking it. Outstanding handles to it go stale from here on.
         void Untrack(void* object);
 
+        /// The same, for a caller that has the handle already and need not be charged a lookup.
+        void Untrack(wxl_handle handle);
+
         /// Drops everything, as when leaving the world.
         void Clear();
 

@@ -137,24 +137,25 @@ namespace wxl::runtime
         if (instance_ == this) instance_ = nullptr;
     }
 
-    wxl_handle ObjectService::Track(void* object) { return handles_.Track(object); }
+    wxl_handle ObjectService::Track(void* object)
+    {
+        // The guid is read once, here, and kept as the handle's key. It is the only reason
+        // FromGuid is a lookup: asking the client for every tracked object's guid instead
+        // would cost a virtual call and a read per object, on a set that is thousands deep
+        // in a city, every time a mod asked about a target.
+        return handles_.Track(object, object ? binding_.Guid(object) : 0);
+    }
 
     void ObjectService::Untrack(void* object) { handles_.Untrack(object); }
+
+    void ObjectService::Untrack(wxl_handle handle) { handles_.Untrack(handle); }
 
     void ObjectService::Clear() { handles_.Clear(); }
 
     wxl_handle ObjectService::FromGuid(wxl_guid guid) const
     {
         if (guid == WXL_GUID_NONE) return WXL_HANDLE_NONE;
-
-        wxl_handle found = WXL_HANDLE_NONE;
-        handles_.ForEach(
-            [&](wxl_handle handle, void* native)
-            {
-                if (found != WXL_HANDLE_NONE) return;
-                if (binding_.Guid(native) == guid) found = handle;
-            });
-        return found;
+        return handles_.FindByKey(guid);
     }
 
     void* ObjectService::Object(wxl_handle handle)

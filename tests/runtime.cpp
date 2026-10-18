@@ -347,9 +347,35 @@ int main()
         Check(api->unit_health(boarHandle, &health) == WXL_E_NOT_FOUND,
               "reading through a stale handle finds nothing rather than the wrong unit");
 
+        // Looking an object up by guid is an index, not a walk, so the index has to be right
+        // in the places an index can be wrong: when the object goes, and when the client hands
+        // the same guid to something else.
+        Check(api->from_guid(0x200) == WXL_HANDLE_NONE,
+              "the guid of a retired object resolves to nothing");
+        Check(api->from_guid(0x400) == wolfHandle, "while a live one still resolves");
+
+        FakeObject heir;
+        heir.guid = 0x400; // the wolf's, reused by the client for something else
+        heir.type = WXL_OBJECT_UNIT;
+        const wxl_handle heirHandle = service.Track(&heir);
+        Check(heirHandle != wolfHandle, "a second object with a guid in use gets its own handle");
+        Check(api->from_guid(0x400) == heirHandle, "and the guid now names the one that holds it");
+
+        service.Untrack(&wolf);
+        Check(api->valid(wolfHandle) == WXL_FALSE, "retiring the first one retires its handle");
+        Check(api->from_guid(0x400) == heirHandle,
+              "but leaves the guid with the object that took it over");
+
+        service.Untrack(heirHandle);
+        Check(api->valid(heirHandle) == WXL_FALSE, "a handle can be retired by handle");
+        Check(api->from_guid(0x400) == WXL_HANDLE_NONE, "and that frees the guid");
+        service.Untrack(heirHandle);
+        Check(api->from_guid(0x400) == WXL_HANDLE_NONE, "retiring a stale handle changes nothing");
+
         service.Clear();
         Check(api->valid(wolfHandle) == WXL_FALSE, "clearing retires everything");
         Check(api->local_player() == WXL_HANDLE_NONE, "including the local player");
+        Check(api->from_guid(0x100) == WXL_HANDLE_NONE, "and empties the guid index with it");
     }
 
     if (g_failures == 0)
