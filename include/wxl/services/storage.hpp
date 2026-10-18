@@ -50,7 +50,9 @@ namespace wxl
         /// Reads up to @p size bytes at @p offset; the value is how many were read.
         Expected<uint64_t> ReadAt(uint64_t offset, void* buffer, uint64_t size) const
         {
-            if (!api_ || handle_ == WXL_HANDLE_NONE) return Unexpected{WXL_E_NOT_FOUND};
+            if (!detail::Carries(api_, &wxl_storage_api::read_at))
+                return Unexpected{WXL_E_UNSUPPORTED};
+            if (handle_ == WXL_HANDLE_NONE) return Unexpected{WXL_E_NOT_FOUND};
             uint64_t         read   = 0;
             const wxl_result result = api_->read_at(handle_, offset, buffer, size, &read);
             if (result != WXL_OK) return Unexpected{result};
@@ -69,7 +71,7 @@ namespace wxl
         void Reset()
         {
             if (handle_ == WXL_HANDLE_NONE) return;
-            if (api_) api_->close(handle_);
+            if (detail::Carries(api_, &wxl_storage_api::close)) api_->close(handle_);
             handle_ = WXL_HANDLE_NONE;
         }
 
@@ -93,14 +95,16 @@ namespace wxl
         bool Exists(std::string_view path) const
         {
             const wxl_storage_api* api = Raw();
-            return api && api->exists(Str(path)) == WXL_TRUE;
+            if (!detail::Carries(api, &wxl_storage_api::exists)) return false;
+            return api->exists(Str(path)) == WXL_TRUE;
         }
 
         /// The file's length, without reading it.
         Expected<uint64_t> Size(std::string_view path) const
         {
             const wxl_storage_api* api = Raw();
-            if (!api) return Unexpected{WXL_E_UNSUPPORTED};
+            if (!detail::Carries(api, &wxl_storage_api::size))
+                return Unexpected{WXL_E_UNSUPPORTED};
             uint64_t         size   = 0;
             const wxl_result result = api->size(Str(path), &size);
             if (result != WXL_OK) return Unexpected{result};
@@ -111,7 +115,8 @@ namespace wxl
         Expected<std::vector<uint8_t>> Read(std::string_view path) const
         {
             const wxl_storage_api* api = Raw();
-            if (!api) return Unexpected{WXL_E_UNSUPPORTED};
+            if (!detail::Carries(api, &wxl_storage_api::read))
+                return Unexpected{WXL_E_UNSUPPORTED};
 
             const Expected<uint64_t> size = Size(path);
             if (!size) return Unexpected{size.Error()};
@@ -142,15 +147,20 @@ namespace wxl
         File Open(std::string_view path) const
         {
             const wxl_storage_api* api = Raw();
-            if (!api) return File();
+            if (!detail::Carries(api, &wxl_storage_api::open)) return File();
             return File(api, api->open(Str(path)));
         }
 
-        /// Adds a directory to the search path. Higher priority wins a name collision.
+        /**
+         * @brief Adds a directory to the search path. Higher priority wins a name collision.
+         *
+         * Not every runtime has such a notion; one that does not answers WXL_E_UNSUPPORTED
+         * rather than pretending, so check the result before relying on an asset being found.
+         */
         wxl_result AddSearchPath(std::string_view directory, int32_t priority = 0) const
         {
             const wxl_storage_api* api = Raw();
-            if (!api) return WXL_E_UNSUPPORTED;
+            if (!detail::Carries(api, &wxl_storage_api::add_search_path)) return WXL_E_UNSUPPORTED;
             return api->add_search_path(Str(directory), priority);
         }
 
@@ -158,7 +168,7 @@ namespace wxl
         wxl_result MountArchive(std::string_view path, int32_t priority = 0) const
         {
             const wxl_storage_api* api = Raw();
-            if (!api) return WXL_E_UNSUPPORTED;
+            if (!detail::Carries(api, &wxl_storage_api::mount_archive)) return WXL_E_UNSUPPORTED;
             return api->mount_archive(Str(path), priority);
         }
 
@@ -167,7 +177,7 @@ namespace wxl
         {
             std::vector<std::string> found;
             const wxl_storage_api*   api = Raw();
-            if (!api) return found;
+            if (!detail::Carries(api, &wxl_storage_api::find)) return found;
 
             const uint32_t count = api->find(Str(pattern), nullptr, 0);
             if (!count) return found;

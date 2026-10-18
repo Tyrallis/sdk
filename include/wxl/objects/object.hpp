@@ -26,18 +26,6 @@
 
 namespace wxl
 {
-    namespace detail
-    {
-        /// Whether a runtime's table reaches as far as a member: an older runtime stops short.
-        template <class Member>
-        bool Carries(const wxl_object_api* api, Member wxl_object_api::*member)
-        {
-            const char* base = reinterpret_cast<const char*>(api);
-            const char* end  = reinterpret_cast<const char*>(&(api->*member)) + sizeof(Member);
-            return static_cast<size_t>(end - base) <= api->struct_size;
-        }
-    } // namespace detail
-
     /**
      * @brief Anything the client holds in the world.
      *
@@ -160,8 +148,7 @@ namespace wxl
         Expected<V> Read(Getter<V> wxl_object_api::*getter) const
         {
             const wxl_object_api* api = ObjectService::Raw();
-            if (!api || !detail::Carries(api, getter) || !(api->*getter))
-                return Unexpected{WXL_E_UNSUPPORTED};
+            if (!detail::Carries(api, getter)) return Unexpected{WXL_E_UNSUPPORTED};
             if (!HasHandle()) return Unexpected{WXL_E_NOT_FOUND};
             V                out{};
             const wxl_result result = (api->*getter)(handle_, &out);
@@ -173,8 +160,7 @@ namespace wxl
         Expected<V> ReadAt(GetterAt<V> wxl_object_api::*getter, uint32_t index) const
         {
             const wxl_object_api* api = ObjectService::Raw();
-            if (!api || !detail::Carries(api, getter) || !(api->*getter))
-                return Unexpected{WXL_E_UNSUPPORTED};
+            if (!detail::Carries(api, getter)) return Unexpected{WXL_E_UNSUPPORTED};
             if (!HasHandle()) return Unexpected{WXL_E_NOT_FOUND};
             V                out{};
             const wxl_result result = (api->*getter)(handle_, index, &out);

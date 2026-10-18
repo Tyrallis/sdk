@@ -138,6 +138,30 @@ namespace wxl
         };
     } // namespace detail
 
+    namespace detail
+    {
+        /**
+         * @brief Whether a service table really answers for one of its members.
+         *
+         * Two ways it may not. The runtime's table can be older than this header, and stop
+         * short of the member: struct_size says how far it reaches. Or the runtime can reach
+         * the member and have nothing true to say through it, and leave it null -- which the
+         * contract allows, and which is how a runtime tells a mod that one row of a service is
+         * beyond it without refusing the whole service.
+         *
+         * Either way the answer is the same to a mod: unsupported.
+         */
+        template <class Api, class Member>
+        bool Carries(const Api* api, Member Api::*member)
+        {
+            if (!api) return false;
+            const char* base = reinterpret_cast<const char*>(api);
+            const char* end  = reinterpret_cast<const char*>(&(api->*member)) + sizeof(Member);
+            if (static_cast<size_t>(end - base) > api->struct_size) return false;
+            return (api->*member) != nullptr;
+        }
+    } // namespace detail
+
     // --- Subscriptions -------------------------------------------------------------------
 
     /**
