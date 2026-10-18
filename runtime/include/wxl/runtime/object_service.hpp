@@ -1,31 +1,16 @@
-// The shared half of wxl.object: handles, type gating, enumeration, over a runtime's leaf reads.
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 WarcraftXL
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program. If not, see <https://www.gnu.org/licenses/>.
+// The shared half of wxl.object: handles, type gating, enumeration, over a runtime's leaf reads.
 
 #ifndef WXL_RUNTIME_OBJECT_SERVICE_HPP
 #define WXL_RUNTIME_OBJECT_SERVICE_HPP
 
+#include <cstdint>
+
+#include "wxl/abi.h"
+#include "wxl/events.h"
 #include "wxl/runtime/handles.hpp"
-#include "wxl/runtime/objects/container.hpp"
-#include "wxl/runtime/objects/corpse.hpp"
-#include "wxl/runtime/objects/dynamic_object.hpp"
-#include "wxl/runtime/objects/game_object.hpp"
-#include "wxl/runtime/objects/item.hpp"
-#include "wxl/runtime/objects/object.hpp"
-#include "wxl/runtime/objects/player.hpp"
-#include "wxl/runtime/objects/unit.hpp"
 #include "wxl/services/object.h"
 
 namespace wxl::runtime
@@ -37,24 +22,38 @@ namespace wxl::runtime
     } // namespace detail
 
     /**
-     * @brief The leaf reads a runtime has to supply: one interface per kind of object, together.
+     * @brief The leaf reads a runtime supplies: the five below, and one per row of
+     *        object_reads.def.
      *
-     * The per-kind interfaces live in wxl/runtime/objects/, one file each. The service asks a
-     * kind's reads only for an object of that kind (a UnitReads method only ever sees a unit or a
-     * player), so an implementation may cast without checking.
+     * Each read takes the native object a handle resolved to, never a handle and never a null,
+     * and is only asked about an object of a kind its row accepts, so an implementation may cast
+     * without checking. A read that does not apply answers false and leaves @p out alone.
      */
-    class ObjectBinding : public ObjectReads,
-                          public UnitReads,
-                          public PlayerReads,
-                          public ItemReads,
-                          public ContainerReads,
-                          public GameObjectReads,
-                          public DynamicObjectReads,
-                          public CorpseReads
+    class ObjectBinding
     {
     public:
+        virtual ~ObjectBinding() = default;
+
+        virtual wxl_guid        Guid(void* object) const = 0;
+        virtual wxl_object_type Type(void* object) const = 0;
+
+        /// The display name. The binding owns the storage and keeps it valid until its next
+        /// call, which is what the service promises a mod.
+        virtual bool Name(void* object, const char*& out, uint32_t& size) const = 0;
+
+        /// The guid a unit targets; WXL_GUID_NONE for nothing. The service resolves it.
+        virtual bool UnitTarget(void* object, wxl_guid& out) const = 0;
+
         /// The object the local player controls, or nullptr while out of the world.
         virtual void* LocalPlayer() const = 0;
+
+#define WXL_OBJECT_READ(kinds, member, Method, type) \
+    virtual bool Method(void* object, type& out) const = 0;
+#define WXL_OBJECT_READ_AT(kinds, member, Method, type) \
+    virtual bool Method(void* object, uint32_t index, type& out) const = 0;
+#include "wxl/runtime/object_reads.def"
+#undef WXL_OBJECT_READ
+#undef WXL_OBJECT_READ_AT
     };
 
     /**
@@ -62,8 +61,10 @@ namespace wxl::runtime
      *
      * One per process. The C struct a mod receives holds plain function pointers with nowhere to
      * carry a context, so the thunks reach the single live instance; a client has one object
-     * manager, so this costs nothing real. Constructing a second one is a programming error and
-     * is reported as such.
+     * manager, so this costs nothing real.
+     *
+     * An object's kind is read once, when it is tracked, and kept with its handle: the client
+     * never changes it, and every getter checks it.
      *
      * Not thread-safe, like the handle table under it: the runtime drives it from the thread
      * that owns the client's objects, and a mod reads it from there.
@@ -108,7 +109,8 @@ namespace wxl::runtime
     private:
         static ObjectService* instance_;
 
-        /// The kinds a getter accepts, one bit per wxl_object_type.
+        /// The kinds a getter accepts, one bit per wxl_object_type; the `kinds` column of
+        /// object_reads.def names one of these.
         static constexpr uint32_t kAny         = 0xFFu;
         static constexpr uint32_t kUnits       = detail::KindBit(WXL_OBJECT_UNIT) | detail::KindBit(WXL_OBJECT_PLAYER);
         static constexpr uint32_t kPlayers     = detail::KindBit(WXL_OBJECT_PLAYER);
@@ -118,18 +120,19 @@ namespace wxl::runtime
         static constexpr uint32_t kDynamics    = detail::KindBit(WXL_OBJECT_DYNAMIC);
         static constexpr uint32_t kCorpses     = detail::KindBit(WXL_OBJECT_CORPSE);
 
-        /// Resolves a handle, or nullptr. Every thunk starts here.
-        static void* Object(wxl_handle handle);
+        /// Resolves a handle to its object, or nullptr; and, when asked, its kind.
+        static void* Object(wxl_handle handle, uint32_t* kind = nullptr);
 
-        /// Whether a resolved object is of one of the kinds in a mask.
-        static bool OfKind(void* native, uint32_t kinds);
+        /// Resolves a handle whose kind is in a mask. WXL_E_NOT_FOUND for a handle that does not
+        /// resolve, WXL_E_INVALID for one of another kind.
+        static wxl_result Gate(wxl_handle handle, uint32_t kinds, void*& native);
 
         /**
          * @brief One getter of the table: resolves, gates on kind, reads through the binding.
          *
          * @tparam V      the out type the getter writes.
          * @tparam Read   the ObjectBinding member that supplies it, as bool (void*, V&) const.
-         * @tparam Kinds  the kinds the getter accepts; any other live handle is WXL_E_INVALID.
+         * @tparam Kinds  the kinds the getter accepts.
          */
         template <class V, auto Read, uint32_t Kinds>
         static wxl_result WXL_CALL Get(wxl_handle handle, V* out);

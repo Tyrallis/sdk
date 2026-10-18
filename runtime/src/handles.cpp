@@ -11,7 +11,7 @@ namespace wxl::runtime
         slots_.emplace_back();
     }
 
-    wxl_handle HandleTable::Track(void* object, uint64_t key)
+    wxl_handle HandleTable::Track(void* object, uint64_t key, uint32_t tag)
     {
         if (!object) return WXL_HANDLE_NONE;
 
@@ -33,6 +33,7 @@ namespace wxl::runtime
         Slot& slot  = slots_[index];
         slot.object = object;
         slot.key    = key;
+        slot.tag    = tag;
 
         const wxl_handle handle = Pack(index, slot.generation);
         byObject_.emplace(object, handle);
@@ -77,6 +78,7 @@ namespace wxl::runtime
 
         slot.object = nullptr;
         slot.key    = 0;
+        slot.tag    = 0;
 
         // Bumping past the handed-out generation is what makes the old handle stale. Wrapping
         // back to 0 would make it live again, so skip 0 on the wrap.
@@ -95,6 +97,7 @@ namespace wxl::runtime
 
             slot.object = nullptr;
             slot.key    = 0;
+            slot.tag    = 0;
             if (++slot.generation == 0) slot.generation = 1;
             free_.push_back(index);
         }
@@ -104,13 +107,14 @@ namespace wxl::runtime
         live_ = 0;
     }
 
-    void* HandleTable::Resolve(wxl_handle handle) const
+    void* HandleTable::Resolve(wxl_handle handle, uint32_t* tag) const
     {
         const std::size_t index = IndexOf(handle);
         if (index == 0 || index >= slots_.size()) return nullptr;
 
         const Slot& slot = slots_[index];
-        if (slot.generation != GenerationOf(handle)) return nullptr;
+        if (slot.generation != GenerationOf(handle) || !slot.object) return nullptr;
+        if (tag) *tag = slot.tag;
         return slot.object;
     }
 

@@ -59,10 +59,33 @@ namespace
         wxl_guid        owner   = 0;
     };
 
-    class FakeBinding final : public wxl::runtime::ObjectBinding
+    /// Every read of the table answering zero, so a row added to it needs nothing here.
+    class ZeroBinding : public wxl::runtime::ObjectBinding
     {
     public:
-        FakeObject* localPlayer = nullptr;
+#define WXL_OBJECT_READ(kinds, member, Method, type) \
+    bool Method(void*, type& out) const override       \
+    {                                                  \
+        out = type{};                                  \
+        return true;                                   \
+    }
+#define WXL_OBJECT_READ_AT(kinds, member, Method, type)    \
+    bool Method(void*, uint32_t, type& out) const override \
+    {                                                      \
+        out = type{};                                      \
+        return true;                                       \
+    }
+#include "wxl/runtime/object_reads.def"
+#undef WXL_OBJECT_READ
+#undef WXL_OBJECT_READ_AT
+    };
+
+    /// The reads the checks below look at, from the fake objects.
+    class FakeBinding final : public ZeroBinding
+    {
+    public:
+        FakeObject*  localPlayer = nullptr;
+        mutable int  typeReads   = 0;
 
         static FakeObject* As(void* object) { return static_cast<FakeObject*>(object); }
 
@@ -74,11 +97,11 @@ namespace
         }
 
         wxl_guid        Guid(void* o) const override { return As(o)->guid; }
-        wxl_object_type Type(void* o) const override { return As(o)->type; }
-        bool Entry(void* o, uint32_t& out) const override { return Give(out, As(o)->entry); }
-        bool Scale(void* o, float& out) const override { return Give(out, 1.0f + static_cast<float>(As(o)->entry)); }
-        bool Position(void* o, wxl_vec3& out) const override { return Give(out, As(o)->position); }
-        bool Facing(void* o, float& out) const override { return Give(out, As(o)->facing); }
+        wxl_object_type Type(void* o) const override
+        {
+            ++typeReads;
+            return As(o)->type;
+        }
         bool Name(void* o, const char*& out, uint32_t& size) const override
         {
             const std::string& name = As(o)->name;
@@ -86,11 +109,16 @@ namespace
             size                    = static_cast<uint32_t>(name.size());
             return true;
         }
+        bool  UnitTarget(void* o, wxl_guid& out) const override { return Give(out, As(o)->target); }
+        void* LocalPlayer() const override { return localPlayer; }
+
+        bool Entry(void* o, uint32_t& out) const override { return Give(out, As(o)->entry); }
+        bool Position(void* o, wxl_vec3& out) const override { return Give(out, As(o)->position); }
+        bool Facing(void* o, float& out) const override { return Give(out, As(o)->facing); }
 
         bool UnitHealth(void* o, uint32_t& out) const override { return Give(out, As(o)->health); }
         bool UnitMaxHealth(void* o, uint32_t& out) const override { return Give(out, As(o)->maxHealth); }
         bool UnitLevel(void* o, uint32_t& out) const override { return Give(out, As(o)->level); }
-        bool UnitTarget(void* o, wxl_guid& out) const override { return Give(out, As(o)->target); }
         bool UnitPower(void* o, uint32_t index, uint32_t& out) const override
         {
             return index < 7 && Give(out, As(o)->power[index]);
@@ -100,42 +128,14 @@ namespace
             return index < 7 && Give(out, As(o)->maxPower[index]);
         }
         bool UnitPowerType(void* o, uint32_t& out) const override { return Give(out, As(o)->powerType); }
-        bool UnitRace(void* o, uint32_t& out) const override { return Give(out, As(o)->level); }
-        bool UnitClass(void* o, uint32_t& out) const override { return Give(out, As(o)->level); }
-        bool UnitSex(void* o, uint32_t& out) const override { return Give(out, As(o)->level); }
-        bool UnitDisplayId(void* o, uint32_t& out) const override { return Give(out, As(o)->entry); }
-        bool UnitNativeDisplayId(void* o, uint32_t& out) const override { return Give(out, As(o)->entry); }
-        bool UnitMountDisplayId(void*, uint32_t& out) const override { return Give(out, 0u); }
-        bool UnitFactionTemplate(void* o, uint32_t& out) const override { return Give(out, As(o)->entry); }
-        bool UnitFlags(void*, uint32_t& out) const override { return Give(out, 0u); }
-        bool UnitFlags2(void*, uint32_t& out) const override { return Give(out, 0u); }
-        bool UnitDynamicFlags(void*, uint32_t& out) const override { return Give(out, 0u); }
-        bool UnitNpcFlags(void*, uint32_t& out) const override { return Give(out, 0u); }
-        bool UnitBoundingRadius(void*, float& out) const override { return Give(out, 0.5f); }
-        bool UnitCombatReach(void*, float& out) const override { return Give(out, 1.5f); }
-        bool UnitCharm(void* o, wxl_guid& out) const override { return Give(out, As(o)->owner); }
-        bool UnitSummon(void* o, wxl_guid& out) const override { return Give(out, As(o)->owner); }
-        bool UnitCharmedBy(void* o, wxl_guid& out) const override { return Give(out, As(o)->owner); }
-        bool UnitSummonedBy(void* o, wxl_guid& out) const override { return Give(out, As(o)->owner); }
-        bool UnitCreatedBy(void* o, wxl_guid& out) const override { return Give(out, As(o)->owner); }
 
-        bool PlayerFlags(void*, uint32_t& out) const override { return Give(out, 0u); }
-        bool PlayerGuildId(void* o, uint32_t& out) const override { return Give(out, As(o)->entry); }
-        bool PlayerGuildRank(void*, uint32_t& out) const override { return Give(out, 0u); }
-        bool PlayerChosenTitle(void*, uint32_t& out) const override { return Give(out, 0u); }
         bool PlayerVisibleItem(void* o, uint32_t slot, uint32_t& out) const override
         {
             return slot < 19 && Give(out, As(o)->visibleItem[slot]);
         }
 
         bool ItemOwner(void* o, wxl_guid& out) const override { return Give(out, As(o)->owner); }
-        bool ItemContainedIn(void*, wxl_guid& out) const override { return Give(out, 0ull); }
-        bool ItemCreator(void*, wxl_guid& out) const override { return Give(out, 0ull); }
         bool ItemStackCount(void* o, uint32_t& out) const override { return Give(out, As(o)->stackCount); }
-        bool ItemDuration(void*, uint32_t& out) const override { return Give(out, 0u); }
-        bool ItemFlags(void*, uint32_t& out) const override { return Give(out, 0u); }
-        bool ItemDurability(void*, uint32_t& out) const override { return Give(out, 0u); }
-        bool ItemMaxDurability(void*, uint32_t& out) const override { return Give(out, 0u); }
 
         bool ContainerNumSlots(void* o, uint32_t& out) const override { return Give(out, As(o)->numSlots); }
         bool ContainerSlot(void* o, uint32_t index, wxl_guid& out) const override
@@ -143,29 +143,9 @@ namespace
             return index < As(o)->numSlots && Give(out, As(o)->slots[index]);
         }
 
-        bool GameObjectCreatedBy(void* o, wxl_guid& out) const override { return Give(out, As(o)->owner); }
-        bool GameObjectDisplayId(void* o, uint32_t& out) const override { return Give(out, As(o)->entry); }
-        bool GameObjectFlags(void*, uint32_t& out) const override { return Give(out, 0u); }
-        bool GameObjectDynamicFlags(void*, uint32_t& out) const override { return Give(out, 0u); }
-        bool GameObjectFaction(void*, uint32_t& out) const override { return Give(out, 0u); }
-        bool GameObjectLevel(void*, uint32_t& out) const override { return Give(out, 0u); }
-        bool GameObjectState(void*, uint32_t& out) const override { return Give(out, 1u); }
         bool GameObjectType(void* o, uint32_t& out) const override { return Give(out, As(o)->goType); }
-        bool GameObjectArtKit(void*, uint32_t& out) const override { return Give(out, 0u); }
-
         bool DynamicCaster(void* o, wxl_guid& out) const override { return Give(out, As(o)->owner); }
         bool DynamicSpellId(void* o, uint32_t& out) const override { return Give(out, As(o)->spellId); }
-        bool DynamicRadius(void*, float& out) const override { return Give(out, 8.0f); }
-        bool DynamicCastTime(void*, uint32_t& out) const override { return Give(out, 0u); }
-
-        bool CorpseOwner(void* o, wxl_guid& out) const override { return Give(out, As(o)->owner); }
-        bool CorpseParty(void*, wxl_guid& out) const override { return Give(out, 0ull); }
-        bool CorpseDisplayId(void* o, uint32_t& out) const override { return Give(out, As(o)->entry); }
-        bool CorpseGuild(void*, uint32_t& out) const override { return Give(out, 0u); }
-        bool CorpseFlags(void*, uint32_t& out) const override { return Give(out, 0u); }
-        bool CorpseDynamicFlags(void*, uint32_t& out) const override { return Give(out, 0u); }
-
-        void* LocalPlayer() const override { return localPlayer; }
     };
 } // namespace
 
@@ -295,6 +275,18 @@ int main()
         Check(api->dynamic_spell_id(cloudHandle, &value) == WXL_OK && value == 42, "a dynamic object's spell reads");
         Check(api->dynamic_spell_id(playerHandle, &value) == WXL_E_INVALID, "a player is not a dynamic object");
         Check(api->corpse_display_id(playerHandle, &value) == WXL_E_INVALID, "nor a corpse");
+    }
+
+    Section("an object's kind");
+    {
+        const int reads = binding.typeReads;
+        uint32_t  value = 0;
+        api->unit_health(boarHandle, &value);
+        api->unit_health(chestHandle, &value);
+        api->type(chestHandle);
+        api->enumerate(WXL_OBJECT_UNIT, nullptr, 0);
+        Check(reads == 5 && binding.typeReads == reads,
+              "is read once per object, when it is tracked, and never asked of the binding again");
     }
 
     Section("enumeration");

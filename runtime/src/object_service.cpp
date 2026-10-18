@@ -1,18 +1,7 @@
-// The shared half of wxl.object: the thunks behind the table, over a runtime's leaf reads.
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 WarcraftXL
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program. If not, see <https://www.gnu.org/licenses/>.
+// The shared half of wxl.object: the thunks behind the table, over a runtime's leaf reads.
 
 #include "wxl/runtime/object_service.hpp"
 
@@ -20,14 +9,22 @@ namespace wxl::runtime
 {
     ObjectService* ObjectService::instance_ = nullptr;
 
+    wxl_result ObjectService::Gate(wxl_handle handle, uint32_t kinds, void*& native)
+    {
+        uint32_t kind = 0;
+        native        = Object(handle, &kind);
+        if (!native) return WXL_E_NOT_FOUND;
+        return kind < 32u && (kinds & (1u << kind)) != 0 ? WXL_OK : WXL_E_INVALID;
+    }
+
     template <class V, auto Read, uint32_t Kinds>
     wxl_result WXL_CALL ObjectService::Get(wxl_handle handle, V* out)
     {
         if (!out) return WXL_E_INVALID;
 
-        void* native = Object(handle);
-        if (!native) return WXL_E_NOT_FOUND;
-        if (!OfKind(native, Kinds)) return WXL_E_INVALID;
+        void*            native = nullptr;
+        const wxl_result gated  = Gate(handle, Kinds, native);
+        if (gated != WXL_OK) return gated;
         return (instance_->binding_.*Read)(native, *out) ? WXL_OK : WXL_E_INVALID;
     }
 
@@ -36,9 +33,9 @@ namespace wxl::runtime
     {
         if (!out) return WXL_E_INVALID;
 
-        void* native = Object(handle);
-        if (!native) return WXL_E_NOT_FOUND;
-        if (!OfKind(native, Kinds)) return WXL_E_INVALID;
+        void*            native = nullptr;
+        const wxl_result gated  = Gate(handle, Kinds, native);
+        if (gated != WXL_OK) return gated;
         return (instance_->binding_.*Read)(native, index, *out) ? WXL_OK : WXL_E_INVALID;
     }
 
@@ -54,82 +51,18 @@ namespace wxl::runtime
         api_.from_guid    = &ObjectService::FromGuidThunk;
         api_.local_player = &ObjectService::LocalPlayerThunk;
 
-        api_.position = &Get<wxl_vec3, &ObjectBinding::Position, kAny>;
-        api_.facing   = &Get<float, &ObjectBinding::Facing, kAny>;
-        api_.name     = &ObjectService::NameThunk;
+        api_.name        = &ObjectService::NameThunk;
+        api_.unit_target = &ObjectService::UnitTargetThunk;
+        api_.enumerate   = &ObjectService::EnumerateThunk;
+        api_.positions   = &ObjectService::PositionsThunk;
 
-        api_.unit_health     = &Get<uint32_t, &ObjectBinding::UnitHealth, kUnits>;
-        api_.unit_max_health = &Get<uint32_t, &ObjectBinding::UnitMaxHealth, kUnits>;
-        api_.unit_level      = &Get<uint32_t, &ObjectBinding::UnitLevel, kUnits>;
-        api_.unit_target     = &ObjectService::UnitTargetThunk;
-
-        api_.enumerate = &ObjectService::EnumerateThunk;
-        api_.positions = &ObjectService::PositionsThunk;
-
-        api_.entry = &Get<uint32_t, &ObjectBinding::Entry, kAny>;
-        api_.scale = &Get<float, &ObjectBinding::Scale, kAny>;
-
-        api_.unit_power             = &GetAt<uint32_t, &ObjectBinding::UnitPower, kUnits>;
-        api_.unit_max_power         = &GetAt<uint32_t, &ObjectBinding::UnitMaxPower, kUnits>;
-        api_.unit_power_type        = &Get<uint32_t, &ObjectBinding::UnitPowerType, kUnits>;
-        api_.unit_race              = &Get<uint32_t, &ObjectBinding::UnitRace, kUnits>;
-        api_.unit_class             = &Get<uint32_t, &ObjectBinding::UnitClass, kUnits>;
-        api_.unit_sex               = &Get<uint32_t, &ObjectBinding::UnitSex, kUnits>;
-        api_.unit_display_id        = &Get<uint32_t, &ObjectBinding::UnitDisplayId, kUnits>;
-        api_.unit_native_display_id = &Get<uint32_t, &ObjectBinding::UnitNativeDisplayId, kUnits>;
-        api_.unit_mount_display_id  = &Get<uint32_t, &ObjectBinding::UnitMountDisplayId, kUnits>;
-        api_.unit_faction_template  = &Get<uint32_t, &ObjectBinding::UnitFactionTemplate, kUnits>;
-        api_.unit_flags             = &Get<uint32_t, &ObjectBinding::UnitFlags, kUnits>;
-        api_.unit_flags2            = &Get<uint32_t, &ObjectBinding::UnitFlags2, kUnits>;
-        api_.unit_dynamic_flags     = &Get<uint32_t, &ObjectBinding::UnitDynamicFlags, kUnits>;
-        api_.unit_npc_flags         = &Get<uint32_t, &ObjectBinding::UnitNpcFlags, kUnits>;
-        api_.unit_bounding_radius   = &Get<float, &ObjectBinding::UnitBoundingRadius, kUnits>;
-        api_.unit_combat_reach      = &Get<float, &ObjectBinding::UnitCombatReach, kUnits>;
-        api_.unit_charm             = &Get<wxl_guid, &ObjectBinding::UnitCharm, kUnits>;
-        api_.unit_summon            = &Get<wxl_guid, &ObjectBinding::UnitSummon, kUnits>;
-        api_.unit_charmed_by        = &Get<wxl_guid, &ObjectBinding::UnitCharmedBy, kUnits>;
-        api_.unit_summoned_by       = &Get<wxl_guid, &ObjectBinding::UnitSummonedBy, kUnits>;
-        api_.unit_created_by        = &Get<wxl_guid, &ObjectBinding::UnitCreatedBy, kUnits>;
-
-        api_.player_flags        = &Get<uint32_t, &ObjectBinding::PlayerFlags, kPlayers>;
-        api_.player_guild_id     = &Get<uint32_t, &ObjectBinding::PlayerGuildId, kPlayers>;
-        api_.player_guild_rank   = &Get<uint32_t, &ObjectBinding::PlayerGuildRank, kPlayers>;
-        api_.player_chosen_title = &Get<uint32_t, &ObjectBinding::PlayerChosenTitle, kPlayers>;
-        api_.player_visible_item = &GetAt<uint32_t, &ObjectBinding::PlayerVisibleItem, kPlayers>;
-
-        api_.item_owner          = &Get<wxl_guid, &ObjectBinding::ItemOwner, kItems>;
-        api_.item_contained_in   = &Get<wxl_guid, &ObjectBinding::ItemContainedIn, kItems>;
-        api_.item_creator        = &Get<wxl_guid, &ObjectBinding::ItemCreator, kItems>;
-        api_.item_stack_count    = &Get<uint32_t, &ObjectBinding::ItemStackCount, kItems>;
-        api_.item_duration       = &Get<uint32_t, &ObjectBinding::ItemDuration, kItems>;
-        api_.item_flags          = &Get<uint32_t, &ObjectBinding::ItemFlags, kItems>;
-        api_.item_durability     = &Get<uint32_t, &ObjectBinding::ItemDurability, kItems>;
-        api_.item_max_durability = &Get<uint32_t, &ObjectBinding::ItemMaxDurability, kItems>;
-
-        api_.container_num_slots = &Get<uint32_t, &ObjectBinding::ContainerNumSlots, kContainers>;
-        api_.container_slot      = &GetAt<wxl_guid, &ObjectBinding::ContainerSlot, kContainers>;
-
-        api_.gameobject_created_by    = &Get<wxl_guid, &ObjectBinding::GameObjectCreatedBy, kGameObjects>;
-        api_.gameobject_display_id    = &Get<uint32_t, &ObjectBinding::GameObjectDisplayId, kGameObjects>;
-        api_.gameobject_flags         = &Get<uint32_t, &ObjectBinding::GameObjectFlags, kGameObjects>;
-        api_.gameobject_dynamic_flags = &Get<uint32_t, &ObjectBinding::GameObjectDynamicFlags, kGameObjects>;
-        api_.gameobject_faction       = &Get<uint32_t, &ObjectBinding::GameObjectFaction, kGameObjects>;
-        api_.gameobject_level         = &Get<uint32_t, &ObjectBinding::GameObjectLevel, kGameObjects>;
-        api_.gameobject_state         = &Get<uint32_t, &ObjectBinding::GameObjectState, kGameObjects>;
-        api_.gameobject_type          = &Get<uint32_t, &ObjectBinding::GameObjectType, kGameObjects>;
-        api_.gameobject_art_kit       = &Get<uint32_t, &ObjectBinding::GameObjectArtKit, kGameObjects>;
-
-        api_.dynamic_caster    = &Get<wxl_guid, &ObjectBinding::DynamicCaster, kDynamics>;
-        api_.dynamic_spell_id  = &Get<uint32_t, &ObjectBinding::DynamicSpellId, kDynamics>;
-        api_.dynamic_radius    = &Get<float, &ObjectBinding::DynamicRadius, kDynamics>;
-        api_.dynamic_cast_time = &Get<uint32_t, &ObjectBinding::DynamicCastTime, kDynamics>;
-
-        api_.corpse_owner         = &Get<wxl_guid, &ObjectBinding::CorpseOwner, kCorpses>;
-        api_.corpse_party         = &Get<wxl_guid, &ObjectBinding::CorpseParty, kCorpses>;
-        api_.corpse_display_id    = &Get<uint32_t, &ObjectBinding::CorpseDisplayId, kCorpses>;
-        api_.corpse_guild         = &Get<uint32_t, &ObjectBinding::CorpseGuild, kCorpses>;
-        api_.corpse_flags         = &Get<uint32_t, &ObjectBinding::CorpseFlags, kCorpses>;
-        api_.corpse_dynamic_flags = &Get<uint32_t, &ObjectBinding::CorpseDynamicFlags, kCorpses>;
+#define WXL_OBJECT_READ(kinds, member, Method, type) \
+    api_.member = &Get<type, &ObjectBinding::Method, k##kinds>;
+#define WXL_OBJECT_READ_AT(kinds, member, Method, type) \
+    api_.member = &GetAt<type, &ObjectBinding::Method, k##kinds>;
+#include "wxl/runtime/object_reads.def"
+#undef WXL_OBJECT_READ
+#undef WXL_OBJECT_READ_AT
     }
 
     ObjectService::~ObjectService()
@@ -139,11 +72,14 @@ namespace wxl::runtime
 
     wxl_handle ObjectService::Track(void* object)
     {
-        // The guid is read once, here, and kept as the handle's key. It is the only reason
-        // FromGuid is a lookup: asking the client for every tracked object's guid instead
-        // would cost a virtual call and a read per object, on a set that is thousands deep
-        // in a city, every time a mod asked about a target.
-        return handles_.Track(object, object ? binding_.Guid(object) : 0);
+        if (!object) return WXL_HANDLE_NONE;
+        if (const wxl_handle known = handles_.HandleOf(object)) return known;
+
+        // The guid and the kind are read once, here, and kept with the handle: the guid so that
+        // FromGuid is a lookup and not a walk of a set thousands deep in a city, the kind so that
+        // no getter has to ask the client for it again.
+        return handles_.Track(object, binding_.Guid(object),
+                              static_cast<uint32_t>(binding_.Type(object)));
     }
 
     void ObjectService::Untrack(void* object) { handles_.Untrack(object); }
@@ -158,15 +94,9 @@ namespace wxl::runtime
         return handles_.FindByKey(guid);
     }
 
-    void* ObjectService::Object(wxl_handle handle)
+    void* ObjectService::Object(wxl_handle handle, uint32_t* kind)
     {
-        return instance_ ? instance_->handles_.Resolve(handle) : nullptr;
-    }
-
-    bool ObjectService::OfKind(void* native, uint32_t kinds)
-    {
-        const uint32_t type = static_cast<uint32_t>(instance_->binding_.Type(native));
-        return type < 32u && (kinds & (1u << type)) != 0;
+        return instance_ ? instance_->handles_.Resolve(handle, kind) : nullptr;
     }
 
     wxl_bool WXL_CALL ObjectService::ValidThunk(wxl_handle object)
@@ -182,9 +112,8 @@ namespace wxl::runtime
 
     uint32_t WXL_CALL ObjectService::TypeThunk(wxl_handle object)
     {
-        void* native = Object(object);
-        return native ? static_cast<uint32_t>(instance_->binding_.Type(native))
-                      : static_cast<uint32_t>(WXL_OBJECT_UNKNOWN);
+        uint32_t kind = WXL_OBJECT_UNKNOWN;
+        return Object(object, &kind) ? kind : static_cast<uint32_t>(WXL_OBJECT_UNKNOWN);
     }
 
     wxl_handle WXL_CALL ObjectService::FromGuidThunk(wxl_guid guid)
@@ -220,9 +149,9 @@ namespace wxl::runtime
     {
         if (!out) return WXL_E_INVALID;
 
-        void* native = Object(unit);
-        if (!native) return WXL_E_NOT_FOUND;
-        if (!OfKind(native, kUnits)) return WXL_E_INVALID;
+        void*            native = nullptr;
+        const wxl_result gated  = Gate(unit, kUnits, native);
+        if (gated != WXL_OK) return gated;
 
         wxl_guid target = WXL_GUID_NONE;
         if (!instance_->binding_.UnitTarget(native, target)) return WXL_E_INVALID;
@@ -236,11 +165,9 @@ namespace wxl::runtime
 
         uint32_t matched = 0;
         instance_->handles_.ForEach(
-            [&](wxl_handle handle, void* native)
+            [&](wxl_handle handle, void*, uint32_t kind)
             {
-                if (type != WXL_OBJECT_UNKNOWN &&
-                    static_cast<uint32_t>(instance_->binding_.Type(native)) != type)
-                    return;
+                if (type != WXL_OBJECT_UNKNOWN && kind != type) return;
 
                 if (out && matched < cap) out[matched] = handle;
                 ++matched;

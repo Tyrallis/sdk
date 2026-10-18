@@ -48,8 +48,10 @@ namespace wxl::runtime
          *             guid, so that looking an object up by guid is a lookup and not a walk of
          *             everything tracked. A key given twice belongs to whichever object was
          *             tracked last, which is what reusing a name means.
+         * @param tag  a value kept with the object and handed back on resolve: an object
+         *             service keeps its kind there. Ignored when the object is tracked already.
          */
-        wxl_handle Track(void* object, uint64_t key = 0);
+        wxl_handle Track(void* object, uint64_t key = 0, uint32_t tag = 0);
 
         /// Retires an object. Its handle stops resolving; later handles never collide with it.
         void Untrack(void* object);
@@ -63,8 +65,9 @@ namespace wxl::runtime
         /// Retires everything. Every outstanding handle stops resolving.
         void Clear();
 
-        /// The object behind a handle, or nullptr when it no longer resolves.
-        void* Resolve(wxl_handle handle) const;
+        /// The object behind a handle, or nullptr when it no longer resolves; and, when @p tag is
+        /// given and the handle resolves, the tag it was tracked with.
+        void* Resolve(wxl_handle handle, uint32_t* tag = nullptr) const;
 
         /// Whether a handle still resolves.
         bool Valid(wxl_handle handle) const { return Resolve(handle) != nullptr; }
@@ -77,7 +80,8 @@ namespace wxl::runtime
 
         /**
          * @brief Visits every live object.
-         * @param visit  called as visit(wxl_handle, void*); must not track or untrack.
+         * @param visit  called as visit(wxl_handle, void* object, uint32_t tag); must not track
+         *               or untrack.
          */
         template <class Visitor>
         void ForEach(Visitor&& visit) const
@@ -86,7 +90,7 @@ namespace wxl::runtime
             {
                 const Slot& slot = slots_[index];
                 if (!slot.object) continue;
-                visit(Pack(index, slot.generation), slot.object);
+                visit(Pack(index, slot.generation), slot.object, slot.tag);
             }
         }
 
@@ -95,7 +99,8 @@ namespace wxl::runtime
         {
             void*    object     = nullptr;
             uint64_t key        = 0; ///< what Track was given, so retiring need not be told again
-            uint32_t generation = 1; ///< odd while live, bumped on retire; never 0
+            uint32_t tag        = 0;
+            uint32_t generation = 1; ///< bumped on retire, so it differs from every handle out; never 0
         };
 
         /// Empties a slot and bumps it past the handle handed out for it.

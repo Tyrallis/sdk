@@ -1,0 +1,124 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 WarcraftXL
+//
+// The reads behind wxl.object: one row per getter of wxl_object_api that reads one value of an
+// object. The getters that resolve handles or walk the table (valid, guid, type, from_guid,
+// local_player, name, unit_target, enumerate, positions) are written by hand in
+// object_service.cpp.
+//
+//   WXL_OBJECT_FIELD(kinds, member, Method, type)    a field of the object, read as is
+//   WXL_OBJECT_READ(kinds, member, Method, type)     a value the runtime works out
+//   WXL_OBJECT_READ_AT(kinds, member, Method, type)  the same, with an index
+//
+//   kinds   the objects the getter accepts: Any, Units, Players, Items, Containers,
+//           GameObjects, Dynamics or Corpses. Any other live handle answers WXL_E_INVALID.
+//   member  the wxl_object_api member the getter is published as.
+//   Method  the ObjectBinding read behind it: bool Method(void* object, type& out) const, or
+//           bool Method(void* object, uint32_t index, type& out) const for READ_AT.
+//   type    what the getter writes.
+//
+// A runtime implements each Method. The FIELD shape tells it the value needs no work: the core
+// answers it from the binding fact of the same name as `member`.
+//
+// Include with WXL_OBJECT_READ_AT and WXL_OBJECT_READ defined; WXL_OBJECT_FIELD defaults to
+// WXL_OBJECT_READ.
+
+#ifndef WXL_OBJECT_READ
+#error "define WXL_OBJECT_READ(kinds, member, Method, type) before including object_reads.def"
+#endif
+#ifndef WXL_OBJECT_READ_AT
+#error "define WXL_OBJECT_READ_AT(kinds, member, Method, type) before including object_reads.def"
+#endif
+#ifndef WXL_OBJECT_FIELD
+    #define WXL_OBJECT_FIELD(kinds, member, Method, type) WXL_OBJECT_READ(kinds, member, Method, type)
+    #define WXL_OBJECT_FIELD_DEFAULTED
+#endif
+
+// --- Any object ----------------------------------------------------------------------------
+
+WXL_OBJECT_READ(Any, position, Position, wxl_vec3)
+WXL_OBJECT_READ(Any, facing,   Facing,   float)
+WXL_OBJECT_READ(Any, entry,    Entry,    uint32_t)
+WXL_OBJECT_READ(Any, scale,    Scale,    float)
+
+// --- Units and players ---------------------------------------------------------------------
+
+WXL_OBJECT_FIELD(Units, unit_health,            UnitHealth,          uint32_t)
+WXL_OBJECT_FIELD(Units, unit_max_health,        UnitMaxHealth,       uint32_t)
+WXL_OBJECT_FIELD(Units, unit_level,             UnitLevel,           uint32_t)
+WXL_OBJECT_READ_AT(Units, unit_power,           UnitPower,           uint32_t)
+WXL_OBJECT_READ_AT(Units, unit_max_power,       UnitMaxPower,        uint32_t)
+WXL_OBJECT_READ(Units, unit_power_type,         UnitPowerType,       uint32_t)
+WXL_OBJECT_READ(Units, unit_race,               UnitRace,            uint32_t)
+WXL_OBJECT_READ(Units, unit_class,              UnitClass,           uint32_t)
+WXL_OBJECT_READ(Units, unit_sex,                UnitSex,             uint32_t)
+WXL_OBJECT_FIELD(Units, unit_display_id,        UnitDisplayId,       uint32_t)
+WXL_OBJECT_FIELD(Units, unit_native_display_id, UnitNativeDisplayId, uint32_t)
+WXL_OBJECT_FIELD(Units, unit_mount_display_id,  UnitMountDisplayId,  uint32_t)
+WXL_OBJECT_FIELD(Units, unit_faction_template,  UnitFactionTemplate, uint32_t)
+WXL_OBJECT_FIELD(Units, unit_flags,             UnitFlags,           uint32_t)
+WXL_OBJECT_FIELD(Units, unit_flags2,            UnitFlags2,          uint32_t)
+WXL_OBJECT_FIELD(Units, unit_dynamic_flags,     UnitDynamicFlags,    uint32_t)
+WXL_OBJECT_FIELD(Units, unit_npc_flags,         UnitNpcFlags,        uint32_t)
+WXL_OBJECT_FIELD(Units, unit_bounding_radius,   UnitBoundingRadius,  float)
+WXL_OBJECT_FIELD(Units, unit_combat_reach,      UnitCombatReach,     float)
+WXL_OBJECT_FIELD(Units, unit_charm,             UnitCharm,           wxl_guid)
+WXL_OBJECT_FIELD(Units, unit_summon,            UnitSummon,          wxl_guid)
+WXL_OBJECT_FIELD(Units, unit_charmed_by,        UnitCharmedBy,       wxl_guid)
+WXL_OBJECT_FIELD(Units, unit_summoned_by,       UnitSummonedBy,      wxl_guid)
+WXL_OBJECT_FIELD(Units, unit_created_by,        UnitCreatedBy,       wxl_guid)
+
+// --- Players -------------------------------------------------------------------------------
+
+WXL_OBJECT_FIELD(Players, player_flags,          PlayerFlags,       uint32_t)
+WXL_OBJECT_FIELD(Players, player_guild_id,       PlayerGuildId,     uint32_t)
+WXL_OBJECT_FIELD(Players, player_guild_rank,     PlayerGuildRank,   uint32_t)
+WXL_OBJECT_FIELD(Players, player_chosen_title,   PlayerChosenTitle, uint32_t)
+WXL_OBJECT_READ_AT(Players, player_visible_item, PlayerVisibleItem, uint32_t)
+
+// --- Items and containers ------------------------------------------------------------------
+
+WXL_OBJECT_FIELD(Items, item_owner,          ItemOwner,         wxl_guid)
+WXL_OBJECT_FIELD(Items, item_contained_in,   ItemContainedIn,   wxl_guid)
+WXL_OBJECT_FIELD(Items, item_creator,        ItemCreator,       wxl_guid)
+WXL_OBJECT_FIELD(Items, item_stack_count,    ItemStackCount,    uint32_t)
+WXL_OBJECT_FIELD(Items, item_duration,       ItemDuration,      uint32_t)
+WXL_OBJECT_FIELD(Items, item_flags,          ItemFlags,         uint32_t)
+WXL_OBJECT_FIELD(Items, item_durability,     ItemDurability,    uint32_t)
+WXL_OBJECT_FIELD(Items, item_max_durability, ItemMaxDurability, uint32_t)
+
+WXL_OBJECT_FIELD(Containers, container_num_slots, ContainerNumSlots, uint32_t)
+WXL_OBJECT_READ_AT(Containers, container_slot,    ContainerSlot,     wxl_guid)
+
+// --- Game objects --------------------------------------------------------------------------
+
+WXL_OBJECT_FIELD(GameObjects, gameobject_created_by,    GameObjectCreatedBy,    wxl_guid)
+WXL_OBJECT_FIELD(GameObjects, gameobject_display_id,    GameObjectDisplayId,    uint32_t)
+WXL_OBJECT_FIELD(GameObjects, gameobject_flags,         GameObjectFlags,        uint32_t)
+WXL_OBJECT_FIELD(GameObjects, gameobject_dynamic_flags, GameObjectDynamicFlags, uint32_t)
+WXL_OBJECT_FIELD(GameObjects, gameobject_faction,       GameObjectFaction,      uint32_t)
+WXL_OBJECT_FIELD(GameObjects, gameobject_level,         GameObjectLevel,        uint32_t)
+WXL_OBJECT_READ(GameObjects, gameobject_state,          GameObjectState,        uint32_t)
+WXL_OBJECT_READ(GameObjects, gameobject_type,           GameObjectType,         uint32_t)
+WXL_OBJECT_READ(GameObjects, gameobject_art_kit,        GameObjectArtKit,       uint32_t)
+
+// --- Dynamic objects -----------------------------------------------------------------------
+
+WXL_OBJECT_FIELD(Dynamics, dynamic_caster,    DynamicCaster,   wxl_guid)
+WXL_OBJECT_FIELD(Dynamics, dynamic_spell_id,  DynamicSpellId,  uint32_t)
+WXL_OBJECT_FIELD(Dynamics, dynamic_radius,    DynamicRadius,   float)
+WXL_OBJECT_FIELD(Dynamics, dynamic_cast_time, DynamicCastTime, uint32_t)
+
+// --- Corpses -------------------------------------------------------------------------------
+
+WXL_OBJECT_FIELD(Corpses, corpse_owner,         CorpseOwner,        wxl_guid)
+WXL_OBJECT_FIELD(Corpses, corpse_party,         CorpseParty,        wxl_guid)
+WXL_OBJECT_FIELD(Corpses, corpse_display_id,    CorpseDisplayId,    uint32_t)
+WXL_OBJECT_FIELD(Corpses, corpse_guild,         CorpseGuild,        uint32_t)
+WXL_OBJECT_FIELD(Corpses, corpse_flags,         CorpseFlags,        uint32_t)
+WXL_OBJECT_FIELD(Corpses, corpse_dynamic_flags, CorpseDynamicFlags, uint32_t)
+
+#ifdef WXL_OBJECT_FIELD_DEFAULTED
+    #undef WXL_OBJECT_FIELD
+    #undef WXL_OBJECT_FIELD_DEFAULTED
+#endif
