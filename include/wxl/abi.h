@@ -38,7 +38,7 @@
 // Major 0 means the contract is still moving: any release may break any other.
 
 #define WXL_ABI_VERSION_MAJOR 0
-#define WXL_ABI_VERSION_MINOR 3
+#define WXL_ABI_VERSION_MINOR 4
 
 // --- Platform ------------------------------------------------------------------------------
 //
