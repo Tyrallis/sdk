@@ -3,6 +3,7 @@
 
 #include "wxl/host/mod_host.hpp"
 
+#include <chrono>
 #include <cstdio>
 #include <string_view>
 #include <utility>
@@ -13,6 +14,14 @@ namespace wxl::host
 
     namespace
     {
+        /// The mod whose code runs on this thread. Per thread, because events are raised on
+        /// more than one and each handler is its own mod's code wherever it runs.
+        thread_local ModHost::ModToken t_currentMod = 0;
+
+        /// How long an unload waits for another thread to leave a handler before it gives up
+        /// and leaves the binary mapped.
+        constexpr std::chrono::milliseconds kUnloadWait{2000};
+
         std::string_view View(wxl_str str)
         {
             return str.data ? std::string_view(str.data, str.size) : std::string_view();
@@ -84,7 +93,8 @@ namespace wxl::host
     {
         current_ = this;
 
-        events_.SetOwnerSlot(&currentMod_);
+        mainThread_ = std::this_thread::get_id();
+        events_.SetOwnerTracker(&ModHost::SwapOwner, this);
         events_.SetFaultHandler(&ModHost::OnHandlerFault, this);
 
         info_.struct_size = sizeof(info_);
@@ -164,7 +174,12 @@ namespace wxl::host
                                                       void* user, int32_t priority)
     {
         if (!current_) return WXL_SUBSCRIPTION_NONE;
-        return current_->events_.Subscribe(event, handler, user, priority, current_->currentMod_);
+        const wxl_subscription token =
+            current_->events_.Subscribe(event, handler, user, priority, t_currentMod);
+        if (token == WXL_SUBSCRIPTION_NONE && handler &&
+            static_cast<uint32_t>(event) < static_cast<uint32_t>(WXL_EV_COUNT))
+            current_->WarnUnraised(t_currentMod, event);
+        return token;
     }
 
     void WXL_CALL ModHost::ThunkUnsubscribe(wxl_subscription subscription)
@@ -175,6 +190,42 @@ namespace wxl::host
     void WXL_CALL ModHost::ThunkEmit(wxl_event event, const void* args)
     {
         if (current_) current_->events_.Emit(event, args);
+    }
+
+    // --- The current mod ---------------------------------------------------------------------
+
+    ModHost::ModToken ModHost::CurrentMod() const { return t_currentMod; }
+
+    ModHost::ModToken ModHost::SwapCurrentMod(ModToken token)
+    {
+        const ModToken previous = t_currentMod;
+        t_currentMod            = token;
+        return previous;
+    }
+
+    uint32_t ModHost::SwapOwner(void* user, uint32_t owner)
+    {
+        return static_cast<ModHost*>(user)->SwapCurrentMod(owner);
+    }
+
+    std::string ModHost::IdOf(ModToken token) const
+    {
+        if (const LoadedMod* mod = ModOf(token)) return mod->id;
+        if (token == loaded_.size() + 1) return loadingId_;
+        return std::string();
+    }
+
+    void ModHost::WarnUnraised(ModToken token, wxl_event event)
+    {
+        {
+            std::lock_guard<std::mutex> lock(stateLock_);
+            if (!warnedUnraised_.insert({token, static_cast<uint32_t>(event)}).second) return;
+        }
+        const std::string id = IdOf(token);
+        logger_.Warn(kHostTag, (id.empty() ? std::string("a handler") : "mod " + id) +
+                                   " subscribed to " + EventName(event) +
+                                   ", which this runtime does not raise: that handler will "
+                                   "never run");
     }
 
     // --- Faults ----------------------------------------------------------------------------
@@ -200,18 +251,47 @@ namespace wxl::host
 
     void ModHost::Disable(ModToken token, std::string_view what)
     {
+        if (token == 0) return;
+
+        // Whatever thread this is, the mod's handlers stop now.
+        events_.DropOwner(token);
+
+        if (!OnMainThread())
+        {
+            std::lock_guard<std::mutex> lock(stateLock_);
+            pendingDisables_.emplace_back(token, std::string(what));
+            disablesPending_.store(true, std::memory_order_release);
+            return;
+        }
+        FinishDisable(token, std::string(what));
+    }
+
+    void ModHost::FinishDisable(ModToken token, const std::string& what)
+    {
         if (token == 0 || token > loaded_.size()) return;
         LoadedMod& mod = loaded_[token - 1];
         if (mod.disabled) return;
 
         mod.disabled = true;
-        mod.fault    = std::string(what);
-        events_.DropOwner(token);
+        mod.fault    = what;
         logger_.Error(kHostTag, "mod " + mod.id + " faulted " + mod.fault +
                                     "; it is disabled: its handlers are dropped, its remaining "
                                     "stages and its unload are skipped, its binary stays mapped, "
                                     "and what it published or wrote stays as it was");
         if (disableFn_) disableFn_(disableUser_, token, mod.id.c_str());
+    }
+
+    void ModHost::SettleDisables()
+    {
+        if (!disablesPending_.load(std::memory_order_acquire) || !OnMainThread()) return;
+
+        std::vector<std::pair<ModToken, std::string>> pending;
+        {
+            std::lock_guard<std::mutex> lock(stateLock_);
+            pending.swap(pendingDisables_);
+            disablesPending_.store(false, std::memory_order_release);
+        }
+        for (const auto& [token, what] : pending) FinishDisable(token, what);
     }
 
     bool ModHost::CallEntry(ModToken token, GuardedFn fn, void* context, char* description,
@@ -263,6 +343,14 @@ namespace wxl::host
         // The token this mod gets if it loads: its place at the end of loaded_.
         const ModToken token = static_cast<ModToken>(loaded_.size() + 1);
         char           description[96];
+
+        // Names the mod in what its query and load do, before it is in loaded_.
+        struct Loading
+        {
+            std::string& id;
+            ~Loading() { id.clear(); }
+        } loading{loadingId_};
+        loadingId_ = manifest.id;
 
         // The first mod code to run, and by contract side-effect free.
         QueryCall query{binary.Entries().query, nullptr};
@@ -345,6 +433,7 @@ namespace wxl::host
 
     void ModHost::Stage(wxl_stage stage)
     {
+        SettleDisables();
         logger_.Debug(kHostTag, std::string("stage ") + StageName(stage));
         const size_t count = binaries_.size();
 
@@ -370,12 +459,24 @@ namespace wxl::host
 
     void ModHost::UnloadAll()
     {
+        SettleDisables();
+
+        // Once a wait has run out, a thread is stuck in some handler; the remaining mods are
+        // not waited for again, and none of them is freed.
+        bool stuck = false;
         for (size_t i = binaries_.size(); i-- > 0;)
         {
             // Before anything frees the code a handler points at. The client keeps raising
             // events while it takes itself apart -- window messages do not stop because the
-            // mods are gone -- so a subscription left behind is a call into a freed binary.
+            // mods are gone -- so a subscription left behind is a call into a freed binary,
+            // and so is a handler another thread entered just before the drop.
             events_.DropOwner(static_cast<uint32_t>(i + 1));
+            if (!stuck && !events_.WaitForOtherDispatches(kUnloadWait))
+            {
+                stuck = true;
+                logger_.Warn(kHostTag, "another thread is still inside a handler; the remaining "
+                                       "mods are unloaded but their binaries stay mapped");
+            }
 
             if (loaded_[i].disabled)
             {
@@ -397,7 +498,8 @@ namespace wxl::host
                 }
             }
             logger_.Info(kHostTag, "unloaded " + loaded_[i].id);
-            binaries_[i].Close();
+            if (stuck) binaries_[i].Abandon();
+            else binaries_[i].Close();
         }
         binaries_.clear();
         loaded_.clear();
@@ -409,5 +511,9 @@ namespace wxl::host
         UnloadAll();
     }
 
-    void ModHost::Raise(wxl_event event, const void* args) { events_.Emit(event, args); }
+    void ModHost::Raise(wxl_event event, const void* args)
+    {
+        if (disablesPending_.load(std::memory_order_relaxed)) SettleDisables();
+        events_.Emit(event, args);
+    }
 } // namespace wxl::host

@@ -8,12 +8,19 @@ namespace wxl::host
     wxl_result ServiceRegistry::Publish(std::string_view name, uint32_t version, const void* iface)
     {
         if (name.empty() || !iface) return WXL_E_INVALID;
-        if (Has(name, version)) return WXL_E_INVALID;
+        std::lock_guard<std::mutex> lock(lock_);
+        if (Find(name, version)) return WXL_E_INVALID;
         entries_.push_back(PublishedService{std::string(name), version, iface});
         return WXL_OK;
     }
 
     const void* ServiceRegistry::Get(std::string_view name, uint32_t version) const
+    {
+        std::lock_guard<std::mutex> lock(lock_);
+        return Find(name, version);
+    }
+
+    const void* ServiceRegistry::Find(std::string_view name, uint32_t version) const
     {
         for (const PublishedService& entry : entries_)
             if (entry.version == version && entry.name == name) return entry.iface;

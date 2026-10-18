@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <exception>
 #include <string>
+#include <thread>
 
 namespace wxl::host
 {
@@ -63,15 +64,31 @@ namespace wxl::host
                                                       " threw something that is not a std::exception");
             }
         }
+
+        /// The dispatches the calling thread is inside, innermost first, across every bus.
+        struct DispatchFrame
+        {
+            const void*    bus;
+            DispatchFrame* up;
+        };
+
+        thread_local DispatchFrame* t_dispatches = nullptr;
     } // namespace
 
-    EventBus::EventBus() : lists_(WXL_EV_COUNT), raisable_(WXL_EV_COUNT, false) {}
+    EventBus::EventBus()
+        : lists_(new std::atomic<const Snapshot*>[WXL_EV_COUNT]), raisable_(WXL_EV_COUNT, false),
+          current_(WXL_EV_COUNT)
+    {
+        for (uint32_t i = 0; i < static_cast<uint32_t>(WXL_EV_COUNT); ++i) lists_[i].store(nullptr);
+    }
 
     EventBus::EventBus(const std::vector<wxl_event>& raisable, const Logger* logger) : EventBus()
     {
         logger_ = logger;
         for (const wxl_event event : raisable) SetRaisable(event, true);
     }
+
+    EventBus::~EventBus() = default;
 
     void EventBus::SetRaisable(wxl_event event, bool raisable)
     {
@@ -83,27 +100,24 @@ namespace wxl::host
         return Known(event) && raisable_[event];
     }
 
-    void EventBus::Insert(List& list, Entry entry)
+    void EventBus::Publish(wxl_event event, std::unique_ptr<Snapshot> next)
     {
-        // After every entry of the same priority: ties keep subscription order.
-        const auto position =
-            std::upper_bound(list.entries.begin(), list.entries.end(), entry,
-                             [](const Entry& a, const Entry& b) { return a.priority < b.priority; });
-        list.entries.insert(position, entry);
+        if (next && next->empty()) next.reset();
+
+        std::unique_ptr<Snapshot> old = std::move(current_[event]);
+        current_[event]               = std::move(next);
+        lists_[event].store(current_[event].get(), std::memory_order_seq_cst);
+        if (old) retiredSnapshots_.push_back(std::move(old));
+        Reclaim();
     }
 
-    void EventBus::Settle(List& list)
+    void EventBus::Reclaim()
     {
-        if (list.dead)
-        {
-            list.entries.erase(std::remove_if(list.entries.begin(), list.entries.end(),
-                                              [](const Entry& e) { return !e.live; }),
-                               list.entries.end());
-            list.dead = false;
-        }
-        for (const Entry& entry : list.pending)
-            if (entry.live) Insert(list, entry);
-        list.pending.clear();
+        // A dispatch counts itself in before it reads a snapshot, and every publish lands before
+        // this load: with nobody counted in, nobody can be holding anything retired so far.
+        if (inFlight_.load(std::memory_order_seq_cst) != 0) return;
+        retiredSnapshots_.clear();
+        retiredEntries_.clear();
     }
 
     wxl_subscription EventBus::Subscribe(wxl_event event, wxl_event_fn handler, void* user,
@@ -111,37 +125,52 @@ namespace wxl::host
     {
         if (!handler || !CanRaise(event)) return WXL_SUBSCRIPTION_NONE;
 
-        List&       list  = lists_[event];
-        const Entry entry{++next_, handler, user, priority, owner, true};
-        if (list.depth > 0) list.pending.push_back(entry);
-        else Insert(list, entry);
-        return entry.id;
+        std::lock_guard<std::mutex> lock(writeLock_);
+
+        std::unique_ptr<Entry> entry(new Entry{++next_, handler, user, priority, owner});
+        Entry* const           added = entry.get();
+        entries_.push_back(std::move(entry));
+
+        std::unique_ptr<Snapshot> next(current_[event] ? new Snapshot(*current_[event]) : new Snapshot);
+        // After every entry of the same priority: ties keep subscription order.
+        const auto position = std::upper_bound(
+            next->begin(), next->end(), added,
+            [](const Entry* a, const Entry* b) { return a->priority < b->priority; });
+        next->insert(position, added);
+        Publish(event, std::move(next));
+        return added->id;
     }
 
     void EventBus::Unsubscribe(wxl_subscription subscription)
     {
         if (subscription == WXL_SUBSCRIPTION_NONE) return;
 
-        for (List& list : lists_)
+        std::lock_guard<std::mutex> lock(writeLock_);
+        for (uint32_t i = 0; i < static_cast<uint32_t>(WXL_EV_COUNT); ++i)
         {
-            for (Entry& entry : list.pending)
-                if (entry.id == subscription) entry.live = false;
+            const Snapshot* list = current_[i].get();
+            if (!list) continue;
 
-            for (size_t i = 0; i < list.entries.size(); ++i)
+            const auto found = std::find_if(list->begin(), list->end(), [subscription](const Entry* e) {
+                return e->id == subscription;
+            });
+            if (found == list->end()) continue;
+
+            Entry* const victim = *found;
+            victim->live.store(false, std::memory_order_release);
+
+            std::unique_ptr<Snapshot> next(new Snapshot(*list));
+            next->erase(next->begin() + (found - list->begin()));
+            for (std::unique_ptr<Entry>& owned : entries_)
             {
-                if (list.entries[i].id != subscription) continue;
-                if (list.depth > 0)
-                {
-                    // The dispatch walks this vector by index: mark now, erase when it ends.
-                    list.entries[i].live = false;
-                    list.dead            = true;
-                }
-                else
-                {
-                    list.entries.erase(list.entries.begin() + static_cast<std::ptrdiff_t>(i));
-                }
-                return;
+                if (owned.get() != victim) continue;
+                retiredEntries_.push_back(std::move(owned));
+                owned = std::move(entries_.back());
+                entries_.pop_back();
+                break;
             }
+            Publish(static_cast<wxl_event>(i), std::move(next));
+            return;
         }
     }
 
@@ -149,77 +178,124 @@ namespace wxl::host
     {
         if (owner == 0) return;
 
-        for (List& list : lists_)
+        std::lock_guard<std::mutex> lock(writeLock_);
+        for (uint32_t i = 0; i < static_cast<uint32_t>(WXL_EV_COUNT); ++i)
         {
-            for (Entry& entry : list.pending)
-                if (entry.owner == owner) entry.live = false;
+            const Snapshot* list = current_[i].get();
+            if (!list) continue;
 
-            if (list.depth > 0)
+            std::unique_ptr<Snapshot> next(new Snapshot);
+            for (Entry* entry : *list)
             {
-                for (Entry& entry : list.entries)
-                {
-                    if (entry.owner != owner || !entry.live) continue;
-                    entry.live = false;
-                    list.dead  = true;
-                }
+                if (entry->owner == owner) entry->live.store(false, std::memory_order_release);
+                else next->push_back(entry);
             }
-            else
-            {
-                list.entries.erase(std::remove_if(list.entries.begin(), list.entries.end(),
-                                                  [owner](const Entry& e) { return e.owner == owner; }),
-                                   list.entries.end());
-            }
+            if (next->size() != list->size()) Publish(static_cast<wxl_event>(i), std::move(next));
         }
+
+        for (size_t i = 0; i < entries_.size();)
+        {
+            if (entries_[i]->owner != owner)
+            {
+                ++i;
+                continue;
+            }
+            retiredEntries_.push_back(std::move(entries_[i]));
+            entries_[i] = std::move(entries_.back());
+            entries_.pop_back();
+        }
+        Reclaim();
     }
 
     void EventBus::Emit(wxl_event event, const void* args)
     {
         if (!Known(event)) return;
 
-        List& list = lists_[event];
-        ++list.depth;
-        const size_t count = list.entries.size(); // entries added meanwhile wait in pending
-        for (size_t i = 0; i < count; ++i)
+        std::atomic<const Snapshot*>& slot = lists_[event];
+        if (!slot.load(std::memory_order_relaxed)) return; // nobody listens: no count, no frame
+
+        struct Dispatch
         {
-            const Entry& entry = list.entries[i];
-            if (!entry.live) continue;
+            const EventBus& bus;
+            DispatchFrame   frame;
 
-            HandlerCall call{entry.handler, entry.user, args, event, logger_};
-            const uint32_t owner = entry.owner;
-
-            uint32_t saved = 0;
-            if (ownerSlot_)
+            explicit Dispatch(const EventBus& b) : bus(b), frame{&b, t_dispatches}
             {
-                saved       = *ownerSlot_;
-                *ownerSlot_ = owner;
+                bus.inFlight_.fetch_add(1, std::memory_order_seq_cst);
+                t_dispatches = &frame;
             }
-            Fault      fault;
-            const bool returned = CallGuarded(&InvokeHandler, &call, &fault);
-            if (ownerSlot_) *ownerSlot_ = saved;
-
-            if (returned) continue;
-
-            if (logger_)
+            ~Dispatch()
             {
-                char description[96];
-                logger_->Error(kHostTag, std::string("a handler for ") + EventName(event) +
-                                             " faulted: " +
-                                             DescribeFault(fault, description, sizeof description));
+                t_dispatches = frame.up;
+                bus.inFlight_.fetch_sub(1, std::memory_order_seq_cst);
             }
-            if (faultFn_) faultFn_(faultUser_, owner, event, fault);
+        };
+
+        {
+            const Dispatch  dispatch(*this);
+            const Snapshot* list = slot.load(std::memory_order_seq_cst);
+            if (list)
+            {
+                for (Entry* entry : *list)
+                {
+                    if (!entry->live.load(std::memory_order_acquire)) continue;
+
+                    HandlerCall    call{entry->handler, entry->user, args, event, logger_};
+                    const uint32_t owner = entry->owner;
+
+                    const uint32_t saved = ownerFn_ ? ownerFn_(ownerUser_, owner) : 0;
+                    Fault          fault;
+                    const bool     returned = CallGuarded(&InvokeHandler, &call, &fault);
+                    if (ownerFn_) ownerFn_(ownerUser_, saved);
+
+                    if (returned) continue;
+
+                    if (logger_)
+                    {
+                        char description[96];
+                        logger_->Error(kHostTag, std::string("a handler for ") + EventName(event) +
+                                                     " faulted: " +
+                                                     DescribeFault(fault, description, sizeof description));
+                    }
+                    if (faultFn_) faultFn_(faultUser_, owner, event, fault);
+                }
+            }
         }
-        if (--list.depth == 0) Settle(list);
+
+        // The last dispatch out frees what changes made while it ran left behind, unless a
+        // change is being made right now, which frees it itself.
+        if (inFlight_.load(std::memory_order_relaxed) == 0)
+        {
+            std::unique_lock<std::mutex> lock(writeLock_, std::try_to_lock);
+            if (lock && (!retiredSnapshots_.empty() || !retiredEntries_.empty())) Reclaim();
+        }
+    }
+
+    uint32_t EventBus::DispatchesOnThisThread() const
+    {
+        uint32_t count = 0;
+        for (const DispatchFrame* frame = t_dispatches; frame; frame = frame->up)
+            if (frame->bus == this) ++count;
+        return count;
+    }
+
+    bool EventBus::WaitForOtherDispatches(std::chrono::milliseconds limit) const
+    {
+        const uint32_t mine     = DispatchesOnThisThread();
+        const auto     deadline = std::chrono::steady_clock::now() + limit;
+        while (inFlight_.load(std::memory_order_seq_cst) > mine)
+        {
+            if (std::chrono::steady_clock::now() >= deadline) return false;
+            std::this_thread::yield();
+        }
+        return true;
     }
 
     size_t EventBus::LiveCount(wxl_event event) const
     {
         if (!Known(event)) return 0;
-        size_t count = 0;
-        for (const Entry& entry : lists_[event].entries)
-            if (entry.live) ++count;
-        for (const Entry& entry : lists_[event].pending)
-            if (entry.live) ++count;
-        return count;
+        std::lock_guard<std::mutex> lock(writeLock_);
+        return current_[event] ? current_[event]->size() : 0;
     }
 
     size_t EventBus::LiveCount() const

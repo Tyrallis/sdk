@@ -7,10 +7,15 @@
 #ifndef WXL_HOST_MOD_HOST_HPP
 #define WXL_HOST_MOD_HOST_HPP
 
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
+#include <mutex>
+#include <set>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <utility>
 #include <vector>
 
 #include "wxl/host.h"
@@ -89,7 +94,11 @@ namespace wxl::host
      * mapped, and the host goes on. The services it published stay published, since another mod
      * may hold the pointer.
      *
-     * Every method runs on the thread that calls it; the host does not lock.
+     * Threads. The host is built, loads, reports stages and unloads on one thread, the main
+     * one: the thread that constructs it. Events may be raised and handlers may subscribe from
+     * any thread; the current mod is tracked per thread. A mod that faults on another thread has
+     * its subscriptions dropped at once, and the rest of its disabling -- the log, the flag,
+     * the disable handler -- waits for the main thread's next @ref Raise or @ref Stage.
      */
     class ModHost
     {
@@ -129,13 +138,15 @@ namespace wxl::host
         /// WXL_STAGE_SHUTDOWN, then @ref UnloadAll.
         void Shutdown();
 
-        /// Dispatches an event. What the runtime calls at its own seams.
+        /// Dispatches an event. What the runtime calls at its own seams, from any thread.
         void Raise(wxl_event event, const void* args);
 
         /**
          * @brief Disables a mod after it faulted: logs what it was doing, drops its
          *        subscriptions, skips its remaining entry points, tells the disable handler.
          *
+         * Off the main thread, only the subscriptions go at once; the rest follows on the main
+         * thread, see the class notes.
          * @param what  what the mod was doing, for the log: "in wxl_mod_stage(early)".
          */
         void Disable(ModToken token, std::string_view what);
@@ -149,21 +160,20 @@ namespace wxl::host
         }
 
         /**
-         * @brief The mod whose code is running, or 0 for nobody.
+         * @brief The mod whose code is running on the calling thread, or 0 for nobody.
          *
          * Set around every entry point and every handler the host calls. A runtime that calls
          * into a mod by another route (a script function, say) brackets the call with
          * @ref SwapCurrentMod so that what the mod does inside is attributed to it.
          */
-        ModToken CurrentMod() const { return currentMod_; }
+        ModToken CurrentMod() const;
 
-        /// Sets the current mod and returns the previous one, to put back after the call.
-        ModToken SwapCurrentMod(ModToken token)
-        {
-            const ModToken previous = currentMod_;
-            currentMod_             = token;
-            return previous;
-        }
+        /// Sets the calling thread's current mod and returns the previous one, to put back
+        /// after the call.
+        ModToken SwapCurrentMod(ModToken token);
+
+        /// Whether the caller runs on the thread that built the host.
+        bool OnMainThread() const { return std::this_thread::get_id() == mainThread_; }
 
         /// The loaded mod a token names, or null for 0 or a token past the end.
         const LoadedMod* ModOf(ModToken token) const;
@@ -196,7 +206,19 @@ namespace wxl::host
         static void WXL_CALL             ThunkUnsubscribe(wxl_subscription subscription);
         static void WXL_CALL             ThunkEmit(wxl_event event, const void* args);
 
-        static void OnHandlerFault(void* user, uint32_t owner, wxl_event event, const Fault& fault);
+        static void     OnHandlerFault(void* user, uint32_t owner, wxl_event event, const Fault& fault);
+        static uint32_t SwapOwner(void* user, uint32_t owner);
+
+        /// Finishes, on the main thread, the disables a fault on another thread left pending.
+        void SettleDisables();
+        void FinishDisable(ModToken token, const std::string& what);
+
+        /// Logs, once per mod and event, a subscription the runtime refused because it never
+        /// raises that event: the handler is real code that will never run.
+        void WarnUnraised(ModToken token, wxl_event event);
+
+        /// The id of a loaded mod, or of the one loading; empty for nobody.
+        std::string IdOf(ModToken token) const;
 
         void Refuse(const std::string& id, const std::string& directoryName,
                     const std::filesystem::path& directory, Verdict verdict,
@@ -218,10 +240,16 @@ namespace wxl::host
         std::vector<LoadedMod>  loaded_;
         std::vector<ModBinary>  binaries_; ///< index-aligned with loaded_
         std::vector<RefusedMod> refused_;
-        bool                    loadedAll_  = false;
-        ModToken                currentMod_ = 0;
+        bool                    loadedAll_   = false;
+        std::string             loadingId_;  ///< the mod inside wxl_mod_query or wxl_mod_load
         DisableFn               disableFn_   = nullptr;
         void*                   disableUser_ = nullptr;
+        std::thread::id         mainThread_;
+
+        mutable std::mutex                              stateLock_; ///< guards the two below
+        std::vector<std::pair<ModToken, std::string>>   pendingDisables_;
+        std::set<std::pair<ModToken, uint32_t>>         warnedUnraised_;
+        std::atomic<bool>                               disablesPending_{false};
     };
 } // namespace wxl::host
 

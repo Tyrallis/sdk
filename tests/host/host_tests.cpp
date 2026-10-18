@@ -7,12 +7,15 @@
 //
 // Without arguments the sections that need a file on disk are skipped and say so.
 
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "wxl/host/admission.hpp"
@@ -183,6 +186,45 @@ namespace
     {
         g_order.push_back(*static_cast<int*>(user));
         throw std::runtime_error("handler failure");
+    }
+
+    void WXL_CALL CountUp(void* user, const void*)
+    {
+        static_cast<std::atomic<int>*>(user)->fetch_add(1);
+    }
+
+    /// Holds its dispatch open until told to let go.
+    struct Gate
+    {
+        std::atomic<bool> entered{false};
+        std::atomic<bool> release{false};
+    };
+
+    void WXL_CALL HoldOpen(void* user, const void*)
+    {
+        Gate* gate = static_cast<Gate*>(user);
+        gate->entered.store(true);
+        while (!gate->release.load()) std::this_thread::yield();
+    }
+
+    struct SelfWait
+    {
+        EventBus* bus;
+        bool      answered = false;
+    };
+
+    void WXL_CALL WaitInside(void* user, const void*)
+    {
+        SelfWait* self = static_cast<SelfWait*>(user);
+        self->answered = self->bus->WaitForOtherDispatches(std::chrono::milliseconds(0));
+    }
+
+    size_t CountLines(const std::vector<std::string>& lines, const char* needle)
+    {
+        size_t count = 0;
+        for (const std::string& line : lines)
+            if (Contains(line, needle)) ++count;
+        return count;
     }
 
     // --- in-process "binaries" for the fake loader ------------------------------------------
@@ -855,6 +897,47 @@ int main(int argc, char** argv)
               "CanRaise reflects the configuration");
     }
 
+    Section("event bus across threads");
+    {
+        EventBus bus({WXL_EV_Update}, nullptr);
+
+        // Two threads raise while this one keeps changing the list under them.
+        std::atomic<int> steady{0};
+        std::atomic<int> churn{0};
+        bus.Subscribe(WXL_EV_Update, &CountUp, &steady, 0);
+        constexpr int kRaises = 20000;
+        const auto    raise   = [&bus] {
+            for (int i = 0; i < kRaises; ++i) bus.Emit(WXL_EV_Update, nullptr);
+        };
+        std::thread a(raise), b(raise);
+        for (int i = 0; i < 2000; ++i)
+            bus.Unsubscribe(bus.Subscribe(WXL_EV_Update, &CountUp, &churn, i % 3 - 1));
+        a.join();
+        b.join();
+        Check(steady.load() == 2 * kRaises,
+              "a subscription that stays is called once per raise, whatever changes around it");
+        Check(bus.LiveCount(WXL_EV_Update) == 1, "and the ones that came and went are gone");
+
+        // A dispatch on another thread holds an unload back until it is done.
+        Gate gate;
+        const wxl_subscription held = bus.Subscribe(WXL_EV_Update, &HoldOpen, &gate, 0);
+        std::thread holder([&bus] { bus.Emit(WXL_EV_Update, nullptr); });
+        while (!gate.entered.load()) std::this_thread::yield();
+        bus.Unsubscribe(held);
+        Check(!bus.WaitForOtherDispatches(std::chrono::milliseconds(20)),
+              "a wait runs out while another thread is still inside a handler, dropped or not");
+        gate.release.store(true);
+        holder.join();
+        Check(bus.WaitForOtherDispatches(std::chrono::milliseconds(1000)),
+              "and returns once it has left");
+
+        SelfWait self{&bus};
+        const wxl_subscription inside = bus.Subscribe(WXL_EV_Update, &WaitInside, &self, 0);
+        bus.Emit(WXL_EV_Update, nullptr);
+        Check(self.answered, "the waiting thread's own dispatch does not count against it");
+        bus.Unsubscribe(inside);
+    }
+
     Section("log");
     {
         CaptureSink sink;
@@ -1001,6 +1084,14 @@ int main(int argc, char** argv)
               "a taken key and a null name are refused through the table");
         Check(host.Table()->subscribe(WXL_EV_FrameBegin, &Record, nullptr, 0) == WXL_SUBSCRIPTION_NONE,
               "an event the runtime did not declare is refused through the table");
+        host.Table()->subscribe(WXL_EV_FrameBegin, &Record, nullptr, 0);
+        Check(CountLines(sink.lines, "subscribed to FrameBegin, which this runtime does not raise") == 1,
+              "the refusal is logged as a warning, once");
+        const ModHost::ModToken outside = host.SwapCurrentMod(1);
+        host.Table()->subscribe(WXL_EV_WorldEnter, &Record, nullptr, 0);
+        host.SwapCurrentMod(outside);
+        Check(sink.Has("[WARN ] [host] mod wxl.good subscribed to WorldEnter"),
+              "naming the mod whose handler will never run");
         int                    tag = 7;
         const wxl_subscription sub = host.Table()->subscribe(WXL_EV_Update, &Record, &tag, 0);
         g_order.clear();
@@ -1091,21 +1182,26 @@ int main(int argc, char** argv)
         Check(g_trace == std::vector<std::string>{"steady:stage0", "faulty:stage0", "stagecrash:stage0"},
               "every loaded mod sees the early stage");
 
+        // The fault happens on another thread: what stops the mod's code happens there and then,
+        // the rest of disabling it waits for this one.
         const wxl_update_args tick{0.5f};
         g_order.clear();
-        host.Raise(WXL_EV_Update, &tick);
+        std::thread([&host, &tick] { host.Raise(WXL_EV_Update, &tick); }).join();
         Check(g_order == std::vector<int>{101, 100},
               "a handler that faults ends only itself: the next mod's handler still runs, and the "
               "faulting mod's later handler for the same event does not");
+        Check(host.Events().LiveCount() == 1,
+              "every subscription of the faulting mod is gone at once, other events included");
+        Check(!host.Loaded()[1].disabled,
+              "a fault on another thread leaves the rest of the disabling to the main thread");
+
+        g_order.clear();
+        host.Raise(WXL_EV_Update, &tick);
         Check(host.Loaded()[1].disabled && Contains(host.Loaded()[1].fault, "Update"),
-              "the faulting mod is disabled, remembering what it was doing");
+              "which disables the mod at its next raise, remembering what it was doing");
         Check(sink.Has("mod wxl.faulty faulted in its handler for Update") &&
                   sink.Has("access violation (0xC0000005)"),
               "the log names the mod, what it was doing and the fault");
-        Check(host.Events().LiveCount() == 1,
-              "every subscription of the disabled mod is gone, other events included");
-        g_order.clear();
-        host.Raise(WXL_EV_Update, &tick);
         host.Raise(WXL_EV_FrameBegin, &tick);
         Check(g_order == std::vector<int>{100}, "the next dispatches run without it");
 

@@ -7,6 +7,7 @@
 #define WXL_HOST_REGISTRY_HPP
 
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -28,7 +29,8 @@ namespace wxl::host
      *
      * A lookup matches an exact version only: a service's version is its layout, and a different
      * one is a different struct. Publishing under a key already taken is refused; nothing is
-     * ever withdrawn, since a mod may have kept the pointer.
+     * ever withdrawn, since a mod may have kept the pointer. Publish and Get are safe from any
+     * thread; Entries is for the thread that configures the runtime.
      */
     class ServiceRegistry
     {
@@ -42,6 +44,9 @@ namespace wxl::host
         const std::vector<PublishedService>& Entries() const { return entries_; }
 
     private:
+        const void* Find(std::string_view name, uint32_t version) const;
+
+        mutable std::mutex            lock_;
         std::vector<PublishedService> entries_;
     };
 } // namespace wxl::host
