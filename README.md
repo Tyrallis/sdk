@@ -211,6 +211,8 @@ Beyond events, a runtime publishes services, and a mod asks for the ones it need
 | `wxl.net` | messages to and from the server | yes; no runtime publishes it yet |
 | `wxl.ui` | frames and the interface | yes; no runtime publishes it yet |
 | `wxl.point` | functions of the engine: run code before, instead of or after them | yes; a few exist on one runtime, and say so |
+| `wxl.gx` | the client's D3D9 device and the model batches it draws | no: the x64 runtime, on a D3D9 device |
+| `wxl.m2file` | model files as the client's loader reads them, for a mod that teaches it a format | no: the x64 runtime |
 | `wxl.hook` | hook points a runtime names and keeps working | yes |
 | `wxl.hook.raw` | a detour at a raw address | no: runtimes that load into a shipped binary |
 | `wxl.patch` | bytes written into the image | no: runtimes that load into a shipped binary |
