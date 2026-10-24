@@ -602,15 +602,21 @@ with your own map and position: map 0 is the Eastern Kingdoms, 1 Kalimdor, 571 N
 ### Handles and objects
 
 When an event is about an object of the game, a creature, a player, a chest, it gives you a
-**handle** (`wxl_handle`): a number that names the object. It is not a pointer to the client's
-memory. It carries a generation, so a handle kept after its object is gone does not reach whatever
-took that object's place; it answers that the object is gone. You can keep handles across frames,
-store them in containers and compare them, and a stale one cannot crash the client.
+`wxl::Object`. Inside it is a **handle** (`wxl_handle`): a number that names the object. It is not a
+pointer to the client's memory. It carries a generation, so a handle kept after its object is gone
+does not reach whatever took that object's place; it answers that the object is gone. You can keep
+objects across frames, store them in containers and compare them, and a stale one cannot crash
+the client.
 
-To read the object behind a handle, the SDK wraps it in a value of the object's class from
-`wxl/objects.hpp`: `wxl::Object`, and below it `wxl::Unit` (a creature or a player),
-`wxl::Player`, `wxl::GameObject` and others. `wxl::Unit(handle)` costs nothing; each read, such as
-`unit.Name()`, asks the `wxl.object` service.
+A handle names the object for as long as it stays in view. If a creature walks out of range and
+comes back, the client announces it again, with a new handle: compare its `Guid()`, the server's
+own id, to recognise it.
+
+`wxl::Object` reads what every object has, such as its name and position. Below it are the
+classes of `wxl/objects.hpp` for each kind: `wxl::Unit` (a creature or a player), `wxl::Player`,
+`wxl::GameObject` and others. `wxl::Unit(object)` views an object you know to be a unit as a unit
+and costs nothing; `object.As<wxl::Unit>()` checks first. Each read, such as `unit.Name()`, asks
+the `wxl.object` service.
 
 ### A read can fail, in more than one way
 
@@ -649,10 +655,10 @@ public:
 
     UnitWatch(const Clock& clock, Journal& journal) : clock_(clock), journal_(journal) {}
 
-    void OnObjectCreate(wxl_handle object, wxl_guid guid, uint32_t type) override;
-    void OnObjectDestroy(wxl_handle object, wxl_guid guid, uint32_t type) override;
-    void OnUnitDeath(wxl_handle unit) override;
-    void OnTargetChanged(wxl_handle previous, wxl_handle current) override;
+    void OnObjectCreate(wxl::Object object, wxl_guid guid, uint32_t type) override;
+    void OnObjectDestroy(wxl::Object object, wxl_guid guid, uint32_t type) override;
+    void OnUnitDeath(wxl::Object unit) override;
+    void OnTargetChanged(wxl::Object previous, wxl::Object current) override;
 
 private:
     /// Adds a line about @p unit to the journal.
@@ -663,9 +669,9 @@ private:
 };
 ```
 
-Its header includes `wxl/objects.hpp` beside `wxl/sdk.hpp`. Besides the handle, an object event
-carries the object's `wxl_guid`, the server's own id for it, and its type, one of the
-`WXL_OBJECT_...` values.
+Its header includes `wxl/objects.hpp` beside `wxl/sdk.hpp`. Besides the object, an object event
+carries its `wxl_guid`, the server's own id for it, and its type, one of the `WXL_OBJECT_...`
+values.
 
 `src/UnitWatch.cpp` starts with the question every handler below asks, how far a unit is from the
 player:
@@ -704,43 +710,44 @@ The handlers:
 **`examples/scout/src/UnitWatch.cpp`**
 
 ```cpp
-void UnitWatch::OnObjectCreate(wxl_handle object, wxl_guid, uint32_t type)
+void UnitWatch::OnObjectCreate(wxl::Object object, wxl_guid, uint32_t type)
 {
-    if (!IsUnit(type)) return;
+    if (!wxl::Unit::Accepts(type)) return;
 
     const wxl::Unit unit(object);
     if (unit == wxl::Player::Local()) return;
     if (IsNear(unit)) Note(What::Appeared, unit);
 }
 
-void UnitWatch::OnObjectDestroy(wxl_handle object, wxl_guid, uint32_t type)
+void UnitWatch::OnObjectDestroy(wxl::Object object, wxl_guid, uint32_t type)
 {
-    if (!IsUnit(type)) return;
+    if (!wxl::Unit::Accepts(type)) return;
 
     const wxl::Unit unit(object);
     if (IsNear(unit)) Note(What::Left, unit);
 }
 
-void UnitWatch::OnUnitDeath(wxl_handle unit)
+void UnitWatch::OnUnitDeath(wxl::Object unit)
 {
     if (IsNear(wxl::Unit(unit))) Note(What::Died, wxl::Unit(unit));
 }
 
-void UnitWatch::OnTargetChanged(wxl_handle, wxl_handle current)
+void UnitWatch::OnTargetChanged(wxl::Object, wxl::Object current)
 {
-    if (current == WXL_HANDLE_NONE) return;
+    if (!current.HasHandle()) return;
     Note(What::Targeted, wxl::Unit(current));
 }
 ```
 
 - **`ObjectCreate` comes for everything the client tracks**: the items in your bags, every chest
-  and door of the zone, every creature in sight. Scout tests the type first, which costs nothing,
-  then the distance, and reads the name only for what it keeps.
+  and door of the zone, every creature in sight. Scout tests the type first, which costs nothing:
+  `wxl::Unit::Accepts(type)` is true for the types a unit can be, a creature or a player. Then it
+  tests the distance, and reads the name only for what it keeps.
 - `unit == wxl::Player::Local()` compares two objects by handle: you appear too when you log in,
   and Scout does not note you.
 - An object being destroyed is still there during `OnObjectDestroy`, so its position can be read.
-- `OnTargetChanged` gives the previous target and the new one; `WXL_HANDLE_NONE` means none, which
-  is what you get when you clear your target. A target is noted at any distance: you chose it.
+- `OnTargetChanged` gives the previous target and the new one; an object with no handle
+  (`HasHandle()` is false) means none, which is what you get when you clear your target. A target is noted at any distance: you chose it.
 
 And the line itself:
 

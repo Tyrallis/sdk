@@ -8,12 +8,6 @@
 
 namespace
 {
-    /// Whether an object of that server type is a unit: a creature or a player.
-    bool IsUnit(uint32_t type)
-    {
-        return type == WXL_OBJECT_UNIT || type == WXL_OBJECT_PLAYER;
-    }
-
     /// The distance between two points on the ground, height left out.
     float GroundDistance(const wxl_vec3& a, const wxl_vec3& b)
     {
@@ -44,31 +38,31 @@ namespace
 
 namespace scout
 {
-    void UnitWatch::OnObjectCreate(wxl_handle object, wxl_guid, uint32_t type)
+    void UnitWatch::OnObjectCreate(wxl::Object object, wxl_guid, uint32_t type)
     {
-        if (!IsUnit(type)) return;
+        if (!wxl::Unit::Accepts(type)) return;
 
         const wxl::Unit unit(object);
         if (unit == wxl::Player::Local()) return;
         if (IsNear(unit)) Note(What::Appeared, unit);
     }
 
-    void UnitWatch::OnObjectDestroy(wxl_handle object, wxl_guid, uint32_t type)
+    void UnitWatch::OnObjectDestroy(wxl::Object object, wxl_guid, uint32_t type)
     {
-        if (!IsUnit(type)) return;
+        if (!wxl::Unit::Accepts(type)) return;
 
         const wxl::Unit unit(object);
         if (IsNear(unit)) Note(What::Left, unit);
     }
 
-    void UnitWatch::OnUnitDeath(wxl_handle unit)
+    void UnitWatch::OnUnitDeath(wxl::Object unit)
     {
         if (IsNear(wxl::Unit(unit))) Note(What::Died, wxl::Unit(unit));
     }
 
-    void UnitWatch::OnTargetChanged(wxl_handle, wxl_handle current)
+    void UnitWatch::OnTargetChanged(wxl::Object, wxl::Object current)
     {
-        if (current == WXL_HANDLE_NONE) return;
+        if (!current.HasHandle()) return;
         Note(What::Targeted, wxl::Unit(current));
     }
 
