@@ -32,6 +32,26 @@ namespace wxl::host
             }
             return EXCEPTION_EXECUTE_HANDLER;
         }
+
+        /// The handler itself, kept out of CallGuarded. A noexcept function's terminate is a
+        /// __finally scope over the same call as the __except; Windows stops unwinding at the
+        /// __except the unwind targets, Wine (and so Proton) runs every __finally the target
+        /// is not inside, and the terminate with it. Here nothing is noexcept: the unwind ends
+        /// in this frame, and CallGuarded's terminate stays for a C++ exception.
+        __declspec(noinline) bool Guarded(GuardedFn fn, void* context, Fault* fault)
+        {
+            __try
+            {
+                fn(context);
+            }
+            __except (Filter(GetExceptionCode(), GetExceptionInformation(), fault))
+            {
+                // The guard page is consumed by a stack overflow; without this the next one is fatal.
+                if (fault && fault->code == EXCEPTION_STACK_OVERFLOW) _resetstkoflw();
+                return false;
+            }
+            return true;
+        }
 #endif
     } // namespace
 
@@ -39,17 +59,7 @@ namespace wxl::host
     {
         if (!fn) return true;
 #ifdef _MSC_VER
-        __try
-        {
-            fn(context);
-        }
-        __except (Filter(GetExceptionCode(), GetExceptionInformation(), fault))
-        {
-            // The guard page is consumed by a stack overflow; without this the next one is fatal.
-            if (fault && fault->code == EXCEPTION_STACK_OVERFLOW) _resetstkoflw();
-            return false;
-        }
-        return true;
+        return Guarded(fn, context, fault);
 #else
         fn(context);
         return true;
