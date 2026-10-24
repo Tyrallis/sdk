@@ -273,8 +273,9 @@ int main()
                       "Update came with the first contract");
         Check(wxl::reflect::SinceOf(WXL_EV_CombatMiss).feature == 5 &&
                   wxl::reflect::SinceOf(WXL_EV_ZoneChanged).feature == 6 &&
-                  wxl::reflect::SinceOf(WXL_EV_ChatMessage).feature == 6,
-              "CombatMiss came with 0.1.5, ZoneChanged and ChatMessage with 0.1.6");
+                  wxl::reflect::SinceOf(WXL_EV_ChatMessage).feature == 6 &&
+                  wxl::reflect::SinceOf(WXL_EV_ChatAddonMessage).feature == 7,
+              "CombatMiss came with 0.1.5, ZoneChanged and ChatMessage with 0.1.6, ChatAddonMessage with 0.1.7");
     }
 
     std::printf("lookups\n");

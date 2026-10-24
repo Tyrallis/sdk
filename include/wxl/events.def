@@ -313,6 +313,8 @@ WXL_EVENT(Combat, CombatEnergize, 72, wxl_combat_energize_args)
 
 // --- Chat, continued ------------------------------------------------------------------------
 
+WXL_EVENTS_SINCE(0, 1, 7, 73)
+
 /** An addon message of the server is delivered to the interface as CHAT_MSG_ADDON, with its prefix, text and sender. */
 WXL_EVENT(Chat, ChatAddonMessage, 73, wxl_chat_addon_args)
 
