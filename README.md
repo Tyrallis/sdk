@@ -27,7 +27,9 @@ and the rules of the boundary between them. There is nothing to link and nothing
 
 - **One source, every target.** `wxl_add_mod()` builds a mod for each architecture in one command.
 - **Object-oriented.** Derive from `wxl::Mod` and the script families; world objects are C++
-  values you can compare, hash and iterate, not handles you dereference by hand.
+  values you can compare, hash and iterate, not handles you dereference by hand, and a handler
+  receives them as `wxl::Object`. A handle names one stay of an object in view; its guid is what
+  lasts.
 - **A read that can fail says so.** Every read answers `wxl::Expected<T>`: the value, or the
   `wxl_result` that stood in for it. A dead unit, a gone one and a runtime without the service
   are three different answers.
@@ -232,11 +234,13 @@ include/wxl/
     host.h         what a runtime offers a mod
     mod.h          what a mod exposes to a runtime
     expected.hpp   Expected<T>: a value or the wxl_result that stood in for it
+    base.hpp       what every C++ header rests on: the runtime table, strings, the log, Service
     sdk.hpp        the C++ layer: Mod, the script families and their parameters, Subscription,
-                   Service, WXL_MOD
+                   WXL_MOD
     objects.hpp    world objects as C++ values: the umbrella over objects/
     objects/       one header per kind the client knows: Object, Item, Container, Unit, Player,
-                   GameObject, DynamicObject, Corpse; plus the view and the ObjectService facade
+                   GameObject, DynamicObject, Corpse; plus the view, the ObjectService facade and
+                   ObjectMap, data kept per object until it leaves
     services.hpp   every typed facade at once
     services/      one C header per service, and one .hpp with its typed facade
 host/              the mod host: discovery, manifests, load order, registry, event bus
