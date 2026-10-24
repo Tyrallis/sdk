@@ -2,8 +2,14 @@ cmake_minimum_required(VERSION 3.21)
 
 # wxl.lua: the Lua mod runtime, itself a mod built with wxl_add_mod. From this directory it is
 # a superbuild producing dist/wxl.lua/ for both architectures; from the SDK's own tree, which
-# sets WXL_MOD_ARCH, it is the library target of that tree's architecture.
+# sets WXL_MOD_ARCH, it is the library target of that tree's architecture. Configured on its own
+# with WXL_MOD_ARCH set -- a child of the superbuild, or a runtime's build that ships it -- its
+# install is the mod folder: mod.json, LICENSE-LuaJIT.txt and bin/<arch>/wxl-lua.dll.
 project(wxl-lua VERSION 0.1.0 LANGUAGES NONE)
+
+option(WXL_LUA_TYPES "Rewrite types/wxl.d.lua from the tables at each build. The tool is a \
+Windows executable: a build that cannot run one (no emulator) or must not write into the SDK \
+checkout turns this off" ON)
 
 set(WXL_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.." CACHE PATH "Path to the WarcraftXL SDK")
 include("${WXL_SDK_DIR}/cmake/wxl_add_mod.cmake")
@@ -47,20 +53,16 @@ if(TARGET wxl-lua)
     else()
         target_compile_options(wxl-lua-types PRIVATE -Wall -Wextra)
     endif()
-    add_custom_target(wxl-lua-types-gen ALL
-        COMMAND wxl-lua-types "${CMAKE_CURRENT_SOURCE_DIR}/types/wxl.d.lua"
-        COMMENT "wxl-lua: types/wxl.d.lua from reflect.hpp and object_reads.def")
-    add_dependencies(wxl-lua wxl-lua-types-gen)
-else()
-    # The superbuild: the LuaJIT notice goes next to mod.json, since the binaries carry it.
-    file(READ mod.json _manifest)
-    string(REGEX MATCH "\"id\"[ \t\r\n]*:[ \t\r\n]*\"([^\"]*)\"" _ "${_manifest}")
-    set(_mod_dir "${CMAKE_BINARY_DIR}/dist/${CMAKE_MATCH_1}")
-    add_custom_command(
-        OUTPUT "${_mod_dir}/LICENSE-LuaJIT.txt"
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE-LuaJIT.txt" "${_mod_dir}/LICENSE-LuaJIT.txt"
-        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE-LuaJIT.txt"
-        COMMENT "wxl-lua: LICENSE-LuaJIT.txt -> ${_mod_dir}")
-    add_custom_target(wxl-lua-notice ALL DEPENDS "${_mod_dir}/LICENSE-LuaJIT.txt")
+    if(WXL_LUA_TYPES)
+        add_custom_target(wxl-lua-types-gen ALL
+            COMMAND wxl-lua-types "${CMAKE_CURRENT_SOURCE_DIR}/types/wxl.d.lua"
+            COMMENT "wxl-lua: types/wxl.d.lua from reflect.hpp and object_reads.def")
+        add_dependencies(wxl-lua wxl-lua-types-gen)
+    endif()
+
+    # On its own, the install is the whole mod folder: the manifest, and the LuaJIT notice the
+    # binaries carry, beside bin/<arch>/. Inside the SDK's tree there is no mod folder to fill.
+    if(PROJECT_IS_TOP_LEVEL)
+        install(FILES mod.json LICENSE-LuaJIT.txt DESTINATION .)
+    endif()
 endif()
