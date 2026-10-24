@@ -68,7 +68,7 @@ namespace
     {
         void operator()(wxl::Object, wxl::Object current) const
         {
-            const wxl::Unit                  target(current.Handle());
+            const wxl::Unit                  target(current);
             const wxl::Expected<std::string> name = target.Name();
             wxl::Log(WXL_LOG_INFO, kTag, name ? "target: " + *name : "target cleared");
         }

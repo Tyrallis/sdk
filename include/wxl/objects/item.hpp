@@ -20,12 +20,16 @@ namespace wxl
     {
     public:
         static constexpr wxl_object_type kKinds[] = {WXL_OBJECT_ITEM, WXL_OBJECT_CONTAINER};
-        static constexpr bool            Accepts(wxl_object_type type)
+        static constexpr bool            Accepts(uint32_t type)
         {
             return type == WXL_OBJECT_ITEM || type == WXL_OBJECT_CONTAINER;
         }
 
         using Object::Object;
+
+        /// The same object as this class, unchecked: for a handler whose event already gave the
+        /// kind (`Accepts(type)`). As<T>() is the checked way.
+        explicit constexpr Item(const Object& object) : Object(object.Handle()) {}
 
         /// The player who owns it; resolve it with Object::Resolve when it is in view.
         Expected<wxl_guid> OwnerGuid() const { return Read(&wxl_object_api::item_owner); }

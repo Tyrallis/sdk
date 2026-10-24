@@ -28,8 +28,8 @@ namespace wxl
      *
      * The client's own kinds are the derived classes, one per wxl_object_type: Item, Container,
      * Unit, Player, GameObject, DynamicObject and Corpse. As<T>() views an Object as one of them
-     * when its server type allows it, and each of them is built from a handle the same way:
-     * `wxl::Unit(object.Handle())` when the kind is already known.
+     * when its server type allows it; `wxl::Unit(object)` is the same view unchecked, for code that
+     * already knows the kind.
      *
      * A handle names one visibility episode (wxl/services/object.h): an object that leaves view
      * and comes back is another Object with the same Guid(). Event handlers are handed their
@@ -41,8 +41,9 @@ namespace wxl
         /// The server types this class stands for; WXL_OBJECT_UNKNOWN means every type.
         static constexpr wxl_object_type kKinds[] = {WXL_OBJECT_UNKNOWN};
 
-        /// Whether an object of that server type may be viewed as this class.
-        static constexpr bool Accepts(wxl_object_type) { return true; }
+        /// Whether an object of that server type -- a wxl_object_type, or the `type` an object
+        /// event carries -- may be viewed as this class.
+        static constexpr bool Accepts(uint32_t) { return true; }
 
         constexpr Object() = default;
         explicit constexpr Object(wxl_handle handle) : handle_(handle) {}

@@ -15,9 +15,13 @@ namespace wxl
     {
     public:
         static constexpr wxl_object_type kKinds[] = {WXL_OBJECT_GAMEOBJECT};
-        static constexpr bool Accepts(wxl_object_type type) { return type == WXL_OBJECT_GAMEOBJECT; }
+        static constexpr bool Accepts(uint32_t type) { return type == WXL_OBJECT_GAMEOBJECT; }
 
         using Object::Object;
+
+        /// The same object as this class, unchecked: for a handler whose event already gave the
+        /// kind (`Accepts(type)`). As<T>() is the checked way.
+        explicit constexpr GameObject(const Object& object) : Object(object.Handle()) {}
 
         /// Who summoned or spawned it, or WXL_GUID_NONE for a world-placed one.
         Expected<wxl_guid> CreatedByGuid() const { return Read(&wxl_object_api::gameobject_created_by); }

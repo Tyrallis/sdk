@@ -15,9 +15,13 @@ namespace wxl
     {
     public:
         static constexpr wxl_object_type kKinds[] = {WXL_OBJECT_DYNAMIC};
-        static constexpr bool Accepts(wxl_object_type type) { return type == WXL_OBJECT_DYNAMIC; }
+        static constexpr bool Accepts(uint32_t type) { return type == WXL_OBJECT_DYNAMIC; }
 
         using Object::Object;
+
+        /// The same object as this class, unchecked: for a handler whose event already gave the
+        /// kind (`Accepts(type)`). As<T>() is the checked way.
+        explicit constexpr DynamicObject(const Object& object) : Object(object.Handle()) {}
 
         /// The unit that cast it.
         Expected<wxl_guid> CasterGuid() const { return Read(&wxl_object_api::dynamic_caster); }

@@ -877,6 +877,9 @@ int main()
               "a handle member reaches a handler as a wxl::Object, viewable as its class");
         Check(std::is_same_v<wxl::HandlerOf<WXL_EV_ObjectCreate>, void(wxl::Object, wxl_guid, uint32_t)>,
               "an object event's handler takes the object, its guid and its type");
+        Check(wxl::Unit::Accepts(boarCreated.type) && !wxl::GameObject::Accepts(boarCreated.type) &&
+                  wxl::Unit(watcher.created).Handle() == FakeObjects::kBoar,
+              "the event's type picks the class, and an Object views as it unchecked");
         wxl::ScriptMgr::Remove(&watcher);
 
         wxl::ObjectMap<int> seen;

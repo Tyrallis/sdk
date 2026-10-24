@@ -27,12 +27,16 @@ namespace wxl
     {
     public:
         static constexpr wxl_object_type kKinds[] = {WXL_OBJECT_UNIT, WXL_OBJECT_PLAYER};
-        static constexpr bool            Accepts(wxl_object_type type)
+        static constexpr bool            Accepts(uint32_t type)
         {
             return type == WXL_OBJECT_UNIT || type == WXL_OBJECT_PLAYER;
         }
 
         using Object::Object;
+
+        /// The same object as this class, unchecked: for a handler whose event already gave the
+        /// kind (`Accepts(type)`). As<T>() is the checked way.
+        explicit constexpr Unit(const Object& object) : Object(object.Handle()) {}
 
         /// A value of 0 is a dead unit; a missing value is a gone one.
         Expected<uint32_t> Health() const { return Read(&wxl_object_api::unit_health); }
