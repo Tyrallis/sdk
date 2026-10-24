@@ -193,9 +193,9 @@ class WorldWatch final : public wxl::WorldScript
 public:
     WorldWatch(Clock& clock, Journal& journal) : clock_(clock), journal_(journal) {}
 
-    void OnUpdate(const wxl_update_args& args) override;
-    void OnWorldEnter(const wxl_world_args& args) override;
-    void OnWorldLeave(const wxl_world_args& args) override;
+    void OnUpdate(float delta) override;
+    void OnWorldEnter(uint32_t map_id, wxl_vec3 position) override;
+    void OnWorldLeave(uint32_t map_id, wxl_vec3 position) override;
 
     /// The map we are on, or 0 while out of the world.
     uint32_t MapId() const { return mapId_; }
@@ -215,14 +215,14 @@ The hooks themselves:
 **`examples/scout/src/WorldWatch.cpp`**
 
 ```cpp
-void WorldWatch::OnWorldEnter(const wxl_world_args& args)
+void WorldWatch::OnWorldEnter(uint32_t map_id, wxl_vec3 position)
 {
-    mapId_ = args.map_id;
+    mapId_ = map_id;
     journal_.Clear();
 
     char line[96];
-    std::snprintf(line, sizeof line, "watching map %u from %.0f, %.0f", args.map_id,
-                  args.position.x, args.position.y);
+    std::snprintf(line, sizeof line, "watching map %u from %.0f, %.0f", map_id, position.x,
+                  position.y);
     wxl::Log(WXL_LOG_INFO, kTag, line);
 }
 ```
@@ -230,14 +230,20 @@ void WorldWatch::OnWorldEnter(const wxl_world_args& args)
 `OnWorldEnter` fires once the terrain and objects around you are loaded. Scout clears the
 journal there, because the journal is about one place.
 
+A hook takes the event's arguments as parameters, one per member of its args struct, in the
+order `include/wxl/fields.def` lists them: `wxl_world_args` holds `map_id` and `position`, so
+`OnWorldEnter` takes those two. A parameter you do not use can go unnamed in the definition, as
+`WorldWatch.cpp` does with `OnWorldLeave`'s `position`. Get the list wrong and the compiler says
+so: `override` refuses a signature the family does not have.
+
 **`examples/scout/src/WorldWatch.cpp`**
 
 ```cpp
-void WorldWatch::OnUpdate(const wxl_update_args& args)
+void WorldWatch::OnUpdate(float delta)
 {
     // Called once per tick of the client's scheduler, with the seconds since the last one.
     // This is the only clock Scout has, and the only work it does every frame.
-    clock_.Advance(args.delta);
+    clock_.Advance(delta);
 }
 ```
 
@@ -419,12 +425,12 @@ answers, decided by what the value means.
 **`examples/scout/src/ObjectWatch.cpp`**
 
 ```cpp
-void ObjectWatch::OnObjectCreate(const wxl_object_args& args)
+void ObjectWatch::OnObjectCreate(wxl_handle object, wxl_guid, uint32_t type)
 {
     // Everything the client tracks comes through here: items in your bags, corpses, the
     // doodads of the zone. Scout only wants things that are alive.
-    if (args.type != WXL_OBJECT_UNIT && args.type != WXL_OBJECT_PLAYER) return;
-    Note(What::Appeared, wxl::Unit(args.object));
+    if (type != WXL_OBJECT_UNIT && type != WXL_OBJECT_PLAYER) return;
+    Note(What::Appeared, wxl::Unit(object));
 }
 ```
 
@@ -437,11 +443,11 @@ And the one hook that needs its empty case thought about:
 **`examples/scout/src/ObjectWatch.cpp`**
 
 ```cpp
-void ObjectWatch::OnTargetChanged(const wxl_target_args& args)
+void ObjectWatch::OnTargetChanged(wxl_handle, wxl_handle current)
 {
     // Clearing the target is a change too, and there is nothing to read then.
-    if (args.current == WXL_HANDLE_NONE) return;
-    Note(What::Targeted, wxl::Unit(args.current));
+    if (current == WXL_HANDLE_NONE) return;
+    Note(What::Targeted, wxl::Unit(current));
 }
 ```
 
@@ -464,7 +470,7 @@ The answer is to register from scratch every time a context appears, which is ex
 **`examples/scout/src/ScriptApi.cpp`**
 
 ```cpp
-void ScriptApi::OnScriptVmReady(const wxl_script_vm_args& args)
+void ScriptApi::OnScriptVmReady(uint32_t context, void*)
 {
     const wxl::ScriptService script;
     if (!script)
@@ -476,7 +482,7 @@ void ScriptApi::OnScriptVmReady(const wxl_script_vm_args& args)
 
     // Both contexts are served. The login screen is a script context too, and a mod that
     // only registers on the game one is simply absent from half the session.
-    const bool glue = args.context == WXL_SCRIPT_CONTEXT_GLUE;
+    const bool glue = context == WXL_SCRIPT_CONTEXT_GLUE;
 
     script.RegisterEvent(kUpdatedEvent);
     script.RegisterFunction<&ScoutCount>("ScoutCount");
@@ -586,32 +592,33 @@ harmless:
 **`examples/scout/src/NetWatch.cpp`**
 
 ```cpp
-void NetWatch::OnMessageReceived(const wxl_message_args& args)
+void NetWatch::OnMessageReceived(uint32_t opcode, wxl::Bytes, wxl::Answer suppressed)
 {
-    ++incoming_[args.opcode];
+    ++incoming_[opcode];
 
-    // suppressed is a pointer, not a value: the runtime is asking, not telling. Writing
-    // WXL_TRUE through it means the client never sees this message at all -- its own
-    // handler does not run. That is how a mod serves an opcode the client does not know;
-    // it is also how a mod breaks the client, so it only happens on request.
-    if (!IsMuted(args.opcode) || !args.suppressed) return;
-    *args.suppressed = WXL_TRUE;
+    // suppressed is the runtime asking, not telling. Setting it means the client never sees
+    // this message at all -- its own handler does not run. That is how a mod serves an
+    // opcode the client does not know; it is also how a mod breaks the client, so it only
+    // happens on request.
+    if (IsMuted(opcode)) suppressed.Set();
 }
 ```
 
 **`examples/scout/src/NetWatch.cpp`**
 
 ```cpp
-void NetWatch::OnMessageSent(const wxl_message_args& args)
+void NetWatch::OnMessageSent(uint32_t opcode, wxl::Bytes, wxl::Answer)
 {
     // Counted, never muted. Dropping something the client chose to say leaves the server
     // with a different idea of the world than the client has, and nothing says which.
-    ++outgoing_[args.opcode];
+    ++outgoing_[opcode];
 }
 ```
 
-`suppressed` is a **pointer**, not a value. The runtime is asking, not telling: write
-`WXL_TRUE` through it and the client never sees that message -- its own handler does not run.
+`suppressed` is a `wxl::Answer`, not a value. The runtime is asking, not telling: `Set()` it and
+the client never sees that message -- its own handler does not run. `Value()` says whether a
+handler before yours already did. `data` is the body as `wxl::Bytes`, valid during the call;
+the member holding its length is not a parameter of its own, since `data.size()` carries it.
 
 That is how a mod serves an opcode the client does not know, and it is the most dangerous thing
 in this tutorial. An opcode the client needs, dropped, leaves it out of step with the server

@@ -91,7 +91,7 @@ namespace scout
         g_net     = &net;
     }
 
-    void ScriptApi::OnScriptVmReady(const wxl_script_vm_args& args)
+    void ScriptApi::OnScriptVmReady(uint32_t context, void*)
     {
         const wxl::ScriptService script;
         if (!script)
@@ -103,7 +103,7 @@ namespace scout
 
         // Both contexts are served. The login screen is a script context too, and a mod that
         // only registers on the game one is simply absent from half the session.
-        const bool glue = args.context == WXL_SCRIPT_CONTEXT_GLUE;
+        const bool glue = context == WXL_SCRIPT_CONTEXT_GLUE;
 
         script.RegisterEvent(kUpdatedEvent);
         script.RegisterFunction<&ScoutCount>("ScoutCount");
@@ -117,7 +117,7 @@ namespace scout
                  glue ? "script API is up on the login screen" : "script API is up in the game");
     }
 
-    void ScriptApi::OnScriptVmClosing(const wxl_script_vm_args&)
+    void ScriptApi::OnScriptVmClosing(uint32_t, void*)
     {
         // The context is about to be torn down and everything on it goes with it. There is
         // nothing to undo -- only a note to self that the functions are gone until the next one.

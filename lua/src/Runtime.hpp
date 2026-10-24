@@ -101,12 +101,13 @@ namespace wxl::lua
         /// One event: the native subscription and the Lua handlers it feeds, in order.
         struct Slot
         {
-            Runtime*              runtime = nullptr;
-            const reflect::Event* event   = nullptr;
-            wxl::Subscription     native;
-            std::vector<Handler>  handlers;
-            int                   depth = 0;     ///< dispatches walking `handlers` right now
-            bool                  dirty = false; ///< a handler died during a dispatch
+            Runtime*                           runtime = nullptr;
+            const reflect::Event*              event   = nullptr;
+            std::vector<const reflect::Field*> writable; ///< what an Override answers through, in order
+            wxl::Subscription                  native;
+            std::vector<Handler>               handlers;
+            int                                depth = 0;     ///< dispatches walking `handlers` right now
+            bool                               dirty = false; ///< a handler died during a dispatch
         };
 
         /// An event raised off the main thread, waiting for the next Update.
@@ -122,7 +123,10 @@ namespace wxl::lua
 
         void OnEvent(Slot& slot, const void* args);
         void Dispatch(Slot& slot, const void* args, bool answerable);
-        void TakeAnswer(lua_State* L, ScriptMod& mod, const reflect::Event& event, const void* args);
+        /// Writes an Override's return values, at @p first on the stack, through the slot's
+        /// writable members: the first value to the first member, and so on.
+        void TakeAnswers(lua_State* L, ScriptMod& mod, const Slot& slot, const void* args, int first,
+                         int count);
         void Compact(Slot& slot);
 
         /// Subscribes the native handler for a slot when it has none. @p requester names the

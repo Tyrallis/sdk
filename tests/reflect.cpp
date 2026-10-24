@@ -5,9 +5,12 @@
 
 #include <cstdio>
 #include <cstring>
+#include <string>
+#include <string_view>
 #include <type_traits>
 
 #include "wxl/reflect.hpp"
+#include "wxl/sdk.hpp"
 
 namespace
 {
@@ -75,6 +78,47 @@ namespace
     };
 
     uint32_t AlignUp(uint32_t value, uint32_t align) { return (value + align - 1) / align * align; }
+
+    // A handler's parameters, as the C++ layer derives them from the rows and as a runtime reading
+    // the field table does, one letter per parameter: a view or a value of the kind it is.
+    template <class T>
+    constexpr char Letter()
+    {
+        if constexpr (std::is_same_v<T, wxl::Bytes>) return 'B';
+        else if constexpr (std::is_same_v<T, wxl::Answer>) return 'A';
+        else if constexpr (std::is_same_v<T, wxl::Buffer>) return 'F';
+        else if constexpr (std::is_same_v<T, std::string_view>) return 's';
+        else if constexpr (std::is_same_v<T, bool>) return 'b';
+        else return 'v';
+    }
+
+    template <class Signature>
+    struct Letters;
+    template <class... P>
+    struct Letters<void(P...)>
+    {
+        static constexpr char text[] = {Letter<P>()..., '\0'};
+    };
+
+    /// Per event, in table order: the parameters of its C++ handler.
+    constexpr const char* kHandlerLetters[] = {
+#define WXL_EVENT(family, name, id, args) Letters<wxl::HandlerOf<WXL_EV_##name>>::text,
+#include "wxl/events.def"
+#undef WXL_EVENT
+    };
+
+    char LetterOf(Kind kind)
+    {
+        switch (kind)
+        {
+            case Kind::bytes: return 'B';
+            case Kind::answer: return 'A';
+            case Kind::buffer: return 'F';
+            case Kind::str: return 's';
+            case Kind::boolean: return 'b';
+            default: return 'v';
+        }
+    }
 }
 
 int main()
@@ -118,6 +162,25 @@ int main()
             Check(sized == (field.extent != nullptr), what);
         }
     }
+
+    std::printf("the C++ handlers take the parameters the rows give\n");
+    Check(eventCount == sizeof kHandlerLetters / sizeof kHandlerLetters[0], "one handler per event");
+    for (uint32_t e = 0; e < eventCount && e < sizeof kHandlerLetters / sizeof kHandlerLetters[0]; ++e)
+    {
+        const wxl::reflect::Event& event = events[e];
+        std::string                fromRows;
+        for (uint32_t i = 0; i < event.field_count; ++i)
+            if (!wxl::reflect::IsExtent(event, event.fields[i])) fromRows += LetterOf(event.fields[i].kind);
+        char what[200];
+        std::snprintf(what, sizeof what, "On%s takes %s, the rows give %s", event.name,
+                      kHandlerLetters[e], fromRows.c_str());
+        Check(fromRows == kHandlerLetters[e], what);
+    }
+    const wxl::reflect::Event* cast = wxl::reflect::Find(WXL_EV_SpellCastGo);
+    const wxl::reflect::Field* size = cast ? wxl::reflect::FieldOf(*cast, "hits_size") : nullptr;
+    const wxl::reflect::Field* hits = cast ? wxl::reflect::FieldOf(*cast, "hit_count") : nullptr;
+    Check(size && hits && wxl::reflect::IsExtent(*cast, *size) && !wxl::reflect::IsExtent(*cast, *hits),
+          "a member another one measures is an extent, a count nobody measures is not");
 
     std::printf("the rows of a struct are contiguous\n");
     for (uint32_t i = 0; i < fieldCount; ++i)

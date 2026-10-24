@@ -112,7 +112,6 @@ namespace wxl::lua
         }
 
         OpenSandbox(state_, candidate_.directory, Id());
-        OpenArgs(state_);
         OpenObjects(state_);
         Install();
 
@@ -183,7 +182,7 @@ namespace wxl::lua
                 }
                 lua_pushvalue(L, -1);
                 const int ref = luaL_ref(L, LUA_REGISTRYINDEX);
-                runtime_.Observe(*this, *event, ref, AnswerOf(*event) || BufferOf(*event), self);
+                runtime_.Observe(*this, *event, ref, Answerable(*event), self);
                 lua_pop(L, 1);
             }
             lua_pop(L, 1);
@@ -298,8 +297,6 @@ namespace wxl::lua
 
         PushClosure(&L_log);
         lua_setfield(L, -2, "log");
-        lua_pushcfunction(L, &ToTable);
-        lua_setfield(L, -2, "totable");
         PushObjectModule(L);
         lua_setfield(L, -2, "object");
 
@@ -431,7 +428,7 @@ namespace wxl::lua
             return luaL_error(L, "%s: %s has no '%s'; its events are %s", verb, family, method,
                               MethodsOf(stem.c_str()).c_str());
 
-        if (override && !AnswerOf(*event) && !BufferOf(*event))
+        if (override && !Answerable(*event))
             return luaL_error(L, "Override: %s of %s cannot be overridden: its args carry no "
                                  "answer or buffer member; use Observe",
                               method, family);

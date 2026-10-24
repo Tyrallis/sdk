@@ -183,48 +183,52 @@ registerForEvent("onUpdate", function(delta) print("probe update " .. delta) end
 registerForEvent("onDraw", function() print("probe draw") end)
 registerForEvent("onShutdown", function() print("probe shutdown") end)
 
-Observe("WorldScript", "OnUpdate", function(args) print("probe observed update " .. args.delta) end)
+Observe("WorldScript", "OnUpdate", function(delta) print("probe observed update " .. delta) end)
 
 -- a handler that errors, and one after it that must still run
-Observe("WorldScript", "OnWorldEnter", function(args)
-    local kept = args
-    error("boom " .. args.map_id)
+Observe("WorldScript", "OnWorldEnter", function(map_id)
+    error("boom " .. map_id)
 end)
-Observe("WorldScript", "OnWorldEnter", function(args)
-    print("after-error " .. args.position.x .. "," .. args.position.y .. "," .. args.position.z)
+Observe("WorldScript", "OnWorldEnter", function(map_id, position)
+    print("after-error " .. position.x .. "," .. position.y .. "," .. position.z)
 end)
 
--- args are only valid during the handler
+-- what a handler keeps is a copy, readable after the call
 local kept
-Observe("WorldScript", "OnWorldLeave", function(args) kept = args end)
-Observe("WorldScript", "OnSoundPlay", function(args)
-    local ok2, err2 = pcall(function() return kept.map_id end)
-    if not ok2 and err2:find("only valid") then print("expired args refused") end
-    print("sound " .. args.sound_id .. " " .. args.path .. " suppressed=" .. tostring(args.suppressed))
+Observe("WorldScript", "OnWorldLeave", function(map_id, position) kept = position end)
+Observe("WorldScript", "OnSoundPlay", function(sound_id, path, suppressed)
+    if kept and kept.x == 1 and kept.z == 3 then print("kept values stay") end
+    print("sound " .. sound_id .. " " .. path .. " suppressed=" .. tostring(suppressed))
 end)
 
--- an answer written through the member instead of returned
-Override("WorldScript", "OnInput", function(args)
-    if args.message == 7 then args.handled = true end
+-- an Override answers with its return value; an Observe after it sees the answer
+Override("WorldScript", "OnInput", function(message) return message == 7 end)
+Observe("WorldScript", "OnInput", function(message, wparam, lparam, handled)
+    print("input " .. message .. " " .. wparam .. " " .. lparam .. " handled=" .. tostring(handled))
 end)
 
--- an Observe handler may not write
-Observe("WorldScript", "OnInput", function(args)
-    local ok3, err3 = pcall(function() args.handled = true end)
-    if not ok3 and err3:find("Override") then print("observe is read-only") end
-end)
+-- return values of the wrong kind, and too many of them
+Override("WorldScript", "OnSoundPlay", function() return "loud", 1 end)
 
--- the off-thread events
-Observe("AssetScript", "OnFileOpen", function(args) print("file open " .. args.path) end)
-Override("NetScript", "OnMessageSent", function(args)
-    print("message sent " .. args.opcode .. " " .. #args.data)
+-- the off-thread events, and a string too long for the buffer
+Observe("AssetScript", "OnFileOpen", function(path, redirect) print("file open " .. path .. " redirect " .. redirect) end)
+Override("AssetScript", "OnFileOpen", function(path) if path == "long" then return string.rep("x", 100) end end)
+Override("NetScript", "OnMessageSent", function(opcode, data)
+    print("message sent " .. opcode .. " " .. #data)
     return true
 end)
 
+-- the members that only measure another are not parameters
+Observe("ObjectScript", "OnSpellCastGo", function(...)
+    local caster, caster_guid, target, target_guid, cast_item, spell_id, cast_count, cast_flags,
+          target_flags, cast_time, hit_count, hits, misses, miss_reasons = ...
+    print("cast go " .. select("#", ...) .. " parameters, spell " .. spell_id .. ", " .. hit_count ..
+          " hit in " .. #hits .. " bytes, " .. #miss_reasons .. " miss, caster " .. caster_guid)
+end)
+
 -- objects
-Observe("ObjectScript", "OnTargetChanged", function(args)
-    local current = args.current
-    print("target " .. tostring(args.previous) .. " -> " .. current:Name() .. " " .. current:Type() ..
+Observe("ObjectScript", "OnTargetChanged", function(previous, current)
+    print("target " .. tostring(previous) .. " -> " .. current:Name() .. " " .. current:Type() ..
           " hp " .. current:Health() .. "/" .. current:MaxHealth() .. " target " .. tostring(current:Target()))
     local hp, why = current:Target():Health()
     print("boar target " .. tostring(hp) .. " " .. tostring(why))
@@ -234,44 +238,46 @@ Observe("ObjectScript", "OnTargetChanged", function(args)
     print("units in view " .. #objects .. " local " .. wxl.object.LocalPlayer():Name() ..
           " guid " .. wxl.object.LocalPlayer():Guid() .. " same " .. tostring(wxl.object.FromGuid("0x0000000000000100") == current))
 end)
-Observe("ObjectScript", "OnObjectCreate", function(args)
-    local t = wxl.totable(args)
-    print("created " .. tostring(t.object) .. " guid " .. t.guid .. " type " .. t.type)
-    local hp, why = args.object:Health()
+Observe("ObjectScript", "OnObjectCreate", function(object, guid, kind)
+    print("created " .. tostring(object) .. " guid " .. guid .. " type " .. kind)
+    local hp, why = object:Health()
     print("chest health " .. tostring(hp) .. " " .. tostring(why))
 end)
-Observe("LuaScript", "OnScriptVmReady", function(args)
-    print("vm " .. args.context .. " " .. type(args.native_state))
+Observe("LuaScript", "OnScriptVmReady", function(context, native_state)
+    print("vm " .. context .. " " .. type(native_state))
 end)
 
 -- handlers defined on the family tables are subscribed after this file has run
-function AssetScript:OnTextureLoad(args) print("implicit texture " .. args.path) end
-function WorldScript:OnSoundPlay(args) return args.sound_id == 9 end
-function WorldScript:OnWorldClick(args) print("implicit click " .. args.button .. " at " .. args.point.z) end
+function AssetScript:OnTextureLoad(path) print("implicit texture " .. path) end
+function WorldScript:OnSoundPlay(sound_id) return sound_id == 9 end
+function WorldScript:OnWorldClick(point, object, button) print("implicit click " .. button .. " at " .. point.z) end
 
-local id = Observe("RenderScript", "OnFrameBegin", function(args) print("frame " .. args.index) end)
-Observe("RenderScript", "OnFrameEnd", function(args) print("unobserve " .. tostring(Unobserve(id)) .. " " .. tostring(Unobserve(id))) end)
+local id = Observe("RenderScript", "OnFrameBegin", function(index) print("frame " .. index) end)
+Observe("RenderScript", "OnFrameEnd", function() print("unobserve " .. tostring(Unobserve(id)) .. " " .. tostring(Unobserve(id))) end)
 )lua";
 
     constexpr const char* kProbeV2 = R"lua(
 registerForEvent("onInit", function() print("probe init v2") end)
-Observe("WorldScript", "OnUpdate", function(args) print("probe v2 update") end)
+Observe("WorldScript", "OnUpdate", function() print("probe v2 update") end)
 )lua";
 
     constexpr const char* kBroken = R"lua(
-Observe("WorldScript", "OnUpdate", function(args) error("always") end)
+Observe("WorldScript", "OnUpdate", function() error("always") end)
 registerForEvent("onUpdate", function() print("broken still updates") end)
 )lua";
 
     constexpr const char* kBench = R"lua(
 local sum = 0
-Observe("WorldScript", "OnUpdate", function(args) sum = sum + args.delta end)
+Observe("WorldScript", "OnUpdate", function(delta) sum = sum + delta end)
 registerForEvent("onShutdown", function() print("bench sum " .. sum) end)
 )lua";
 
-    constexpr const char* kBenchTable = R"lua(
+    constexpr const char* kBenchWide = R"lua(
 local sum = 0
-Observe("WorldScript", "OnUpdate", function(args) local t = wxl.totable(args) sum = sum + t.delta end)
+Observe("CombatScript", "OnCombatDamage", function(source, source_guid, target, target_guid, spell_id, kind,
+                                                    environment, amount)
+    sum = sum + amount
+end)
 )lua";
 } // namespace
 
@@ -301,7 +307,7 @@ int main(int argc, char** argv)
                   LuaManifest("wxl.needy", "\"requires\": [ { \"service\": \"wxl.nothing\", \"version\": 1 } ]"));
         WriteFile(mods / "needy" / "init.lua", "print('never')\n");
         WriteFile(mods / "badname" / "mod.json", LuaManifest("wxl.badname"));
-        WriteFile(mods / "badname" / "init.lua", "function WorldScript:OnTick(args) end\n");
+        WriteFile(mods / "badname" / "init.lua", "function WorldScript:OnTick() end\n");
         WriteFile(mods / "Bare Folder_One" / "init.lua",
                   "registerForEvent('onInit', function() print('bare init ' .. wxl.mod.id .. ' ' .. wxl.mod.version) end)\n");
         WriteFile(mods / "!!" / "init.lua", "print('never')\n");
@@ -365,14 +371,17 @@ int main(int argc, char** argv)
               "an error names the mod, the event and carries a traceback");
         Check(sink.Has("[wxl.probe] after-error 1,2,3"), "the handler after it still runs, and reads a vec3");
 
-        // Args expire with the call.
+        // Values outlive the call: they are copies.
         host.Raise(WXL_EV_WorldLeave, &enter);
         wxl_bool       suppressed = WXL_FALSE;
         wxl_sound_args sound{9, wxl_str{"Sound\\x.wav", 11}, &suppressed};
         host.Raise(WXL_EV_SoundPlay, &sound);
-        Check(sink.Has("[wxl.probe] expired args refused"), "args kept past the handler raise an error");
-        Check(sink.Has("[wxl.probe] sound 9 Sound\\x.wav suppressed=false"), "a str and an answer read");
+        Check(sink.Has("[wxl.probe] kept values stay"), "a value kept past the handler is still readable");
+        Check(sink.Has("[wxl.probe] sound 9 Sound\\x.wav suppressed=false"), "a str and an answer arrive as parameters");
         Check(suppressed == WXL_TRUE, "a family-table handler on an answerable event answers with its return value");
+        Check(sink.Has("[WARN ] [wxl.lua] mod wxl.probe: the Override of OnSoundPlay returned 2 values; it answers through 'suppressed', one value each") &&
+                  sink.Has("[WARN ] [wxl.lua] mod wxl.probe: the Override of OnSoundPlay returned a string for 'suppressed'; it takes true to answer"),
+              "a return value of the wrong kind, and one too many, are warned about");
         const char*           texture = "World\\x.blp";
         wxl_texture_load_args load{wxl_str{texture, static_cast<uint32_t>(std::strlen(texture))}};
         host.Raise(WXL_EV_TextureLoad, &load);
@@ -381,16 +390,17 @@ int main(int argc, char** argv)
         host.Raise(WXL_EV_WorldClick, &click);
         Check(sink.Has("[wxl.probe] implicit click 2 at 3.5"), "and reads its args");
 
-        // An answer written through the member.
+        // An answer returned, and seen by the handler after it.
         wxl_bool       handled = WXL_FALSE;
-        wxl_input_args input{7, 0, 0, &handled};
+        wxl_input_args input{7, 1, -1, &handled};
         host.Raise(WXL_EV_Input, &input);
-        Check(handled == WXL_TRUE, "args.handled = true from an Override writes the flag");
-        Check(sink.Has("[wxl.probe] observe is read-only"), "an Observe handler may not write it");
+        Check(handled == WXL_TRUE, "returning true from an Override writes the flag");
+        Check(sink.Has("[wxl.probe] input 7 1 -1 handled=true"), "an Observe handler after it sees the answer");
         handled = WXL_FALSE;
         input.message = 8;
         host.Raise(WXL_EV_Input, &input);
-        Check(handled == WXL_FALSE, "and nothing is written when the handler does not");
+        Check(handled == WXL_FALSE && sink.Has("[wxl.probe] input 8 1 -1 handled=false"),
+              "and returning false writes nothing");
 
         // The example's Override returning true.
         wxl_bool         kept = WXL_FALSE;
@@ -411,8 +421,15 @@ int main(int argc, char** argv)
         host.Raise(WXL_EV_FileOpen, &open);
         Check(std::strcmp(redirect, "Interface\\Icons\\INV_Misc_Coin_01.blp") == 0,
               "returning a string from an Override fills the buffer");
-        Check(sink.Has("[wxl.probe] file open Interface\\Icons\\INV_Misc_QuestionMark.blp"),
-              "the probe's Observe of the same event ran too");
+        Check(sink.Has("[wxl.probe] file open Interface\\Icons\\INV_Misc_QuestionMark.blp redirect Interface\\Icons\\INV_Misc_Coin_01.blp"),
+              "an Observe of the same event sees the buffer an earlier Override filled");
+        const char*        longPath = "long";
+        wxl_file_open_args tooLong{wxl_str{longPath, 4}, redirect, sizeof redirect};
+        redirect[0] = '\0';
+        host.Raise(WXL_EV_FileOpen, &tooLong);
+        Check(redirect[0] == '\0' &&
+                  sink.Has("[WARN ] [wxl.lua] mod wxl.probe: the Override of OnFileOpen returned 100 bytes for 'redirect', which takes at most 63; it is not taken"),
+              "a string longer than the buffer is not taken, and the warning names the limit");
 
         // Off the main thread: queued, delivered at the next Update, the answer not taken.
         redirect[0] = '\0';
@@ -449,7 +466,7 @@ int main(int argc, char** argv)
         const wxl_object_args created{wxltest::FakeObjects::kChest, 0x300, WXL_OBJECT_GAMEOBJECT};
         host.Raise(WXL_EV_ObjectCreate, &created);
         Check(sink.Has("[wxl.probe] created GameObject(0x000000000000002C) guid 0x0000000000000300 type 5"),
-              "wxl.totable converts every member");
+              "a handle, a guid and a number arrive as parameters");
         Check(sink.Has("[wxl.probe] chest health nil a GameObject has no Health"),
               "a unit getter on a game object answers nil and why");
         const wxl_unit_args death{wxltest::FakeObjects::kPlayer};
@@ -459,6 +476,15 @@ int main(int argc, char** argv)
         wxl_script_vm_args ready{WXL_SCRIPT_CONTEXT_GAME, &vm};
         host.Raise(WXL_EV_ScriptVmReady, &ready);
         Check(sink.Has("[wxl.probe] vm 1 userdata"), "a ptr member is a lightuserdata");
+
+        const uint8_t             hits[16]   = {};
+        const uint8_t             misses[8]  = {};
+        const uint8_t             reasons[1] = {2};
+        const wxl_spell_cast_args go{WXL_HANDLE_NONE, 0x10, WXL_HANDLE_NONE, 0, 0, 133, 1, 0, 0, 0,
+                                     2, 1, hits, sizeof hits, misses, sizeof misses, reasons};
+        host.Raise(WXL_EV_SpellCastGo, &go);
+        Check(sink.Has("[wxl.probe] cast go 14 parameters, spell 133, 2 hit in 16 bytes, 1 miss, caster 0x0000000000000010"),
+              "a member that only measures another is not a parameter: its bytes carry it");
 
         // Unobserve.
         host.Raise(WXL_EV_FrameBegin, &frame);
@@ -510,30 +536,32 @@ int main(int argc, char** argv)
         host.Stage(WXL_STAGE_READY);
 
         const wxl_update_args tick{0.001f};
-        constexpr int         kRaises = 200000;
-        const auto            measure = [&] {
+        const wxl_combat_damage_args damage{WXL_HANDLE_NONE, 0x10, WXL_HANDLE_NONE, 0x20, 133, 1, 0, 250,
+                                            0, 4, 0, 0, 0, WXL_TRUE, 0};
+        constexpr int kRaises = 200000;
+        const auto    measure = [&](wxl_event event, const void* args) {
             const auto start = std::chrono::steady_clock::now();
-            for (int i = 0; i < kRaises; ++i) host.Raise(WXL_EV_Update, &tick);
+            for (int i = 0; i < kRaises; ++i) host.Raise(event, args);
             const auto end = std::chrono::steady_clock::now();
             return std::chrono::duration<double, std::nano>(end - start).count() / kRaises;
         };
 
-        measure(); // warm up
-        const double lazy = measure();
-        std::printf("  %.0f ns per Update with one Observe handler reading args.delta (lazy userdata)\n", lazy);
+        measure(WXL_EV_Update, &tick); // warm up
+        const double one = measure(WXL_EV_Update, &tick);
+        std::printf("  %.0f ns per Update with one Observe handler taking delta\n", one);
 
-        WriteFile(mods / "bench" / "init.lua", kBenchTable);
+        WriteFile(mods / "bench" / "init.lua", kBenchWide);
         const wxl_lua_api* api = static_cast<const wxl_lua_api*>(host.Table()->get_service(WXL_LUA_SERVICE, WXL_LUA_SERVICE_VERSION));
-        Check(api && api->poll() == 1, "the bench mod reloads with the table variant");
-        measure();
-        const double table = measure();
-        std::printf("  %.0f ns per Update with the handler converting through wxl.totable\n", table);
+        Check(api && api->poll() == 1, "the bench mod reloads with the wide variant");
+        measure(WXL_EV_CombatDamage, &damage);
+        const double wide = measure(WXL_EV_CombatDamage, &damage);
+        std::printf("  %.0f ns per CombatDamage with one handler taking its 15 parameters\n", wide);
 
         api->reload("wxl.bench");
         WriteFile(mods / "bench" / "init.lua", "-- nothing observed\n");
         api->poll();
-        measure();
-        const double idle = measure();
+        measure(WXL_EV_Update, &tick);
+        const double idle = measure(WXL_EV_Update, &tick);
         std::printf("  %.0f ns per Update with no Lua handler (the queue and poll checks)\n", idle);
 
         Check(sink.Has("[wxl.bench] bench sum"), "the handler ran");

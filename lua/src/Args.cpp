@@ -12,8 +12,6 @@ namespace wxl::lua
 {
     namespace
     {
-        constexpr const char* kArgsMeta = "wxl.args";
-
         template <class T>
         T ReadAt(const void* args, uint32_t offset)
         {
@@ -34,120 +32,22 @@ namespace wxl::lua
             return field.extent ? ReadAt<uint32_t>(args, field.extent_offset) : 0;
         }
 
-        const reflect::Field* FirstOfKind(const reflect::Event& event, reflect::Kind kind)
+        bool Writable(const reflect::Field& field)
         {
-            for (uint32_t i = 0; i < event.field_count; ++i)
-                if (event.fields[i].kind == kind) return &event.fields[i];
-            return nullptr;
-        }
-
-        ArgsBox* CheckBox(lua_State* L, int index)
-        {
-            return static_cast<ArgsBox*>(luaL_checkudata(L, index, kArgsMeta));
-        }
-
-        /// The box, with its args still valid.
-        ArgsBox* LiveBox(lua_State* L, int index)
-        {
-            ArgsBox* box = CheckBox(L, index);
-            if (!box->args)
-                luaL_error(L, "the args of On%s are only valid while the handler runs",
-                           box->event->name);
-            return box;
-        }
-
-        std::string MemberList(const reflect::Event& event)
-        {
-            std::string names;
-            for (uint32_t i = 0; i < event.field_count; ++i)
-            {
-                if (!names.empty()) names += ", ";
-                names += event.fields[i].name;
-            }
-            return names;
-        }
-
-        int ArgsIndex(lua_State* L)
-        {
-            ArgsBox*    box  = LiveBox(L, 1);
-            const char* name = luaL_checkstring(L, 2);
-            if (const reflect::Field* field = reflect::FieldOf(*box->event, name))
-            {
-                PushField(L, *field, box->args);
-                return 1;
-            }
-            return luaL_error(L, "On%s args have no member '%s'; the members are %s",
-                              box->event->name, name, MemberList(*box->event).c_str());
-        }
-
-        int ArgsNewIndex(lua_State* L)
-        {
-            ArgsBox*              box   = LiveBox(L, 1);
-            const char*           name  = luaL_checkstring(L, 2);
-            const reflect::Field* field = reflect::FieldOf(*box->event, name);
-            if (!field)
-                return luaL_error(L, "On%s args have no member '%s'; the members are %s",
-                                  box->event->name, name, MemberList(*box->event).c_str());
-            if (field->kind != reflect::Kind::answer && field->kind != reflect::Kind::buffer)
-                return luaL_error(L, "On%s args: '%s' is read-only", box->event->name, name);
-            if (!box->writable)
-                return luaL_error(L, "On%s args: '%s' can only be written from an Override "
-                                     "handler on the main thread",
-                                  box->event->name, name);
-
-            if (field->kind == reflect::Kind::answer)
-            {
-                if (!lua_isboolean(L, 3))
-                    return luaL_error(L, "On%s args: '%s' takes a boolean", box->event->name, name);
-                // WXL_TRUE is a request, honoured unless another handler already decided;
-                // WXL_FALSE is never written back.
-                if (lua_toboolean(L, 3) && !WriteAnswer(*field, box->args))
-                    return luaL_error(L, "On%s args: the runtime passed no '%s' flag",
-                                      box->event->name, name);
-                return 0;
-            }
-
-            size_t      size = 0;
-            const char* text = luaL_checklstring(L, 3, &size);
-            uint32_t    capacity = 0;
-            if (!WriteBuffer(*field, box->args, std::string_view(text, size), capacity))
-                return luaL_error(L, "On%s args: '%s' takes at most %d bytes; %d were given",
-                                  box->event->name, name, static_cast<int>(capacity ? capacity - 1 : 0),
-                                  static_cast<int>(size));
-            return 0;
-        }
-
-        int ArgsToString(lua_State* L)
-        {
-            ArgsBox* box = CheckBox(L, 1);
-            lua_pushfstring(L, "On%s args%s", box->event->name, box->args ? "" : " (expired)");
-            return 1;
+            return field.kind == reflect::Kind::answer || field.kind == reflect::Kind::buffer;
         }
     } // namespace
 
-    void OpenArgs(lua_State* L)
+    int PushParameters(lua_State* L, const reflect::Event& event, const void* args)
     {
-        luaL_newmetatable(L, kArgsMeta);
-        lua_pushcfunction(L, &ArgsIndex);
-        lua_setfield(L, -2, "__index");
-        lua_pushcfunction(L, &ArgsNewIndex);
-        lua_setfield(L, -2, "__newindex");
-        lua_pushcfunction(L, &ArgsToString);
-        lua_setfield(L, -2, "__tostring");
-        lua_pushliteral(L, "wxl.args");
-        lua_setfield(L, -2, "__metatable");
-        lua_pop(L, 1);
-    }
-
-    ArgsBox* PushArgs(lua_State* L, const reflect::Event& event, const void* args, bool writable)
-    {
-        ArgsBox* box  = static_cast<ArgsBox*>(lua_newuserdata(L, sizeof(ArgsBox)));
-        box->event    = &event;
-        box->args     = args;
-        box->writable = writable;
-        luaL_getmetatable(L, kArgsMeta);
-        lua_setmetatable(L, -2);
-        return box;
+        int pushed = 0;
+        for (uint32_t i = 0; i < event.field_count; ++i)
+        {
+            if (reflect::IsExtent(event, event.fields[i])) continue;
+            PushField(L, event.fields[i], args);
+            ++pushed;
+        }
+        return pushed;
     }
 
     void PushField(lua_State* L, const reflect::Field& field, const void* args)
@@ -224,14 +124,19 @@ namespace wxl::lua
         lua_pushnil(L);
     }
 
-    const reflect::Field* AnswerOf(const reflect::Event& event)
+    std::vector<const reflect::Field*> WritableOf(const reflect::Event& event)
     {
-        return FirstOfKind(event, reflect::Kind::answer);
+        std::vector<const reflect::Field*> fields;
+        for (uint32_t i = 0; i < event.field_count; ++i)
+            if (Writable(event.fields[i])) fields.push_back(&event.fields[i]);
+        return fields;
     }
 
-    const reflect::Field* BufferOf(const reflect::Event& event)
+    bool Answerable(const reflect::Event& event)
     {
-        return FirstOfKind(event, reflect::Kind::buffer);
+        for (uint32_t i = 0; i < event.field_count; ++i)
+            if (Writable(event.fields[i])) return true;
+        return false;
     }
 
     bool WriteAnswer(const reflect::Field& field, const void* args)
@@ -251,19 +156,6 @@ namespace wxl::lua
         std::memcpy(buffer, text.data(), text.size());
         buffer[text.size()] = '\0';
         return true;
-    }
-
-    int ToTable(lua_State* L)
-    {
-        ArgsBox* box = LiveBox(L, 1);
-        lua_createtable(L, 0, static_cast<int>(box->event->field_count));
-        for (uint32_t i = 0; i < box->event->field_count; ++i)
-        {
-            const reflect::Field& field = box->event->fields[i];
-            PushField(L, field, box->args);
-            lua_setfield(L, -2, field.name);
-        }
-        return 1;
     }
 
     // --- The copy for the queue ------------------------------------------------------------

@@ -2,7 +2,8 @@
 // Copyright (c) 2026 WarcraftXL
 //
 // The event contract as data: every event with its family, name and args, and every member of
-// its args with what it carries. Generated from events.def and fields.def.
+// its args with what it carries. Generated from events.def and fields.def. A handler's
+// parameters are the members IsExtent leaves, in this order.
 
 #pragma once
 
@@ -155,6 +156,19 @@ namespace wxl::reflect
             if (std::strcmp(event.family, family) == 0 && std::strcmp(event.name, name) == 0)
                 return &event;
         return nullptr;
+    }
+
+    /**
+     * @brief Whether a member only holds another's length or capacity.
+     *
+     * A bytes or a buffer member of the same struct names it as its extent. A handler is not
+     * given it as a parameter of its own: the bytes or the buffer carry it.
+     */
+    inline bool IsExtent(const Event& event, const Field& field)
+    {
+        for (uint32_t i = 0; i < event.field_count; ++i)
+            if (event.fields[i].extent && event.fields[i].extent_offset == field.offset) return true;
+        return false;
     }
 
     /// The member of an event's args with this name, or null.

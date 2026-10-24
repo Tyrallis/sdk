@@ -14,11 +14,11 @@ namespace
     class ExampleWorld final : public wxl::WorldScript
     {
     public:
-        void OnWorldEnter(const wxl_world_args& args) override
+        void OnWorldEnter(uint32_t map_id, wxl_vec3 position) override
         {
             char line[160];
-            std::snprintf(line, sizeof(line), "entered map %u at %.1f %.1f %.1f", args.map_id,
-                          args.position.x, args.position.y, args.position.z);
+            std::snprintf(line, sizeof(line), "entered map %u at %.1f %.1f %.1f", map_id, position.x,
+                          position.y, position.z);
             wxl::Log(WXL_LOG_INFO, kTag, line);
 
             // The object service is optional here: on a runtime that does not publish it, the mod
@@ -52,23 +52,23 @@ namespace
     class ExampleRender final : public wxl::RenderScript
     {
     public:
-        void OnFrameEnd(const wxl_frame_args& args) override
+        void OnFrameEnd(uint64_t index, float) override
         {
-            if (args.index % 3600 != 0) return;
+            if (index % 3600 != 0) return;
 
             char line[64];
-            std::snprintf(line, sizeof(line), "frame %llu",
-                          static_cast<unsigned long long>(args.index));
+            std::snprintf(line, sizeof(line), "frame %llu", static_cast<unsigned long long>(index));
             wxl::Log(WXL_LOG_DEBUG, kTag, line);
         }
     };
 
-    /// One event outside the script families, held as a subscription that releases itself.
+    /// One event outside the script families, held as a subscription that releases itself. It
+    /// takes the event's parameters, as an override would: wxl::HandlerOf<WXL_EV_TargetChanged>.
     struct TargetWatcher
     {
-        void operator()(const wxl_target_args& args) const
+        void operator()(wxl_handle, wxl_handle current) const
         {
-            const wxl::Unit                  target(args.current);
+            const wxl::Unit                  target(current);
             const wxl::Expected<std::string> name = target.Name();
             wxl::Log(WXL_LOG_INFO, kTag, name ? "target: " + *name : "target cleared");
         }

@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <functional>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -233,6 +234,357 @@ namespace wxl
     template <wxl_event Event>
     using EventArgsOf = typename EventArgs<Event>::type;
 
+    // --- Handler parameters ----------------------------------------------------------------
+    //
+    // A handler receives an event's args as parameters, one per member of the struct in the
+    // order of fields.def:
+    //
+    //     void OnMessageReceived(uint32_t opcode, wxl::Bytes data, wxl::Answer suppressed)
+    //
+    // A member that only holds the length of a bytes member or the capacity of a buffer is not
+    // a parameter of its own: the view it measures carries it. What each kind becomes:
+    //
+    //   u32 i32 u64 i64 f32   uint32_t int32_t uint64_t int64_t float
+    //   bool                  bool
+    //   handle                wxl_handle; wxl/objects.hpp reads the object behind it
+    //   guid vec3             wxl_guid wxl_vec3
+    //   str                   std::string_view, valid for the call
+    //   bytes                 wxl::Bytes, valid for the call
+    //   answer                wxl::Answer
+    //   buffer                wxl::Buffer
+    //   ptr                   the member's own C type
+    //
+    // wxl::HandlerOf<Event> names the list as a function type. The parameters are read from the
+    // struct the runtime raised, which stays the C ABI: a C handler still receives the struct.
+
+    /// Bytes an event carries, as a read-only range. Valid for the handler's call only.
+    class Bytes
+    {
+    public:
+        constexpr Bytes() = default;
+        Bytes(const void* data, uint32_t size)
+            : data_(static_cast<const uint8_t*>(data)), size_(data ? size : 0u)
+        {
+        }
+
+        const uint8_t* data() const { return data_; }
+        uint32_t       size() const { return size_; }
+        bool           empty() const { return size_ == 0; }
+        const uint8_t* begin() const { return data_; }
+        const uint8_t* end() const { return data_ + size_; }
+        uint8_t        operator[](uint32_t index) const { return data_[index]; }
+
+        /// The same bytes as characters, for a body that is text.
+        std::string_view View() const
+        {
+            return data_ ? std::string_view(reinterpret_cast<const char*>(data_), size_)
+                         : std::string_view();
+        }
+
+    private:
+        const uint8_t* data_ = nullptr;
+        uint32_t       size_ = 0;
+    };
+
+    /**
+     * @brief The flag of an event a handler can act on: `handled`, `suppressed`, `refused`.
+     *
+     * Set() is a request the runtime honours, and it is never withdrawn: once one handler has
+     * answered, the flag stays set for the handlers after it. Value() reads what the handlers
+     * before this one decided.
+     */
+    class Answer
+    {
+    public:
+        constexpr Answer() = default;
+        explicit Answer(wxl_bool* flag) : flag_(flag) {}
+
+        /// Whether a handler has answered.
+        bool Value() const { return flag_ && *flag_ != WXL_FALSE; }
+
+        /// Answers. False when the runtime passed no flag, so there is nothing to answer.
+        bool Set() const
+        {
+            if (!flag_) return false;
+            *flag_ = WXL_TRUE;
+            return true;
+        }
+
+    private:
+        wxl_bool* flag_ = nullptr;
+    };
+
+    /**
+     * @brief A buffer a handler answers into with a string: FileOpen's `redirect`.
+     *
+     * It holds at most Capacity() bytes, the terminator included. The last handler to write
+     * wins, so a handler that cares reads Value() first to see whether another already answered.
+     */
+    class Buffer
+    {
+    public:
+        constexpr Buffer() = default;
+        Buffer(char* data, uint32_t capacity) : data_(data), capacity_(data ? capacity : 0u) {}
+
+        /// What the buffer holds: empty until a handler writes.
+        std::string_view Value() const
+        {
+            if (!data_) return std::string_view();
+            uint32_t length = 0;
+            while (length < capacity_ && data_[length]) ++length;
+            return std::string_view(data_, length);
+        }
+
+        /// Bytes the buffer takes, the terminator included; 0 when the runtime passed none.
+        uint32_t Capacity() const { return capacity_; }
+
+        /// Writes @p text and a terminator. False, and nothing written, when it does not fit.
+        bool Write(std::string_view text) const
+        {
+            if (!data_ || text.size() >= capacity_) return false;
+            if (!text.empty()) std::memcpy(data_, text.data(), text.size());
+            data_[text.size()] = '\0';
+            return true;
+        }
+
+    private:
+        char*    data_     = nullptr;
+        uint32_t capacity_ = 0;
+    };
+
+    namespace detail
+    {
+        template <class... Members>
+        struct List
+        {
+        };
+
+        /// The struct and the type behind a pointer to a data member.
+        template <class P>
+        struct MemberOf;
+        template <class C, class T>
+        struct MemberOf<T C::*>
+        {
+            using owner = C;
+            using type  = T;
+        };
+
+        // How one member of an args struct reaches a handler: `member` is what it reads,
+        // `extent` the member holding its length or capacity, for the kinds that have one.
+
+        template <auto M>
+        struct AsValue
+        {
+            static constexpr auto member = M;
+            using type                   = typename MemberOf<decltype(M)>::type;
+            static type Read(const typename MemberOf<decltype(M)>::owner& args) { return args.*M; }
+        };
+
+        template <auto M>
+        struct AsBool
+        {
+            static constexpr auto member = M;
+            using type                   = bool;
+            static bool Read(const typename MemberOf<decltype(M)>::owner& args)
+            {
+                return args.*M != WXL_FALSE;
+            }
+        };
+
+        template <auto M>
+        struct AsText
+        {
+            static constexpr auto member = M;
+            using type                   = std::string_view;
+            static std::string_view Read(const typename MemberOf<decltype(M)>::owner& args)
+            {
+                return View(args.*M);
+            }
+        };
+
+        template <auto M, auto Size>
+        struct AsBytes
+        {
+            static constexpr auto member = M;
+            static constexpr auto extent = Size;
+            using type                   = Bytes;
+            static Bytes Read(const typename MemberOf<decltype(M)>::owner& args)
+            {
+                return Bytes(args.*M, args.*Size);
+            }
+        };
+
+        template <auto M>
+        struct AsAnswer
+        {
+            static constexpr auto member = M;
+            using type                   = Answer;
+            static Answer Read(const typename MemberOf<decltype(M)>::owner& args)
+            {
+                return Answer(args.*M);
+            }
+        };
+
+        template <auto M, auto Capacity>
+        struct AsBuffer
+        {
+            static constexpr auto member = M;
+            static constexpr auto extent = Capacity;
+            using type                   = Buffer;
+            static Buffer Read(const typename MemberOf<decltype(M)>::owner& args)
+            {
+                return Buffer(args.*M, args.*Capacity);
+            }
+        };
+
+        /// Closes a struct's list of members; never a parameter.
+        struct EndOfArgs
+        {
+        };
+
+        /// Every member of an args struct, in the order of fields.def, closed by EndOfArgs.
+        template <class Args>
+        struct MembersOf;
+
+#define WXL_SDK_AS_u32    AsValue
+#define WXL_SDK_AS_i32    AsValue
+#define WXL_SDK_AS_u64    AsValue
+#define WXL_SDK_AS_i64    AsValue
+#define WXL_SDK_AS_f32    AsValue
+#define WXL_SDK_AS_bool   AsBool
+#define WXL_SDK_AS_handle AsValue
+#define WXL_SDK_AS_guid   AsValue
+#define WXL_SDK_AS_vec3   AsValue
+#define WXL_SDK_AS_str    AsText
+#define WXL_ARGS(args)                                                                         \
+    template <>                                                                                \
+    struct MembersOf<args>                                                                     \
+    {                                                                                          \
+        using type = List<
+#define WXL_ARGS_FIELD(args, member, kind)      WXL_SDK_AS_##kind<&args::member>,
+#define WXL_ARGS_BYTES(args, member, size)      AsBytes<&args::member, &args::size>,
+#define WXL_ARGS_ANSWER(args, member)           AsAnswer<&args::member>,
+#define WXL_ARGS_BUFFER(args, member, capacity) AsBuffer<&args::member, &args::capacity>,
+#define WXL_ARGS_PTR(args, member, type)        AsValue<&args::member>,
+#define WXL_ARGS_END(args) EndOfArgs>; };
+#include "wxl/fields.def"
+#undef WXL_ARGS_END
+#undef WXL_ARGS_PTR
+#undef WXL_ARGS_BUFFER
+#undef WXL_ARGS_ANSWER
+#undef WXL_ARGS_BYTES
+#undef WXL_ARGS_FIELD
+#undef WXL_ARGS
+#undef WXL_SDK_AS_str
+#undef WXL_SDK_AS_vec3
+#undef WXL_SDK_AS_guid
+#undef WXL_SDK_AS_handle
+#undef WXL_SDK_AS_bool
+#undef WXL_SDK_AS_f32
+#undef WXL_SDK_AS_i64
+#undef WXL_SDK_AS_u64
+#undef WXL_SDK_AS_i32
+#undef WXL_SDK_AS_u32
+
+        template <class M, class = void>
+        struct HasMember : std::false_type
+        {
+        };
+        template <class M>
+        struct HasMember<M, std::void_t<decltype(M::member)>> : std::true_type
+        {
+        };
+
+        template <class M, class = void>
+        struct HasExtent : std::false_type
+        {
+        };
+        template <class M>
+        struct HasExtent<M, std::void_t<decltype(M::extent)>> : std::true_type
+        {
+        };
+
+        /// Whether @p Other reads @p M as its length or capacity.
+        template <class M, class Other>
+        constexpr bool MeasuresIt()
+        {
+            if constexpr (HasMember<M>::value && HasExtent<Other>::value)
+            {
+                if constexpr (std::is_same_v<std::remove_cv_t<decltype(M::member)>,
+                                             std::remove_cv_t<decltype(Other::extent)>>)
+                    return M::member == Other::extent;
+            }
+            return false;
+        }
+
+        /// Whether a member is a parameter: a member that no other member of @p All measures.
+        template <class M, class... All>
+        constexpr bool IsParameter()
+        {
+            return HasMember<M>::value && !(MeasuresIt<M, All>() || ...);
+        }
+
+        template <class... Lists>
+        struct Concat
+        {
+            using type = List<>;
+        };
+        template <class... A>
+        struct Concat<List<A...>>
+        {
+            using type = List<A...>;
+        };
+        template <class... A, class... B, class... Rest>
+        struct Concat<List<A...>, List<B...>, Rest...> : Concat<List<A..., B...>, Rest...>
+        {
+        };
+
+        template <class Members>
+        struct ParametersOf;
+        template <class... All>
+        struct ParametersOf<List<All...>>
+            : Concat<std::conditional_t<IsParameter<All, All...>(), List<All>, List<>>...>
+        {
+        };
+
+        /// A handler's parameter list, and the call that reads an args struct into it.
+        template <class Parameters>
+        struct Unpack;
+        template <class... P>
+        struct Unpack<List<P...>>
+        {
+            using Signature = void(typename P::type...);
+
+            /// Calls @p f with @p lead first, then one value per parameter.
+            template <class Args, class F, class... Lead>
+            static void Call(const Args& args, F&& f, Lead&&... lead)
+            {
+                (void)args; // a struct may have no parameter
+                std::invoke(std::forward<F>(f), std::forward<Lead>(lead)..., P::Read(args)...);
+            }
+        };
+
+        template <class Args>
+        using UnpackOf = Unpack<typename ParametersOf<typename MembersOf<Args>::type>::type>;
+
+        /// Whether @p F can be called with the parameters of a handler's signature.
+        template <class F, class Signature>
+        struct CallableAs;
+        template <class F, class... P>
+        struct CallableAs<F, void(P...)> : std::is_invocable<F, P...>
+        {
+        };
+    } // namespace detail
+
+    /**
+     * @brief A handler of an event, as a function type.
+     *
+     * `wxl::HandlerOf<WXL_EV_MessageReceived>` is `void(uint32_t, wxl::Bytes, wxl::Answer)`: the
+     * parameters an On<Event> override and a wxl::Subscribe handler take.
+     */
+    template <wxl_event Event>
+    using HandlerOf = typename detail::UnpackOf<EventArgsOf<Event>>::Signature;
+
     /// Subscribes a raw handler. An empty Subscription means the runtime does not raise the event.
     inline Subscription Subscribe(wxl_event event, wxl_event_fn handler, void* user,
                                   int32_t priority = WXL_PRIORITY_DEFAULT)
@@ -249,22 +601,29 @@ namespace wxl
         {
             static void WXL_CALL Dispatch(void* user, const void* args)
             {
-                (*static_cast<Handler*>(user))(*static_cast<const EventArgsOf<Event>*>(args));
+                UnpackOf<EventArgsOf<Event>>::Call(*static_cast<const EventArgsOf<Event>*>(args),
+                                                   *static_cast<Handler*>(user));
             }
         };
     } // namespace detail
 
     /**
-     * @brief Subscribes a callable object to one event, with the args typed.
+     * @brief Subscribes a callable object to one event, with the args as parameters.
      *
-     * The handler is called as `(*handler)(const EventArgsOf<Event>&)` and must outlive the
-     * subscription; a lambda stored in a member works, a temporary does not.
+     * The handler is called with the parameters of wxl::HandlerOf<Event>, as an On<Event>
+     * override is, and must outlive the subscription; a lambda stored in a member works, a
+     * temporary does not.
      *
+     *     std::function<void(float)> m_onTick = [](float delta) { ... };
      *     wxl::Subscription tick = wxl::Subscribe<WXL_EV_Update>(&m_onTick);
      */
     template <wxl_event Event, class Handler>
     Subscription Subscribe(Handler* handler, int32_t priority = WXL_PRIORITY_DEFAULT)
     {
+        static_assert(detail::CallableAs<Handler&, HandlerOf<Event>>::value,
+                      "this handler cannot be called with the event's parameters; they are "
+                      "wxl::HandlerOf<Event>, one per member of its args (sdk.hpp, Handler "
+                      "parameters)");
         if (!handler) return Subscription();
         return Subscribe(Event, &detail::HandlerThunk<Event, Handler>::Dispatch, handler, priority);
     }
@@ -282,79 +641,109 @@ namespace wxl
     // matters and ignore the rest: an event a script does not override is not subscribed, so
     // the client never crosses into the mod for it.
     //
+    // Each virtual takes the event's parameters (see Handler parameters above):
+    //
+    //     void OnUnitDeath(wxl_handle unit) override;
+    //     void OnSoundPlay(uint32_t sound_id, std::string_view path, wxl::Answer suppressed) override;
+    //
     // An override for an event the runtime never raises is not an error, but it never runs, and
     // the runtime logs a warning naming the mod and the event.
     //
     // Each block names only its own family: events.def defaults the rest to nothing.
 
+    namespace detail
+    {
+        /// The first base of every family, before its events'.
+        class ScriptRoot
+        {
+        };
+
+        // One base per event, carrying its virtual. The parameter list is a type, wxl::HandlerOf,
+        // so the virtual is declared by a template specialised on it.
+#define WXL_EVENT(family, name, id, args)                                                      \
+    template <class Signature>                                                                 \
+    class Hook##name;                                                                          \
+    template <class... P>                                                                      \
+    class Hook##name<void(P...)>                                                               \
+    {                                                                                          \
+    public:                                                                                    \
+        virtual void On##name(P...) {}                                                         \
+                                                                                               \
+    protected:                                                                                 \
+        ~Hook##name() = default;                                                               \
+    };
+#include "wxl/events.def"
+#undef WXL_EVENT
+    } // namespace detail
+
     /// The game's own facts: ticks, the world, input, sound.
-    class WorldScript
+    class WorldScript : public detail::ScriptRoot
+#define WXL_EVENT_World(name, id, args) , public detail::Hook##name<HandlerOf<WXL_EV_##name>>
+#include "wxl/events.def"
+#undef WXL_EVENT_World
     {
     public:
         virtual ~WorldScript() = default;
-#define WXL_EVENT_World(name, id, args) virtual void On##name(const args&) {}
-#include "wxl/events.def"
-#undef WXL_EVENT_World
     };
 
     /// The slots of a frame.
-    class RenderScript
+    class RenderScript : public detail::ScriptRoot
+#define WXL_EVENT_Render(name, id, args) , public detail::Hook##name<HandlerOf<WXL_EV_##name>>
+#include "wxl/events.def"
+#undef WXL_EVENT_Render
     {
     public:
         virtual ~RenderScript() = default;
-#define WXL_EVENT_Render(name, id, args) virtual void On##name(const args&) {}
-#include "wxl/events.def"
-#undef WXL_EVENT_Render
     };
 
     /// What lives in the world.
-    class ObjectScript
+    class ObjectScript : public detail::ScriptRoot
+#define WXL_EVENT_Object(name, id, args) , public detail::Hook##name<HandlerOf<WXL_EV_##name>>
+#include "wxl/events.def"
+#undef WXL_EVENT_Object
     {
     public:
         virtual ~ObjectScript() = default;
-#define WXL_EVENT_Object(name, id, args) virtual void On##name(const args&) {}
-#include "wxl/events.def"
-#undef WXL_EVENT_Object
     };
 
     /// What comes off disk.
-    class AssetScript
+    class AssetScript : public detail::ScriptRoot
+#define WXL_EVENT_Asset(name, id, args) , public detail::Hook##name<HandlerOf<WXL_EV_##name>>
+#include "wxl/events.def"
+#undef WXL_EVENT_Asset
     {
     public:
         virtual ~AssetScript() = default;
-#define WXL_EVENT_Asset(name, id, args) virtual void On##name(const args&) {}
-#include "wxl/events.def"
-#undef WXL_EVENT_Asset
     };
 
     /// What crosses to the server.
-    class NetScript
+    class NetScript : public detail::ScriptRoot
+#define WXL_EVENT_Net(name, id, args) , public detail::Hook##name<HandlerOf<WXL_EV_##name>>
+#include "wxl/events.def"
+#undef WXL_EVENT_Net
     {
     public:
         virtual ~NetScript() = default;
-#define WXL_EVENT_Net(name, id, args) virtual void On##name(const args&) {}
-#include "wxl/events.def"
-#undef WXL_EVENT_Net
     };
 
     /// The script VM coming and going.
-    class LuaScript
+    class LuaScript : public detail::ScriptRoot
+#define WXL_EVENT_Lua(name, id, args) , public detail::Hook##name<HandlerOf<WXL_EV_##name>>
+#include "wxl/events.def"
+#undef WXL_EVENT_Lua
     {
     public:
         virtual ~LuaScript() = default;
-#define WXL_EVENT_Lua(name, id, args) virtual void On##name(const args&) {}
-#include "wxl/events.def"
-#undef WXL_EVENT_Lua
     };
 
     /// What the server reports of fights: attacks, damage, heals, misses.
-    class CombatScript
+    class CombatScript : public detail::ScriptRoot
+#define WXL_EVENT_Combat(name, id, args) , public detail::Hook##name<HandlerOf<WXL_EV_##name>>
+#include "wxl/events.def"
+#undef WXL_EVENT_Combat
     {
     public:
         virtual ~CombatScript() = default;
-#define WXL_EVENT_Combat(name, id, args) virtual void On##name(const args&) {}
-#include "wxl/events.def"
-#undef WXL_EVENT_Combat
     };
 
     namespace detail
@@ -388,7 +777,7 @@ namespace wxl
          *
          * The virtual call happens here, inside the mod, so no vtable crosses the boundary.
          */
-        template <class Script, class Args, void (Script::*Method)(const Args&)>
+        template <class Script, class Args, auto Method>
         struct Thunk
         {
             static void WXL_CALL Dispatch(void*, const void* args)
@@ -407,7 +796,8 @@ namespace wxl
                 // by a handler waits for the next event, one removed is skipped from here on.
                 const size_t count = family.scripts.size();
                 for (size_t i = 0; i < count; ++i)
-                    if (Script* script = family.scripts[i]) (script->*Method)(typed);
+                    if (Script* script = family.scripts[i])
+                        UnpackOf<Args>::Call(typed, Method, script);
             }
         };
 
@@ -429,19 +819,47 @@ namespace wxl
         // provably the family's empty default. A handler the trait cannot see -- an override
         // declared private or protected, which C++ allows -- is subscribed, and so is every
         // event of a script added through its family's pointer, which hides what it overrides.
+        //
+        // A member named like a handler but taking other parameters hides the family's virtual
+        // instead of overriding it, and would never be called: that is a compile error.
 
-        /// Whether D's handler for one event is, provably, the family's empty default.
-#define WXL_SDK_DEFAULT_TRAIT(name, args)                                                      \
-        template <class D, class F, class = void>                                             \
-        struct InheritsDefault_##name : std::false_type                                       \
-        {                                                                                     \
-        };                                                                                    \
-        template <class D, class F>                                                           \
-        struct InheritsDefault_##name<D, F, std::void_t<decltype(&D::On##name)>>              \
-            : std::is_same<decltype(&D::On##name), void (F::*)(const args&)>                  \
-        {                                                                                     \
+        /// The function type of a pointer to member function, without its class.
+        template <class P>
+        struct FunctionOf
+        {
+            using type = void;
         };
-#define WXL_EVENT(family, name, id, args) WXL_SDK_DEFAULT_TRAIT(name, args)
+        template <class C, class R, class... A>
+        struct FunctionOf<R (C::*)(A...)>
+        {
+            using type = R(A...);
+        };
+
+        /// What naming D's handler gives when it cannot be named from here.
+        struct Unnamed
+        {
+        };
+
+        // Probe<name><D>(0) has the type of &D::On<name>, or Unnamed. A function overload rather
+        // than a partial specialisation: clang refuses a protected override named in a partial
+        // specialisation's base, where it should only fail to match.
+
+        /// Whether D's handler for one event is, provably, the family's empty default; and
+        /// whether D declares one with parameters other than the event's.
+#define WXL_SDK_DEFAULT_TRAIT(name)                                                            \
+        template <class D>                                                                    \
+        auto Probe##name(int) -> decltype(&D::On##name);                                      \
+        template <class D>                                                                    \
+        Unnamed Probe##name(...);                                                             \
+        template <class D, class F>                                                           \
+        using InheritsDefault_##name =                                                        \
+            std::is_same<decltype(Probe##name<D>(0)), decltype(&F::On##name)>;                \
+        template <class D, class F>                                                           \
+        using Misdeclared_##name = std::bool_constant<                                        \
+            !std::is_same_v<decltype(Probe##name<D>(0)), Unnamed> &&                          \
+            !std::is_same_v<typename FunctionOf<decltype(Probe##name<D>(0))>::type,           \
+                            typename FunctionOf<decltype(&F::On##name)>::type>>;
+#define WXL_EVENT(family, name, id, args) WXL_SDK_DEFAULT_TRAIT(name)
 #include "wxl/events.def"
 #undef WXL_EVENT
 #undef WXL_SDK_DEFAULT_TRAIT
@@ -451,6 +869,10 @@ namespace wxl
         struct Rows;
 
 #define WXL_SDK_SUBSCRIBE_ROW(Script, name, args)                                              \
+    static_assert(!Misdeclared_##name<D, Script>::value,                                       \
+                  "On" #name " does not take the parameters of the event, so it would never "  \
+                  "be called; they are wxl::HandlerOf<WXL_EV_" #name ">, one per member of "   \
+                  "its args (sdk.hpp, Handler parameters)");                                   \
     if constexpr (std::is_same_v<D, Script> || !InheritsDefault_##name<D, Script>::value)      \
     {                                                                                          \
         if (!family.fed[WXL_EV_##name])                                                        \

@@ -59,29 +59,29 @@ namespace scout
         journal_.Add(std::move(entry));
     }
 
-    void ObjectWatch::OnObjectCreate(const wxl_object_args& args)
+    void ObjectWatch::OnObjectCreate(wxl_handle object, wxl_guid, uint32_t type)
     {
         // Everything the client tracks comes through here: items in your bags, corpses, the
         // doodads of the zone. Scout only wants things that are alive.
-        if (args.type != WXL_OBJECT_UNIT && args.type != WXL_OBJECT_PLAYER) return;
-        Note(What::Appeared, wxl::Unit(args.object));
+        if (type != WXL_OBJECT_UNIT && type != WXL_OBJECT_PLAYER) return;
+        Note(What::Appeared, wxl::Unit(object));
     }
 
-    void ObjectWatch::OnObjectDestroy(const wxl_object_args& args)
+    void ObjectWatch::OnObjectDestroy(wxl_handle object, wxl_guid, uint32_t type)
     {
-        if (args.type != WXL_OBJECT_UNIT && args.type != WXL_OBJECT_PLAYER) return;
-        Note(What::LeftView, wxl::Unit(args.object));
+        if (type != WXL_OBJECT_UNIT && type != WXL_OBJECT_PLAYER) return;
+        Note(What::LeftView, wxl::Unit(object));
     }
 
-    void ObjectWatch::OnUnitDeath(const wxl_unit_args& args)
+    void ObjectWatch::OnUnitDeath(wxl_handle unit)
     {
-        Note(What::Died, wxl::Unit(args.unit));
+        Note(What::Died, wxl::Unit(unit));
     }
 
-    void ObjectWatch::OnTargetChanged(const wxl_target_args& args)
+    void ObjectWatch::OnTargetChanged(wxl_handle, wxl_handle current)
     {
         // Clearing the target is a change too, and there is nothing to read then.
-        if (args.current == WXL_HANDLE_NONE) return;
-        Note(What::Targeted, wxl::Unit(args.current));
+        if (current == WXL_HANDLE_NONE) return;
+        Note(What::Targeted, wxl::Unit(current));
     }
 } // namespace scout

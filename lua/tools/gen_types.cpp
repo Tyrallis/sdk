@@ -26,24 +26,6 @@ namespace
     using wxl::reflect::Field;
     using wxl::reflect::Kind;
 
-    /// wxl_file_open_args -> wxl.FileOpenArgs
-    std::string ArgsClass(const char* args)
-    {
-        std::string name = "wxl.";
-        bool        upper = true;
-        for (const char* c = std::strncmp(args, "wxl_", 4) == 0 ? args + 4 : args; *c; ++c)
-        {
-            if (*c == '_')
-            {
-                upper = true;
-                continue;
-            }
-            name += upper ? static_cast<char>(*c - 'a' + 'A') : *c;
-            upper = false;
-        }
-        return name;
-    }
-
     const char* LuaType(Kind kind)
     {
         switch (kind)
@@ -55,50 +37,68 @@ namespace
         case Kind::f32: return "number";
         case Kind::boolean: return "boolean";
         case Kind::handle: return "wxl.Object|nil";
-        case Kind::guid: return "string";
+        case Kind::guid: return "wxl.Guid";
         case Kind::vec3: return "wxl.Vec3";
         case Kind::str: return "string";
         case Kind::ptr: return "lightuserdata|nil";
-        case Kind::bytes: return "string";
+        case Kind::bytes: return "wxl.Bytes";
         case Kind::answer: return "boolean|nil";
         case Kind::buffer: return "string|nil";
         }
         return "any";
     }
 
-    const char* KindNote(Kind kind)
-    {
-        switch (kind)
-        {
-        case Kind::guid: return " a guid, as \"0x\" and sixteen hex digits";
-        case Kind::bytes: return " the bytes, valid for the handler";
-        case Kind::answer: return " the answer: read what another handler wrote, or write true from an Override";
-        case Kind::buffer: return " the buffer: read what another handler wrote, or write a string from an Override";
-        case Kind::ptr: return " native only; nothing in this API takes it";
-        default: return "";
-        }
-    }
+    bool Writable(const Field& field) { return field.kind == Kind::answer || field.kind == Kind::buffer; }
 
     bool Answerable(const Event& event)
     {
         for (uint32_t i = 0; i < event.field_count; ++i)
-            if (event.fields[i].kind == Kind::answer || event.fields[i].kind == Kind::buffer) return true;
+            if (Writable(event.fields[i])) return true;
         return false;
     }
 
-    /// What an Override handler returns for an event: true for an answer, a string for a buffer.
-    std::string ReturnType(const Event& event)
+    /// "delta: number": a handler's parameters, the members IsExtent leaves, as Lua types.
+    std::string Parameters(const Event& event)
     {
-        bool answer = false, buffer = false;
+        std::string text;
         for (uint32_t i = 0; i < event.field_count; ++i)
         {
-            if (event.fields[i].kind == Kind::answer) answer = true;
-            if (event.fields[i].kind == Kind::buffer) buffer = true;
+            const Field& field = event.fields[i];
+            if (wxl::reflect::IsExtent(event, field)) continue;
+            if (!text.empty()) text += ", ";
+            text += field.name;
+            text += ": ";
+            text += LuaType(field.kind);
         }
-        if (answer && buffer) return "boolean|string|nil";
-        if (answer) return "boolean|nil";
-        if (buffer) return "string|nil";
-        return "nil";
+        return text;
+    }
+
+    /// What an Override returns: one value per writable member, in member order.
+    std::string Returns(const Event& event)
+    {
+        std::string text;
+        for (uint32_t i = 0; i < event.field_count; ++i)
+        {
+            const Field& field = event.fields[i];
+            if (!Writable(field)) continue;
+            if (!text.empty()) text += ", ";
+            text += field.kind == Kind::answer ? "boolean|nil" : "string|nil";
+        }
+        return text;
+    }
+
+    /// "handled", or "path, then flag": the writable members, for a description.
+    std::string WritableNames(const Event& event)
+    {
+        std::string text;
+        for (uint32_t i = 0; i < event.field_count; ++i)
+        {
+            const Field& field = event.fields[i];
+            if (!Writable(field)) continue;
+            if (!text.empty()) text += ", then ";
+            text += field.name;
+        }
+        return text;
     }
 
     std::vector<std::string> Families(const Event* events, uint32_t count)
@@ -145,35 +145,17 @@ namespace
                "-- table (reflect.hpp) and object table (object_reads.def) by wxl-lua-types; do not\n"
                "-- edit by hand.\n\n";
 
-        // --- the args classes, one per struct -------------------------------------------------
-        out << "-- The args of each event: a userdata read member by member, valid during the\n"
-               "-- handler's call.\n\n";
-        std::vector<std::string> written;
-        for (uint32_t i = 0; i < count; ++i)
-        {
-            const Event&      event = events[i];
-            const std::string cls   = ArgsClass(event.args);
-            bool              seen  = false;
-            for (const std::string& w : written)
-                if (w == cls) seen = true;
-            if (seen) continue;
-            written.push_back(cls);
-
-            out << "---@class " << cls << "\n";
-            for (uint32_t f = 0; f < event.field_count; ++f)
-            {
-                const Field& field = event.fields[f];
-                out << "---@field " << field.name << " " << LuaType(field.kind) << KindNote(field.kind) << "\n";
-            }
-            out << "\n";
-        }
-
-        out << "---@class wxl.Vec3\n---@field x number\n---@field y number\n---@field z number\n\n";
+        out << "---A guid, as \"0x\" and sixteen hex digits: nothing is lost and it keys a table.\n"
+               "---@alias wxl.Guid string\n\n"
+               "---An event's bytes, copied into a string.\n"
+               "---@alias wxl.Bytes string\n\n"
+               "---@class wxl.Vec3\n---@field x number\n---@field y number\n---@field z number\n\n";
 
         // --- the families -------------------------------------------------------------------
         out << "-- The script families. A function defined on one of these tables as On<Event> is\n"
-               "-- subscribed when the entry file has run; on an event that can be answered its\n"
-               "-- return value is taken, as Override takes it.\n\n";
+               "-- subscribed when the entry file has run and called with the event's parameters;\n"
+               "-- on an event that can be answered its return values are taken, as Override\n"
+               "-- takes them.\n\n";
         for (const std::string& family : families)
         {
             const std::string stem = family.substr(0, family.size() - 6);
@@ -182,9 +164,11 @@ namespace
             {
                 const Event& event = events[i];
                 if (stem != event.family) continue;
-                out << "---@field On" << event.name << " fun(self: " << family
-                    << ", args: " << ArgsClass(event.args) << ")";
-                if (Answerable(event)) out << ": " << ReturnType(event);
+                out << "---@field On" << event.name << " fun(self: " << family;
+                if (!Parameters(event).empty()) out << ", " << Parameters(event);
+                out << ")";
+                if (Answerable(event))
+                    out << ": " << Returns(event) << " answers through " << WritableNames(event);
                 out << "\n";
             }
             out << family << " = {}\n\n";
@@ -195,24 +179,26 @@ namespace
         for (size_t i = 0; i < families.size(); ++i) out << (i ? "|\"" : "\"") << families[i] << "\"";
         out << "\n\n";
 
-        out << "---Calls `handler(args)` whenever the event is raised. Returns the handler's id.\n";
+        out << "---Calls `handler` with the event's parameters whenever it is raised. Returns the\n"
+               "---handler's id.\n";
         for (uint32_t i = 0; i < count; ++i)
         {
             const Event& event = events[i];
             out << "---@overload fun(family: \"" << event.family << "Script\", method: \"On" << event.name
-                << "\", handler: fun(args: " << ArgsClass(event.args) << ")): integer\n";
+                << "\", handler: fun(" << Parameters(event) << ")): integer\n";
         }
         out << "---@param family wxl.Family\n---@param method string\n---@param handler function\n"
                "---@return integer id\nfunction Observe(family, method, handler) end\n\n";
 
-        out << "---Like Observe, on an event that can be answered: returning true writes the answer,\n"
-               "---returning a string fills the buffer. Only on the main thread.\n";
+        out << "---Like Observe, on an event that can be answered. The handler returns one value per\n"
+               "---member it answers through, in member order: true sets an answer, a string fills a\n"
+               "---buffer, nil leaves the member as it is. Taken on the main thread only.\n";
         for (uint32_t i = 0; i < count; ++i)
         {
             const Event& event = events[i];
             if (!Answerable(event)) continue;
             out << "---@overload fun(family: \"" << event.family << "Script\", method: \"On" << event.name
-                << "\", handler: fun(args: " << ArgsClass(event.args) << "): " << ReturnType(event)
+                << "\", handler: fun(" << Parameters(event) << "): " << Returns(event)
                 << "): integer\n";
         }
         out << "---@param family wxl.Family\n---@param method string\n---@param handler function\n"
@@ -306,9 +292,7 @@ namespace
                "wxl = {}\n\n"
                "---Writes a line to the runtime's log, tagged with the mod's id.\n"
                "---@param level \"trace\"|\"debug\"|\"info\"|\"warn\"|\"error\"\n"
-               "---@param ... any\nfunction wxl.log(level, ...) end\n\n"
-               "---Every member of an event's args, as a plain table.\n"
-               "---@param args any\n---@return table\nfunction wxl.totable(args) end\n";
+               "---@param ... any\nfunction wxl.log(level, ...) end\n";
 
         return out.str();
     }

@@ -11,33 +11,34 @@ registerForEvent("onShutdown", function()
     print("bye")
 end)
 
--- A handler defined on a family table is subscribed once this file has run.
-function ObjectScript:OnUnitDeath(args)
-    local unit = args.unit
+-- A handler defined on a family table is subscribed once this file has run. It receives the
+-- event's parameters, one per member of its args.
+function ObjectScript:OnUnitDeath(unit)
     local name = unit:Name() or "something"
     local level = unit:Level() or 0
     print(name .. " died at level " .. level)
 end
 
--- On an event that can be answered, what the handler returns is the answer.
-function AssetScript:OnFileOpen(args)
-    if args.path == "Interface\\Icons\\INV_Misc_QuestionMark.blp" then
+-- On an event that can be answered, what the handler returns is the answer. The parameter it
+-- answers through holds what earlier handlers decided: here, a path another mod redirected to.
+function AssetScript:OnFileOpen(path, redirect)
+    if redirect == "" and path == "Interface\\Icons\\INV_Misc_QuestionMark.blp" then
         return "Interface\\Icons\\INV_Misc_Coin_01.blp"
     end
 end
 
 -- Observe and Override do the same from anywhere, at any time.
 local ticks = 0
-Observe("WorldScript", "OnUpdate", function(args)
+Observe("WorldScript", "OnUpdate", function(delta)
     ticks = ticks + 1
     if ticks % 600 == 0 then
-        print(string.format("%d ticks, last delta %.3f", ticks, args.delta))
+        print(string.format("%d ticks, last delta %.3f", ticks, delta))
     end
 end)
 
-Override("NetScript", "OnMessageReceived", function(args)
-    if args.opcode == 0x1234 then
-        print("opcode 0x1234 with " .. #args.data .. " bytes, kept from the client")
+Override("NetScript", "OnMessageReceived", function(opcode, data)
+    if opcode == 0x1234 then
+        print("opcode 0x1234 with " .. #data .. " bytes, kept from the client")
         return true
     end
 end)

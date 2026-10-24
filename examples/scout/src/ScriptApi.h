@@ -25,8 +25,8 @@ namespace scout
     public:
         ScriptApi(Journal& journal, NetWatch& net);
 
-        void OnScriptVmReady(const wxl_script_vm_args& args) override;
-        void OnScriptVmClosing(const wxl_script_vm_args& args) override;
+        void OnScriptVmReady(uint32_t context, void* native_state) override;
+        void OnScriptVmClosing(uint32_t context, void* native_state) override;
 
         /// Tells the interface the journal grew, if there is an interface to tell.
         void Announce() const;

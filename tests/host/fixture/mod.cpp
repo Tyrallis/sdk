@@ -26,10 +26,10 @@ namespace
     /// Logs every tick it sees.
     struct TickLogger
     {
-        void operator()(const wxl_update_args& update) const
+        void operator()(float delta) const
         {
             char line[64];
-            std::snprintf(line, sizeof(line), "update %.3f", static_cast<double>(update.delta));
+            std::snprintf(line, sizeof(line), "update %.3f", static_cast<double>(delta));
             wxl::Log(WXL_LOG_INFO, kTag, line);
         }
     };

@@ -3,256 +3,11 @@
 -- table (reflect.hpp) and object table (object_reads.def) by wxl-lua-types; do not
 -- edit by hand.
 
--- The args of each event: a userdata read member by member, valid during the
--- handler's call.
+---A guid, as "0x" and sixteen hex digits: nothing is lost and it keys a table.
+---@alias wxl.Guid string
 
----@class wxl.UpdateArgs
----@field delta number
-
----@class wxl.WorldArgs
----@field map_id integer
----@field position wxl.Vec3
-
----@class wxl.WorldClickArgs
----@field point wxl.Vec3
----@field object wxl.Object|nil
----@field button integer
-
----@class wxl.InputArgs
----@field message integer
----@field wparam integer
----@field lparam integer
----@field handled boolean|nil the answer: read what another handler wrote, or write true from an Override
-
----@class wxl.SoundArgs
----@field sound_id integer
----@field path string
----@field suppressed boolean|nil the answer: read what another handler wrote, or write true from an Override
-
----@class wxl.FrameArgs
----@field index integer
----@field delta number
-
----@class wxl.SwapchainArgs
----@field width integer
----@field height integer
-
----@class wxl.ObjectArgs
----@field object wxl.Object|nil
----@field guid string a guid, as "0x" and sixteen hex digits
----@field type integer
-
----@class wxl.TargetArgs
----@field previous wxl.Object|nil
----@field current wxl.Object|nil
-
----@class wxl.DoodadArgs
----@field doodad wxl.Object|nil
----@field path string
----@field position wxl.Vec3
-
----@class wxl.EquipmentArgs
----@field unit wxl.Object|nil
----@field slot integer
----@field item_id integer
-
----@class wxl.ModelLoadArgs
----@field path string
----@field data string the bytes, valid for the handler
----@field size integer
----@field replacement lightuserdata|nil native only; nothing in this API takes it
----@field replacement_size lightuserdata|nil native only; nothing in this API takes it
-
----@class wxl.TextureLoadArgs
----@field path string
-
----@class wxl.TerrainChunkArgs
----@field map_id integer
----@field tile_x integer
----@field tile_y integer
----@field chunk_x integer
----@field chunk_y integer
-
----@class wxl.MapObjectArgs
----@field path string
----@field data string the bytes, valid for the handler
----@field size integer
-
----@class wxl.FileOpenArgs
----@field path string
----@field redirect string|nil the buffer: read what another handler wrote, or write a string from an Override
----@field redirect_capacity integer
-
----@class wxl.FileOpenedArgs
----@field path string
----@field found boolean
----@field size integer
-
----@class wxl.ClientDbArgs
----@field name string
----@field records lightuserdata|nil native only; nothing in this API takes it
----@field record_count integer
----@field record_size integer
-
----@class wxl.MessageArgs
----@field opcode integer
----@field data string the bytes, valid for the handler
----@field size integer
----@field suppressed boolean|nil the answer: read what another handler wrote, or write true from an Override
-
----@class wxl.ConnectionArgs
----@field address string
-
----@class wxl.ScriptVmArgs
----@field context integer
----@field native_state lightuserdata|nil native only; nothing in this API takes it
-
----@class wxl.UnitArgs
----@field unit wxl.Object|nil
-
----@class wxl.UnitAuraArgs
----@field unit wxl.Object|nil
----@field spell_id integer
----@field removed boolean
-
----@class wxl.SpellCastArgs
----@field caster wxl.Object|nil
----@field caster_guid string a guid, as "0x" and sixteen hex digits
----@field target wxl.Object|nil
----@field target_guid string a guid, as "0x" and sixteen hex digits
----@field cast_item string a guid, as "0x" and sixteen hex digits
----@field spell_id integer
----@field cast_count integer
----@field cast_flags integer
----@field target_flags integer
----@field cast_time integer
----@field hit_count integer
----@field miss_count integer
----@field hits string the bytes, valid for the handler
----@field hits_size integer
----@field misses string the bytes, valid for the handler
----@field misses_size integer
----@field miss_reasons string the bytes, valid for the handler
-
----@class wxl.SpellFailArgs
----@field caster wxl.Object|nil
----@field caster_guid string a guid, as "0x" and sixteen hex digits
----@field spell_id integer
----@field cast_count integer
----@field reason integer
----@field custom_error integer
----@field custom_arg integer
-
----@class wxl.SpellRequestArgs
----@field caster wxl.Object|nil
----@field spell_id integer
----@field item wxl.Object|nil
----@field target_guid string a guid, as "0x" and sixteen hex digits
----@field confirmed boolean
----@field refused boolean|nil the answer: read what another handler wrote, or write true from an Override
-
----@class wxl.ItemUseArgs
----@field item wxl.Object|nil
----@field item_guid string a guid, as "0x" and sixteen hex digits
----@field target_guid string a guid, as "0x" and sixteen hex digits
----@field confirmed boolean
----@field refused boolean|nil the answer: read what another handler wrote, or write true from an Override
-
----@class wxl.UiEventArgs
----@field index integer
----@field name string
----@field format string
----@field values string the bytes, valid for the handler
----@field values_size integer
----@field value_count integer
-
----@class wxl.ScriptErrorArgs
----@field context integer
----@field message string
-
----@class wxl.SpellProgressArgs
----@field caster wxl.Object|nil
----@field caster_guid string a guid, as "0x" and sixteen hex digits
----@field target wxl.Object|nil
----@field target_guid string a guid, as "0x" and sixteen hex digits
----@field spell_id integer
----@field duration integer
----@field remaining integer
-
----@class wxl.SpellDelayArgs
----@field caster wxl.Object|nil
----@field caster_guid string a guid, as "0x" and sixteen hex digits
----@field spell_id integer
----@field delay integer
-
----@class wxl.SpellCooldownArgs
----@field unit wxl.Object|nil
----@field unit_guid string a guid, as "0x" and sixteen hex digits
----@field item wxl.Object|nil
----@field item_guid string a guid, as "0x" and sixteen hex digits
----@field spell_id integer
----@field duration integer
----@field flags integer
-
----@class wxl.SpellCooldownChangeArgs
----@field unit wxl.Object|nil
----@field unit_guid string a guid, as "0x" and sixteen hex digits
----@field spell_id integer
----@field change integer
----@field delay integer
-
----@class wxl.SpellCancelArgs
----@field caster wxl.Object|nil
----@field caster_guid string a guid, as "0x" and sixteen hex digits
----@field spell_id integer
----@field cast_count integer
----@field reason integer
----@field notify_server boolean
-
----@class wxl.CombatAttackArgs
----@field attacker wxl.Object|nil
----@field attacker_guid string a guid, as "0x" and sixteen hex digits
----@field victim wxl.Object|nil
----@field victim_guid string a guid, as "0x" and sixteen hex digits
-
----@class wxl.CombatDamageArgs
----@field source wxl.Object|nil
----@field source_guid string a guid, as "0x" and sixteen hex digits
----@field target wxl.Object|nil
----@field target_guid string a guid, as "0x" and sixteen hex digits
----@field spell_id integer
----@field kind integer
----@field environment integer
----@field amount integer
----@field overkill integer
----@field school integer
----@field absorbed integer
----@field resisted integer
----@field blocked integer
----@field crit boolean
----@field hit_info integer
-
----@class wxl.CombatHealArgs
----@field source wxl.Object|nil
----@field source_guid string a guid, as "0x" and sixteen hex digits
----@field target wxl.Object|nil
----@field target_guid string a guid, as "0x" and sixteen hex digits
----@field spell_id integer
----@field amount integer
----@field overheal integer
----@field absorbed integer
----@field crit boolean
----@field periodic boolean
-
----@class wxl.CombatMissArgs
----@field source wxl.Object|nil
----@field source_guid string a guid, as "0x" and sixteen hex digits
----@field target wxl.Object|nil
----@field target_guid string a guid, as "0x" and sixteen hex digits
----@field spell_id integer
----@field melee boolean
----@field reason integer
----@field hit_info integer
+---An event's bytes, copied into a string.
+---@alias wxl.Bytes string
 
 ---@class wxl.Vec3
 ---@field x number
@@ -260,158 +15,161 @@
 ---@field z number
 
 -- The script families. A function defined on one of these tables as On<Event> is
--- subscribed when the entry file has run; on an event that can be answered its
--- return value is taken, as Override takes it.
+-- subscribed when the entry file has run and called with the event's parameters;
+-- on an event that can be answered its return values are taken, as Override
+-- takes them.
 
 ---@class WorldScript
----@field OnUpdate fun(self: WorldScript, args: wxl.UpdateArgs)
----@field OnWorldEnter fun(self: WorldScript, args: wxl.WorldArgs)
----@field OnWorldLeave fun(self: WorldScript, args: wxl.WorldArgs)
----@field OnWorldClick fun(self: WorldScript, args: wxl.WorldClickArgs)
----@field OnInput fun(self: WorldScript, args: wxl.InputArgs): boolean|nil
----@field OnSoundPlay fun(self: WorldScript, args: wxl.SoundArgs): boolean|nil
+---@field OnUpdate fun(self: WorldScript, delta: number)
+---@field OnWorldEnter fun(self: WorldScript, map_id: integer, position: wxl.Vec3)
+---@field OnWorldLeave fun(self: WorldScript, map_id: integer, position: wxl.Vec3)
+---@field OnWorldClick fun(self: WorldScript, point: wxl.Vec3, object: wxl.Object|nil, button: integer)
+---@field OnInput fun(self: WorldScript, message: integer, wparam: integer, lparam: integer, handled: boolean|nil): boolean|nil answers through handled
+---@field OnSoundPlay fun(self: WorldScript, sound_id: integer, path: string, suppressed: boolean|nil): boolean|nil answers through suppressed
 WorldScript = {}
 
 ---@class RenderScript
----@field OnFrameBegin fun(self: RenderScript, args: wxl.FrameArgs)
----@field OnFrameEnd fun(self: RenderScript, args: wxl.FrameArgs)
----@field OnWorldRenderBegin fun(self: RenderScript, args: wxl.FrameArgs)
----@field OnWorldRenderEnd fun(self: RenderScript, args: wxl.FrameArgs)
----@field OnUiRenderEnd fun(self: RenderScript, args: wxl.FrameArgs)
----@field OnSwapchainLost fun(self: RenderScript, args: wxl.SwapchainArgs)
----@field OnSwapchainRestored fun(self: RenderScript, args: wxl.SwapchainArgs)
+---@field OnFrameBegin fun(self: RenderScript, index: integer, delta: number)
+---@field OnFrameEnd fun(self: RenderScript, index: integer, delta: number)
+---@field OnWorldRenderBegin fun(self: RenderScript, index: integer, delta: number)
+---@field OnWorldRenderEnd fun(self: RenderScript, index: integer, delta: number)
+---@field OnUiRenderEnd fun(self: RenderScript, index: integer, delta: number)
+---@field OnSwapchainLost fun(self: RenderScript, width: integer, height: integer)
+---@field OnSwapchainRestored fun(self: RenderScript, width: integer, height: integer)
 RenderScript = {}
 
 ---@class ObjectScript
----@field OnObjectCreate fun(self: ObjectScript, args: wxl.ObjectArgs)
----@field OnObjectUpdate fun(self: ObjectScript, args: wxl.ObjectArgs)
----@field OnObjectDestroy fun(self: ObjectScript, args: wxl.ObjectArgs)
----@field OnTargetChanged fun(self: ObjectScript, args: wxl.TargetArgs)
----@field OnDoodadSpawn fun(self: ObjectScript, args: wxl.DoodadArgs)
----@field OnEquipmentChanged fun(self: ObjectScript, args: wxl.EquipmentArgs)
----@field OnUnitDeath fun(self: ObjectScript, args: wxl.UnitArgs)
----@field OnUnitAuraChanged fun(self: ObjectScript, args: wxl.UnitAuraArgs)
----@field OnSpellCastStart fun(self: ObjectScript, args: wxl.SpellCastArgs)
----@field OnSpellCastGo fun(self: ObjectScript, args: wxl.SpellCastArgs)
----@field OnSpellCastFailed fun(self: ObjectScript, args: wxl.SpellFailArgs)
----@field OnSpellCastInterrupted fun(self: ObjectScript, args: wxl.SpellFailArgs)
----@field OnSpellCastRequest fun(self: ObjectScript, args: wxl.SpellRequestArgs): boolean|nil
----@field OnItemUseRequest fun(self: ObjectScript, args: wxl.ItemUseArgs): boolean|nil
----@field OnSpellChannelStart fun(self: ObjectScript, args: wxl.SpellProgressArgs)
----@field OnSpellChannelUpdate fun(self: ObjectScript, args: wxl.SpellProgressArgs)
----@field OnSpellChannelStop fun(self: ObjectScript, args: wxl.SpellProgressArgs)
----@field OnSpellCastResume fun(self: ObjectScript, args: wxl.SpellProgressArgs)
----@field OnSpellCastDelayed fun(self: ObjectScript, args: wxl.SpellDelayArgs)
----@field OnSpellCooldown fun(self: ObjectScript, args: wxl.SpellCooldownArgs)
----@field OnSpellCooldownChanged fun(self: ObjectScript, args: wxl.SpellCooldownChangeArgs)
----@field OnSpellCastCancel fun(self: ObjectScript, args: wxl.SpellCancelArgs)
+---@field OnObjectCreate fun(self: ObjectScript, object: wxl.Object|nil, guid: wxl.Guid, type: integer)
+---@field OnObjectUpdate fun(self: ObjectScript, object: wxl.Object|nil, guid: wxl.Guid, type: integer)
+---@field OnObjectDestroy fun(self: ObjectScript, object: wxl.Object|nil, guid: wxl.Guid, type: integer)
+---@field OnTargetChanged fun(self: ObjectScript, previous: wxl.Object|nil, current: wxl.Object|nil)
+---@field OnDoodadSpawn fun(self: ObjectScript, doodad: wxl.Object|nil, path: string, position: wxl.Vec3)
+---@field OnEquipmentChanged fun(self: ObjectScript, unit: wxl.Object|nil, slot: integer, item_id: integer)
+---@field OnUnitDeath fun(self: ObjectScript, unit: wxl.Object|nil)
+---@field OnUnitAuraChanged fun(self: ObjectScript, unit: wxl.Object|nil, spell_id: integer, removed: boolean)
+---@field OnSpellCastStart fun(self: ObjectScript, caster: wxl.Object|nil, caster_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, cast_item: wxl.Guid, spell_id: integer, cast_count: integer, cast_flags: integer, target_flags: integer, cast_time: integer, hit_count: integer, hits: wxl.Bytes, misses: wxl.Bytes, miss_reasons: wxl.Bytes)
+---@field OnSpellCastGo fun(self: ObjectScript, caster: wxl.Object|nil, caster_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, cast_item: wxl.Guid, spell_id: integer, cast_count: integer, cast_flags: integer, target_flags: integer, cast_time: integer, hit_count: integer, hits: wxl.Bytes, misses: wxl.Bytes, miss_reasons: wxl.Bytes)
+---@field OnSpellCastFailed fun(self: ObjectScript, caster: wxl.Object|nil, caster_guid: wxl.Guid, spell_id: integer, cast_count: integer, reason: integer, custom_error: integer, custom_arg: integer)
+---@field OnSpellCastInterrupted fun(self: ObjectScript, caster: wxl.Object|nil, caster_guid: wxl.Guid, spell_id: integer, cast_count: integer, reason: integer, custom_error: integer, custom_arg: integer)
+---@field OnSpellCastRequest fun(self: ObjectScript, caster: wxl.Object|nil, spell_id: integer, item: wxl.Object|nil, target_guid: wxl.Guid, confirmed: boolean, refused: boolean|nil): boolean|nil answers through refused
+---@field OnItemUseRequest fun(self: ObjectScript, item: wxl.Object|nil, item_guid: wxl.Guid, target_guid: wxl.Guid, confirmed: boolean, refused: boolean|nil): boolean|nil answers through refused
+---@field OnSpellChannelStart fun(self: ObjectScript, caster: wxl.Object|nil, caster_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, duration: integer, remaining: integer)
+---@field OnSpellChannelUpdate fun(self: ObjectScript, caster: wxl.Object|nil, caster_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, duration: integer, remaining: integer)
+---@field OnSpellChannelStop fun(self: ObjectScript, caster: wxl.Object|nil, caster_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, duration: integer, remaining: integer)
+---@field OnSpellCastResume fun(self: ObjectScript, caster: wxl.Object|nil, caster_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, duration: integer, remaining: integer)
+---@field OnSpellCastDelayed fun(self: ObjectScript, caster: wxl.Object|nil, caster_guid: wxl.Guid, spell_id: integer, delay: integer)
+---@field OnSpellCooldown fun(self: ObjectScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, item: wxl.Object|nil, item_guid: wxl.Guid, spell_id: integer, duration: integer, flags: integer)
+---@field OnSpellCooldownChanged fun(self: ObjectScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, spell_id: integer, change: integer, delay: integer)
+---@field OnSpellCastCancel fun(self: ObjectScript, caster: wxl.Object|nil, caster_guid: wxl.Guid, spell_id: integer, cast_count: integer, reason: integer, notify_server: boolean)
 ObjectScript = {}
 
 ---@class AssetScript
----@field OnModelLoad fun(self: AssetScript, args: wxl.ModelLoadArgs)
----@field OnTextureLoad fun(self: AssetScript, args: wxl.TextureLoadArgs)
----@field OnTerrainChunkBuild fun(self: AssetScript, args: wxl.TerrainChunkArgs)
----@field OnMapObjectLoad fun(self: AssetScript, args: wxl.MapObjectArgs)
----@field OnFileOpen fun(self: AssetScript, args: wxl.FileOpenArgs): string|nil
----@field OnFileOpened fun(self: AssetScript, args: wxl.FileOpenedArgs)
----@field OnClientDbLoaded fun(self: AssetScript, args: wxl.ClientDbArgs)
+---@field OnModelLoad fun(self: AssetScript, path: string, data: wxl.Bytes, replacement: lightuserdata|nil, replacement_size: lightuserdata|nil)
+---@field OnTextureLoad fun(self: AssetScript, path: string)
+---@field OnTerrainChunkBuild fun(self: AssetScript, map_id: integer, tile_x: integer, tile_y: integer, chunk_x: integer, chunk_y: integer)
+---@field OnMapObjectLoad fun(self: AssetScript, path: string, data: wxl.Bytes)
+---@field OnFileOpen fun(self: AssetScript, path: string, redirect: string|nil): string|nil answers through redirect
+---@field OnFileOpened fun(self: AssetScript, path: string, found: boolean, size: integer)
+---@field OnClientDbLoaded fun(self: AssetScript, name: string, records: lightuserdata|nil, record_count: integer, record_size: integer)
 AssetScript = {}
 
 ---@class NetScript
----@field OnMessageReceived fun(self: NetScript, args: wxl.MessageArgs): boolean|nil
----@field OnMessageSent fun(self: NetScript, args: wxl.MessageArgs): boolean|nil
----@field OnConnected fun(self: NetScript, args: wxl.ConnectionArgs)
----@field OnDisconnected fun(self: NetScript, args: wxl.ConnectionArgs)
+---@field OnMessageReceived fun(self: NetScript, opcode: integer, data: wxl.Bytes, suppressed: boolean|nil): boolean|nil answers through suppressed
+---@field OnMessageSent fun(self: NetScript, opcode: integer, data: wxl.Bytes, suppressed: boolean|nil): boolean|nil answers through suppressed
+---@field OnConnected fun(self: NetScript, address: string)
+---@field OnDisconnected fun(self: NetScript, address: string)
 NetScript = {}
 
 ---@class LuaScript
----@field OnScriptVmReady fun(self: LuaScript, args: wxl.ScriptVmArgs)
----@field OnScriptVmClosing fun(self: LuaScript, args: wxl.ScriptVmArgs)
----@field OnUiEvent fun(self: LuaScript, args: wxl.UiEventArgs)
----@field OnScriptError fun(self: LuaScript, args: wxl.ScriptErrorArgs)
+---@field OnScriptVmReady fun(self: LuaScript, context: integer, native_state: lightuserdata|nil)
+---@field OnScriptVmClosing fun(self: LuaScript, context: integer, native_state: lightuserdata|nil)
+---@field OnUiEvent fun(self: LuaScript, index: integer, name: string, format: string, values: wxl.Bytes, value_count: integer)
+---@field OnScriptError fun(self: LuaScript, context: integer, message: string)
 LuaScript = {}
 
 ---@class CombatScript
----@field OnCombatAttackStart fun(self: CombatScript, args: wxl.CombatAttackArgs)
----@field OnCombatAttackStop fun(self: CombatScript, args: wxl.CombatAttackArgs)
----@field OnCombatDamage fun(self: CombatScript, args: wxl.CombatDamageArgs)
----@field OnCombatHeal fun(self: CombatScript, args: wxl.CombatHealArgs)
----@field OnCombatMiss fun(self: CombatScript, args: wxl.CombatMissArgs)
+---@field OnCombatAttackStart fun(self: CombatScript, attacker: wxl.Object|nil, attacker_guid: wxl.Guid, victim: wxl.Object|nil, victim_guid: wxl.Guid)
+---@field OnCombatAttackStop fun(self: CombatScript, attacker: wxl.Object|nil, attacker_guid: wxl.Guid, victim: wxl.Object|nil, victim_guid: wxl.Guid)
+---@field OnCombatDamage fun(self: CombatScript, source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, kind: integer, environment: integer, amount: integer, overkill: integer, school: integer, absorbed: integer, resisted: integer, blocked: integer, crit: boolean, hit_info: integer)
+---@field OnCombatHeal fun(self: CombatScript, source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, amount: integer, overheal: integer, absorbed: integer, crit: boolean, periodic: boolean)
+---@field OnCombatMiss fun(self: CombatScript, source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, melee: boolean, reason: integer, hit_info: integer)
 CombatScript = {}
 
 ---@alias wxl.Family "WorldScript"|"RenderScript"|"ObjectScript"|"AssetScript"|"NetScript"|"LuaScript"|"CombatScript"
 
----Calls `handler(args)` whenever the event is raised. Returns the handler's id.
----@overload fun(family: "WorldScript", method: "OnUpdate", handler: fun(args: wxl.UpdateArgs)): integer
----@overload fun(family: "WorldScript", method: "OnWorldEnter", handler: fun(args: wxl.WorldArgs)): integer
----@overload fun(family: "WorldScript", method: "OnWorldLeave", handler: fun(args: wxl.WorldArgs)): integer
----@overload fun(family: "WorldScript", method: "OnWorldClick", handler: fun(args: wxl.WorldClickArgs)): integer
----@overload fun(family: "WorldScript", method: "OnInput", handler: fun(args: wxl.InputArgs)): integer
----@overload fun(family: "WorldScript", method: "OnSoundPlay", handler: fun(args: wxl.SoundArgs)): integer
----@overload fun(family: "RenderScript", method: "OnFrameBegin", handler: fun(args: wxl.FrameArgs)): integer
----@overload fun(family: "RenderScript", method: "OnFrameEnd", handler: fun(args: wxl.FrameArgs)): integer
----@overload fun(family: "RenderScript", method: "OnWorldRenderBegin", handler: fun(args: wxl.FrameArgs)): integer
----@overload fun(family: "RenderScript", method: "OnWorldRenderEnd", handler: fun(args: wxl.FrameArgs)): integer
----@overload fun(family: "RenderScript", method: "OnUiRenderEnd", handler: fun(args: wxl.FrameArgs)): integer
----@overload fun(family: "RenderScript", method: "OnSwapchainLost", handler: fun(args: wxl.SwapchainArgs)): integer
----@overload fun(family: "RenderScript", method: "OnSwapchainRestored", handler: fun(args: wxl.SwapchainArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnObjectCreate", handler: fun(args: wxl.ObjectArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnObjectUpdate", handler: fun(args: wxl.ObjectArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnObjectDestroy", handler: fun(args: wxl.ObjectArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnTargetChanged", handler: fun(args: wxl.TargetArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnDoodadSpawn", handler: fun(args: wxl.DoodadArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnEquipmentChanged", handler: fun(args: wxl.EquipmentArgs)): integer
----@overload fun(family: "AssetScript", method: "OnModelLoad", handler: fun(args: wxl.ModelLoadArgs)): integer
----@overload fun(family: "AssetScript", method: "OnTextureLoad", handler: fun(args: wxl.TextureLoadArgs)): integer
----@overload fun(family: "AssetScript", method: "OnTerrainChunkBuild", handler: fun(args: wxl.TerrainChunkArgs)): integer
----@overload fun(family: "AssetScript", method: "OnMapObjectLoad", handler: fun(args: wxl.MapObjectArgs)): integer
----@overload fun(family: "AssetScript", method: "OnFileOpen", handler: fun(args: wxl.FileOpenArgs)): integer
----@overload fun(family: "AssetScript", method: "OnFileOpened", handler: fun(args: wxl.FileOpenedArgs)): integer
----@overload fun(family: "AssetScript", method: "OnClientDbLoaded", handler: fun(args: wxl.ClientDbArgs)): integer
----@overload fun(family: "NetScript", method: "OnMessageReceived", handler: fun(args: wxl.MessageArgs)): integer
----@overload fun(family: "NetScript", method: "OnMessageSent", handler: fun(args: wxl.MessageArgs)): integer
----@overload fun(family: "NetScript", method: "OnConnected", handler: fun(args: wxl.ConnectionArgs)): integer
----@overload fun(family: "NetScript", method: "OnDisconnected", handler: fun(args: wxl.ConnectionArgs)): integer
----@overload fun(family: "LuaScript", method: "OnScriptVmReady", handler: fun(args: wxl.ScriptVmArgs)): integer
----@overload fun(family: "LuaScript", method: "OnScriptVmClosing", handler: fun(args: wxl.ScriptVmArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnUnitDeath", handler: fun(args: wxl.UnitArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnUnitAuraChanged", handler: fun(args: wxl.UnitAuraArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnSpellCastStart", handler: fun(args: wxl.SpellCastArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnSpellCastGo", handler: fun(args: wxl.SpellCastArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnSpellCastFailed", handler: fun(args: wxl.SpellFailArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnSpellCastInterrupted", handler: fun(args: wxl.SpellFailArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnSpellCastRequest", handler: fun(args: wxl.SpellRequestArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnItemUseRequest", handler: fun(args: wxl.ItemUseArgs)): integer
----@overload fun(family: "LuaScript", method: "OnUiEvent", handler: fun(args: wxl.UiEventArgs)): integer
----@overload fun(family: "LuaScript", method: "OnScriptError", handler: fun(args: wxl.ScriptErrorArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnSpellChannelStart", handler: fun(args: wxl.SpellProgressArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnSpellChannelUpdate", handler: fun(args: wxl.SpellProgressArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnSpellChannelStop", handler: fun(args: wxl.SpellProgressArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnSpellCastResume", handler: fun(args: wxl.SpellProgressArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnSpellCastDelayed", handler: fun(args: wxl.SpellDelayArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnSpellCooldown", handler: fun(args: wxl.SpellCooldownArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnSpellCooldownChanged", handler: fun(args: wxl.SpellCooldownChangeArgs)): integer
----@overload fun(family: "ObjectScript", method: "OnSpellCastCancel", handler: fun(args: wxl.SpellCancelArgs)): integer
----@overload fun(family: "CombatScript", method: "OnCombatAttackStart", handler: fun(args: wxl.CombatAttackArgs)): integer
----@overload fun(family: "CombatScript", method: "OnCombatAttackStop", handler: fun(args: wxl.CombatAttackArgs)): integer
----@overload fun(family: "CombatScript", method: "OnCombatDamage", handler: fun(args: wxl.CombatDamageArgs)): integer
----@overload fun(family: "CombatScript", method: "OnCombatHeal", handler: fun(args: wxl.CombatHealArgs)): integer
----@overload fun(family: "CombatScript", method: "OnCombatMiss", handler: fun(args: wxl.CombatMissArgs)): integer
+---Calls `handler` with the event's parameters whenever it is raised. Returns the
+---handler's id.
+---@overload fun(family: "WorldScript", method: "OnUpdate", handler: fun(delta: number)): integer
+---@overload fun(family: "WorldScript", method: "OnWorldEnter", handler: fun(map_id: integer, position: wxl.Vec3)): integer
+---@overload fun(family: "WorldScript", method: "OnWorldLeave", handler: fun(map_id: integer, position: wxl.Vec3)): integer
+---@overload fun(family: "WorldScript", method: "OnWorldClick", handler: fun(point: wxl.Vec3, object: wxl.Object|nil, button: integer)): integer
+---@overload fun(family: "WorldScript", method: "OnInput", handler: fun(message: integer, wparam: integer, lparam: integer, handled: boolean|nil)): integer
+---@overload fun(family: "WorldScript", method: "OnSoundPlay", handler: fun(sound_id: integer, path: string, suppressed: boolean|nil)): integer
+---@overload fun(family: "RenderScript", method: "OnFrameBegin", handler: fun(index: integer, delta: number)): integer
+---@overload fun(family: "RenderScript", method: "OnFrameEnd", handler: fun(index: integer, delta: number)): integer
+---@overload fun(family: "RenderScript", method: "OnWorldRenderBegin", handler: fun(index: integer, delta: number)): integer
+---@overload fun(family: "RenderScript", method: "OnWorldRenderEnd", handler: fun(index: integer, delta: number)): integer
+---@overload fun(family: "RenderScript", method: "OnUiRenderEnd", handler: fun(index: integer, delta: number)): integer
+---@overload fun(family: "RenderScript", method: "OnSwapchainLost", handler: fun(width: integer, height: integer)): integer
+---@overload fun(family: "RenderScript", method: "OnSwapchainRestored", handler: fun(width: integer, height: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnObjectCreate", handler: fun(object: wxl.Object|nil, guid: wxl.Guid, type: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnObjectUpdate", handler: fun(object: wxl.Object|nil, guid: wxl.Guid, type: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnObjectDestroy", handler: fun(object: wxl.Object|nil, guid: wxl.Guid, type: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnTargetChanged", handler: fun(previous: wxl.Object|nil, current: wxl.Object|nil)): integer
+---@overload fun(family: "ObjectScript", method: "OnDoodadSpawn", handler: fun(doodad: wxl.Object|nil, path: string, position: wxl.Vec3)): integer
+---@overload fun(family: "ObjectScript", method: "OnEquipmentChanged", handler: fun(unit: wxl.Object|nil, slot: integer, item_id: integer)): integer
+---@overload fun(family: "AssetScript", method: "OnModelLoad", handler: fun(path: string, data: wxl.Bytes, replacement: lightuserdata|nil, replacement_size: lightuserdata|nil)): integer
+---@overload fun(family: "AssetScript", method: "OnTextureLoad", handler: fun(path: string)): integer
+---@overload fun(family: "AssetScript", method: "OnTerrainChunkBuild", handler: fun(map_id: integer, tile_x: integer, tile_y: integer, chunk_x: integer, chunk_y: integer)): integer
+---@overload fun(family: "AssetScript", method: "OnMapObjectLoad", handler: fun(path: string, data: wxl.Bytes)): integer
+---@overload fun(family: "AssetScript", method: "OnFileOpen", handler: fun(path: string, redirect: string|nil)): integer
+---@overload fun(family: "AssetScript", method: "OnFileOpened", handler: fun(path: string, found: boolean, size: integer)): integer
+---@overload fun(family: "AssetScript", method: "OnClientDbLoaded", handler: fun(name: string, records: lightuserdata|nil, record_count: integer, record_size: integer)): integer
+---@overload fun(family: "NetScript", method: "OnMessageReceived", handler: fun(opcode: integer, data: wxl.Bytes, suppressed: boolean|nil)): integer
+---@overload fun(family: "NetScript", method: "OnMessageSent", handler: fun(opcode: integer, data: wxl.Bytes, suppressed: boolean|nil)): integer
+---@overload fun(family: "NetScript", method: "OnConnected", handler: fun(address: string)): integer
+---@overload fun(family: "NetScript", method: "OnDisconnected", handler: fun(address: string)): integer
+---@overload fun(family: "LuaScript", method: "OnScriptVmReady", handler: fun(context: integer, native_state: lightuserdata|nil)): integer
+---@overload fun(family: "LuaScript", method: "OnScriptVmClosing", handler: fun(context: integer, native_state: lightuserdata|nil)): integer
+---@overload fun(family: "ObjectScript", method: "OnUnitDeath", handler: fun(unit: wxl.Object|nil)): integer
+---@overload fun(family: "ObjectScript", method: "OnUnitAuraChanged", handler: fun(unit: wxl.Object|nil, spell_id: integer, removed: boolean)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellCastStart", handler: fun(caster: wxl.Object|nil, caster_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, cast_item: wxl.Guid, spell_id: integer, cast_count: integer, cast_flags: integer, target_flags: integer, cast_time: integer, hit_count: integer, hits: wxl.Bytes, misses: wxl.Bytes, miss_reasons: wxl.Bytes)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellCastGo", handler: fun(caster: wxl.Object|nil, caster_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, cast_item: wxl.Guid, spell_id: integer, cast_count: integer, cast_flags: integer, target_flags: integer, cast_time: integer, hit_count: integer, hits: wxl.Bytes, misses: wxl.Bytes, miss_reasons: wxl.Bytes)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellCastFailed", handler: fun(caster: wxl.Object|nil, caster_guid: wxl.Guid, spell_id: integer, cast_count: integer, reason: integer, custom_error: integer, custom_arg: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellCastInterrupted", handler: fun(caster: wxl.Object|nil, caster_guid: wxl.Guid, spell_id: integer, cast_count: integer, reason: integer, custom_error: integer, custom_arg: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellCastRequest", handler: fun(caster: wxl.Object|nil, spell_id: integer, item: wxl.Object|nil, target_guid: wxl.Guid, confirmed: boolean, refused: boolean|nil)): integer
+---@overload fun(family: "ObjectScript", method: "OnItemUseRequest", handler: fun(item: wxl.Object|nil, item_guid: wxl.Guid, target_guid: wxl.Guid, confirmed: boolean, refused: boolean|nil)): integer
+---@overload fun(family: "LuaScript", method: "OnUiEvent", handler: fun(index: integer, name: string, format: string, values: wxl.Bytes, value_count: integer)): integer
+---@overload fun(family: "LuaScript", method: "OnScriptError", handler: fun(context: integer, message: string)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellChannelStart", handler: fun(caster: wxl.Object|nil, caster_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, duration: integer, remaining: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellChannelUpdate", handler: fun(caster: wxl.Object|nil, caster_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, duration: integer, remaining: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellChannelStop", handler: fun(caster: wxl.Object|nil, caster_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, duration: integer, remaining: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellCastResume", handler: fun(caster: wxl.Object|nil, caster_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, duration: integer, remaining: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellCastDelayed", handler: fun(caster: wxl.Object|nil, caster_guid: wxl.Guid, spell_id: integer, delay: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellCooldown", handler: fun(unit: wxl.Object|nil, unit_guid: wxl.Guid, item: wxl.Object|nil, item_guid: wxl.Guid, spell_id: integer, duration: integer, flags: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellCooldownChanged", handler: fun(unit: wxl.Object|nil, unit_guid: wxl.Guid, spell_id: integer, change: integer, delay: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellCastCancel", handler: fun(caster: wxl.Object|nil, caster_guid: wxl.Guid, spell_id: integer, cast_count: integer, reason: integer, notify_server: boolean)): integer
+---@overload fun(family: "CombatScript", method: "OnCombatAttackStart", handler: fun(attacker: wxl.Object|nil, attacker_guid: wxl.Guid, victim: wxl.Object|nil, victim_guid: wxl.Guid)): integer
+---@overload fun(family: "CombatScript", method: "OnCombatAttackStop", handler: fun(attacker: wxl.Object|nil, attacker_guid: wxl.Guid, victim: wxl.Object|nil, victim_guid: wxl.Guid)): integer
+---@overload fun(family: "CombatScript", method: "OnCombatDamage", handler: fun(source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, kind: integer, environment: integer, amount: integer, overkill: integer, school: integer, absorbed: integer, resisted: integer, blocked: integer, crit: boolean, hit_info: integer)): integer
+---@overload fun(family: "CombatScript", method: "OnCombatHeal", handler: fun(source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, amount: integer, overheal: integer, absorbed: integer, crit: boolean, periodic: boolean)): integer
+---@overload fun(family: "CombatScript", method: "OnCombatMiss", handler: fun(source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, melee: boolean, reason: integer, hit_info: integer)): integer
 ---@param family wxl.Family
 ---@param method string
 ---@param handler function
 ---@return integer id
 function Observe(family, method, handler) end
 
----Like Observe, on an event that can be answered: returning true writes the answer,
----returning a string fills the buffer. Only on the main thread.
----@overload fun(family: "WorldScript", method: "OnInput", handler: fun(args: wxl.InputArgs): boolean|nil): integer
----@overload fun(family: "WorldScript", method: "OnSoundPlay", handler: fun(args: wxl.SoundArgs): boolean|nil): integer
----@overload fun(family: "AssetScript", method: "OnFileOpen", handler: fun(args: wxl.FileOpenArgs): string|nil): integer
----@overload fun(family: "NetScript", method: "OnMessageReceived", handler: fun(args: wxl.MessageArgs): boolean|nil): integer
----@overload fun(family: "NetScript", method: "OnMessageSent", handler: fun(args: wxl.MessageArgs): boolean|nil): integer
----@overload fun(family: "ObjectScript", method: "OnSpellCastRequest", handler: fun(args: wxl.SpellRequestArgs): boolean|nil): integer
----@overload fun(family: "ObjectScript", method: "OnItemUseRequest", handler: fun(args: wxl.ItemUseArgs): boolean|nil): integer
+---Like Observe, on an event that can be answered. The handler returns one value per
+---member it answers through, in member order: true sets an answer, a string fills a
+---buffer, nil leaves the member as it is. Taken on the main thread only.
+---@overload fun(family: "WorldScript", method: "OnInput", handler: fun(message: integer, wparam: integer, lparam: integer, handled: boolean|nil): boolean|nil): integer
+---@overload fun(family: "WorldScript", method: "OnSoundPlay", handler: fun(sound_id: integer, path: string, suppressed: boolean|nil): boolean|nil): integer
+---@overload fun(family: "AssetScript", method: "OnFileOpen", handler: fun(path: string, redirect: string|nil): string|nil): integer
+---@overload fun(family: "NetScript", method: "OnMessageReceived", handler: fun(opcode: integer, data: wxl.Bytes, suppressed: boolean|nil): boolean|nil): integer
+---@overload fun(family: "NetScript", method: "OnMessageSent", handler: fun(opcode: integer, data: wxl.Bytes, suppressed: boolean|nil): boolean|nil): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellCastRequest", handler: fun(caster: wxl.Object|nil, spell_id: integer, item: wxl.Object|nil, target_guid: wxl.Guid, confirmed: boolean, refused: boolean|nil): boolean|nil): integer
+---@overload fun(family: "ObjectScript", method: "OnItemUseRequest", handler: fun(item: wxl.Object|nil, item_guid: wxl.Guid, target_guid: wxl.Guid, confirmed: boolean, refused: boolean|nil): boolean|nil): integer
 ---@param family wxl.Family
 ---@param method string
 ---@param handler function
@@ -722,8 +480,3 @@ wxl = {}
 ---@param level "trace"|"debug"|"info"|"warn"|"error"
 ---@param ... any
 function wxl.log(level, ...) end
-
----Every member of an event's args, as a plain table.
----@param args any
----@return table
-function wxl.totable(args) end

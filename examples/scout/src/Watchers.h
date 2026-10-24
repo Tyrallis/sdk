@@ -32,9 +32,9 @@ namespace scout
     public:
         WorldWatch(Clock& clock, Journal& journal) : clock_(clock), journal_(journal) {}
 
-        void OnUpdate(const wxl_update_args& args) override;
-        void OnWorldEnter(const wxl_world_args& args) override;
-        void OnWorldLeave(const wxl_world_args& args) override;
+        void OnUpdate(float delta) override;
+        void OnWorldEnter(uint32_t map_id, wxl_vec3 position) override;
+        void OnWorldLeave(uint32_t map_id, wxl_vec3 position) override;
 
         /// The map we are on, or 0 while out of the world.
         uint32_t MapId() const { return mapId_; }
@@ -60,10 +60,10 @@ namespace scout
 
         ObjectWatch(Clock& clock, Journal& journal) : clock_(clock), journal_(journal) {}
 
-        void OnObjectCreate(const wxl_object_args& args) override;
-        void OnObjectDestroy(const wxl_object_args& args) override;
-        void OnUnitDeath(const wxl_unit_args& args) override;
-        void OnTargetChanged(const wxl_target_args& args) override;
+        void OnObjectCreate(wxl_handle object, wxl_guid guid, uint32_t type) override;
+        void OnObjectDestroy(wxl_handle object, wxl_guid guid, uint32_t type) override;
+        void OnUnitDeath(wxl_handle unit) override;
+        void OnTargetChanged(wxl_handle previous, wxl_handle current) override;
 
     private:
         /// Writes a line about a unit, unless it is too far away to care about.
@@ -83,8 +83,8 @@ namespace scout
     class NetWatch final : public wxl::NetScript
     {
     public:
-        void OnMessageReceived(const wxl_message_args& args) override;
-        void OnMessageSent(const wxl_message_args& args) override;
+        void OnMessageReceived(uint32_t opcode, wxl::Bytes data, wxl::Answer suppressed) override;
+        void OnMessageSent(uint32_t opcode, wxl::Bytes data, wxl::Answer suppressed) override;
 
         /// How many messages of that opcode have crossed, in the direction asked for.
         uint32_t Count(uint32_t opcode, bool incoming) const;

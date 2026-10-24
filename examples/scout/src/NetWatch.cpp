@@ -7,23 +7,22 @@
 
 namespace scout
 {
-    void NetWatch::OnMessageReceived(const wxl_message_args& args)
+    void NetWatch::OnMessageReceived(uint32_t opcode, wxl::Bytes, wxl::Answer suppressed)
     {
-        ++incoming_[args.opcode];
+        ++incoming_[opcode];
 
-        // suppressed is a pointer, not a value: the runtime is asking, not telling. Writing
-        // WXL_TRUE through it means the client never sees this message at all -- its own
-        // handler does not run. That is how a mod serves an opcode the client does not know;
-        // it is also how a mod breaks the client, so it only happens on request.
-        if (!IsMuted(args.opcode) || !args.suppressed) return;
-        *args.suppressed = WXL_TRUE;
+        // suppressed is the runtime asking, not telling. Setting it means the client never sees
+        // this message at all -- its own handler does not run. That is how a mod serves an
+        // opcode the client does not know; it is also how a mod breaks the client, so it only
+        // happens on request.
+        if (IsMuted(opcode)) suppressed.Set();
     }
 
-    void NetWatch::OnMessageSent(const wxl_message_args& args)
+    void NetWatch::OnMessageSent(uint32_t opcode, wxl::Bytes, wxl::Answer)
     {
         // Counted, never muted. Dropping something the client chose to say leaves the server
         // with a different idea of the world than the client has, and nothing says which.
-        ++outgoing_[args.opcode];
+        ++outgoing_[opcode];
     }
 
     uint32_t NetWatch::Count(uint32_t opcode, bool incoming) const

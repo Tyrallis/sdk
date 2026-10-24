@@ -4,7 +4,8 @@
 // The args table: every struct an event of events.def carries, member by member, with what each
 // member holds. events.h declares the structs from these rows, and a runtime that hands events to
 // something other than C -- a script VM, a log, a recorder -- reads them through the same rows
-// (wxl/reflect.hpp), so the struct and its description are one text.
+// (wxl/reflect.hpp), so the struct and its description are one text. The rows are also a
+// handler's parameters, in C++ (sdk.hpp) and in Lua: one per member, in this order.
 //
 //   WXL_ARGS(args)                            opens a struct
 //   WXL_ARGS_FIELD(args, member, kind)        a value, read as it is
@@ -26,7 +27,8 @@
 //             guid                  wxl_guid: the server's id for an object
 //             vec3                  wxl_vec3
 //             str                   wxl_str, valid for the call
-//   size, capacity   the member of the same struct holding the length
+//   size, capacity   the member of the same struct holding the length; a handler gets it through
+//                    the bytes or the buffer, not as a parameter of its own
 //
 // The rows of a struct are its members in declaration order, so a member is appended at the end
 // of its struct and never moved: the struct is part of the ABI. A new struct gets its block here,

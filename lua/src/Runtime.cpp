@@ -25,10 +25,11 @@ namespace wxl::lua
 
     namespace
     {
-        constexpr int kWarnOffThread  = 0;
-        constexpr int kWarnUnraised   = 1;
-        constexpr int kWarnBadReturn  = 2;
-        constexpr int kWarnNoAnswer   = 3;
+        constexpr int kWarnOffThread   = 0;
+        constexpr int kWarnUnraised    = 1;
+        constexpr int kWarnBadReturn   = 2;
+        constexpr int kWarnNoAnswer    = 3;
+        constexpr int kWarnExtraReturn = 4;
 
         /// A path a manifest may name: relative, and never leaving the folder.
         bool StaysInside(const std::string& path)
@@ -55,6 +56,7 @@ namespace wxl::lua
         {
             slots_[i].runtime = this;
             slots_[i].event   = reflect::Find(static_cast<wxl_event>(i));
+            if (slots_[i].event) slots_[i].writable = WritableOf(*slots_[i].event);
         }
         // Update drives the queue, the reload poll and onUpdate; UiRenderEnd drives onDraw.
         EnsureNative(slots_[WXL_EV_Update], nullptr);
@@ -408,19 +410,23 @@ namespace wxl::lua
 
             lua_State* L    = handler.mod->State();
             const int  base = lua_gettop(L);
+            // The traceback, the function, self, a value per member: never more than this.
+            if (!lua_checkstack(L, static_cast<int>(slot.event->field_count) + 3))
+            {
+                handler.mod->ReportError(std::string("in its handler for On") + slot.event->name,
+                                         "the Lua stack cannot take the event's parameters");
+                continue;
+            }
             lua_rawgeti(L, LUA_REGISTRYINDEX, handler.mod->TracebackRef());
-            // The args userdata is kept at base+2 so it outlives the call, and nulled after.
-            ArgsBox* box = PushArgs(L, *slot.event, args, handler.override && answerable);
             lua_rawgeti(L, LUA_REGISTRYINDEX, handler.ref);
-            int nargs = 1;
+            int nargs = 0;
             if (handler.self != LUA_NOREF)
             {
                 lua_rawgeti(L, LUA_REGISTRYINDEX, handler.self);
-                nargs = 2;
+                nargs = 1;
             }
-            lua_pushvalue(L, base + 2);
-            const int status = lua_pcall(L, nargs, 1, base + 1);
-            box->args        = nullptr;
+            nargs += PushParameters(L, *slot.event, args);
+            const int status = lua_pcall(L, nargs, LUA_MULTRET, base + 1);
 
             if (status != 0)
             {
@@ -431,7 +437,8 @@ namespace wxl::lua
             }
             else if (handler.override)
             {
-                if (answerable) TakeAnswer(L, *handler.mod, *slot.event, args);
+                if (answerable)
+                    TakeAnswers(L, *handler.mod, slot, args, base + 2, lua_gettop(L) - (base + 1));
                 else
                     WarnOnce(*handler.mod, *slot.event, kWarnOffThread,
                              "mod " + handler.mod->Id() + ": On" + slot.event->name +
@@ -445,51 +452,62 @@ namespace wxl::lua
         if (slot.depth == 0 && slot.dirty) Compact(slot);
     }
 
-    void Runtime::TakeAnswer(lua_State* L, ScriptMod& mod, const reflect::Event& event, const void* args)
+    void Runtime::TakeAnswers(lua_State* L, ScriptMod& mod, const Slot& slot, const void* args,
+                              int first, int count)
     {
-        switch (lua_type(L, -1))
+        const reflect::Event& event = *slot.event;
+        const std::string     where = "mod " + mod.Id() + ": the Override of On" + event.name;
+
+        if (count > static_cast<int>(slot.writable.size()))
         {
-        case LUA_TNIL:
-        case LUA_TNONE: return;
-        case LUA_TBOOLEAN:
-        {
-            if (!lua_toboolean(L, -1)) return;
-            const reflect::Field* field = AnswerOf(event);
-            if (!field)
-                return WarnOnce(mod, event, kWarnBadReturn,
-                                "mod " + mod.Id() + ": the Override of On" + event.name +
-                                    " returned true, but its args have no answer member; return "
-                                    "a string for its buffer");
-            if (!WriteAnswer(*field, args))
-                WarnOnce(mod, event, kWarnNoAnswer,
-                         "mod " + mod.Id() + ": the runtime passed no '" + field->name +
-                             "' flag with On" + event.name + "; the answer is not taken");
-            return;
+            std::string members;
+            for (const reflect::Field* field : slot.writable)
+                members += (members.empty() ? "'" : ", '") + std::string(field->name) + "'";
+            WarnOnce(mod, event, kWarnExtraReturn,
+                     where + " returned " + std::to_string(count) + " values; it answers through " +
+                         members + ", one value each, and the rest are not taken");
         }
-        case LUA_TSTRING:
+
+        for (int i = 0; i < count && i < static_cast<int>(slot.writable.size()); ++i)
         {
-            const reflect::Field* field = BufferOf(event);
-            if (!field)
-                return WarnOnce(mod, event, kWarnBadReturn,
-                                "mod " + mod.Id() + ": the Override of On" + event.name +
-                                    " returned a string, but its args have no buffer member; "
-                                    "return true for its answer");
-            size_t      size = 0;
-            const char* text = lua_tolstring(L, -1, &size);
+            const reflect::Field& field = *slot.writable[i];
+            const int             index = first + i;
+            const int             type  = lua_type(L, index);
+            if (type == LUA_TNIL) continue;
+
+            if (field.kind == reflect::Kind::answer)
+            {
+                if (type != LUA_TBOOLEAN)
+                {
+                    WarnOnce(mod, event, kWarnBadReturn,
+                             where + " returned a " + lua_typename(L, type) + " for '" + field.name +
+                                 "'; it takes true to answer, or false or nil to leave it");
+                    continue;
+                }
+                // WXL_TRUE is a request, honoured unless another handler already decided;
+                // false is never written back.
+                if (lua_toboolean(L, index) && !WriteAnswer(field, args))
+                    WarnOnce(mod, event, kWarnNoAnswer,
+                             "mod " + mod.Id() + ": the runtime passed no '" + field.name +
+                                 "' flag with On" + event.name + "; the answer is not taken");
+                continue;
+            }
+
+            if (type != LUA_TSTRING)
+            {
+                WarnOnce(mod, event, kWarnBadReturn,
+                         where + " returned a " + lua_typename(L, type) + " for '" + field.name +
+                             "'; it takes a string, or nil to leave it");
+                continue;
+            }
+            size_t      size     = 0;
+            const char* text     = lua_tolstring(L, index, &size);
             uint32_t    capacity = 0;
-            if (!WriteBuffer(*field, args, std::string_view(text, size), capacity))
-                Log(WXL_LOG_WARN, "mod " + mod.Id() + ": the string returned for On" + event.name +
-                                      " is " + std::to_string(size) + " bytes; '" + field->name +
-                                      "' takes at most " + std::to_string(capacity ? capacity - 1 : 0) +
+            if (!WriteBuffer(field, args, std::string_view(text, size), capacity))
+                Log(WXL_LOG_WARN, where + " returned " + std::to_string(size) + " bytes for '" +
+                                      field.name + "', which takes at most " +
+                                      std::to_string(capacity ? capacity - 1 : 0) +
                                       "; it is not taken");
-            return;
-        }
-        default:
-            WarnOnce(mod, event, kWarnBadReturn,
-                     "mod " + mod.Id() + ": the Override of On" + event.name + " returned a " +
-                         lua_typename(L, lua_type(L, -1)) +
-                         "; an Override returns true, a string, or nothing");
-            return;
         }
     }
 

@@ -94,11 +94,12 @@ ctest --test-dir build -C Debug
 
 class Greeter final : public wxl::WorldScript
 {
-    void OnWorldEnter(const wxl_world_args&) override
+    void OnWorldEnter(uint32_t map_id, wxl_vec3) override
     {
         const wxl::Player me = wxl::Player::Local();
         if (wxl::Expected<std::string> name = me.Name())
-            wxl::Log(WXL_LOG_INFO, "greeter", "hello, " + *name);
+            wxl::Log(WXL_LOG_INFO, "greeter",
+                     "hello, " + *name + ", on map " + std::to_string(map_id));
     }
 };
 
@@ -106,6 +107,7 @@ Greeter g_greeter;
 
 class GreeterMod final : public wxl::Mod
 {
+public:
     wxl_result OnLoad() override
     {
         wxl::ScriptMgr::Add(&g_greeter);
@@ -131,7 +133,8 @@ serves the client's own Lua and watches the server traffic -- and
 
 Events are grouped into seven script families: `WorldScript`, `RenderScript`, `ObjectScript`,
 `AssetScript`, `NetScript`, `LuaScript` and `CombatScript`. Override the hooks you want; the rest
-cost nothing.
+cost nothing. A hook takes its event's arguments as parameters, `OnMessageReceived(uint32_t
+opcode, wxl::Bytes data, wxl::Answer suppressed)`, in C++ and in Lua alike.
 
 Beyond events, a runtime publishes services, and a mod asks for the ones it needs:
 
@@ -170,7 +173,8 @@ include/wxl/
     host.h         what a runtime offers a mod
     mod.h          what a mod exposes to a runtime
     expected.hpp   Expected<T>: a value or the wxl_result that stood in for it
-    sdk.hpp        the C++ layer: Mod, the script families, Subscription, Service, WXL_MOD
+    sdk.hpp        the C++ layer: Mod, the script families and their parameters, Subscription,
+                   Service, WXL_MOD
     objects.hpp    world objects as C++ values: the umbrella over objects/
     objects/       one header per kind the client knows: Object, Item, Container, Unit, Player,
                    GameObject, DynamicObject, Corpse; plus the view and the ObjectService facade

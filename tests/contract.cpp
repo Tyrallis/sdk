@@ -88,35 +88,34 @@ namespace
         float    lastDelta   = 0.0f;
         uint32_t lastMap     = 0;
 
-        void OnUpdate(const wxl_update_args& args) override
+        void OnUpdate(float delta) override
         {
             ++updates;
-            lastDelta = args.delta;
+            lastDelta = delta;
         }
 
-        void OnWorldEnter(const wxl_world_args& args) override
+        void OnWorldEnter(uint32_t map_id, wxl_vec3) override
         {
             ++worldEnters;
-            lastMap = args.map_id;
+            lastMap = map_id;
         }
 
-        void OnInput(const wxl_input_args& args) override
+        void OnInput(uint32_t message, uint64_t, int64_t, wxl::Answer handled) override
         {
-            if (args.handled && *args.handled == WXL_FALSE && args.message == 0x100)
-                *args.handled = WXL_TRUE;
+            if (!handled.Value() && message == 0x100) handled.Set();
         }
     };
 
     struct CountingRenderScript final : wxl::RenderScript
     {
         int frames = 0;
-        void OnFrameBegin(const wxl_frame_args&) override { ++frames; }
+        void OnFrameBegin(uint64_t, float) override { ++frames; }
     };
 
     struct SecondWorldScript final : wxl::WorldScript
     {
         int updates = 0;
-        void OnUpdate(const wxl_update_args&) override { ++updates; }
+        void OnUpdate(float) override { ++updates; }
     };
 
     struct CountingNetScript final : wxl::NetScript
@@ -124,11 +123,11 @@ namespace
         int      received   = 0;
         uint32_t lastOpcode = 0;
 
-        void OnMessageReceived(const wxl_message_args& args) override
+        void OnMessageReceived(uint32_t opcode, wxl::Bytes, wxl::Answer suppressed) override
         {
             ++received;
-            lastOpcode = args.opcode;
-            if (args.suppressed && args.opcode == 0xF001) *args.suppressed = WXL_TRUE;
+            lastOpcode = opcode;
+            if (opcode == 0xF001) suppressed.Set();
         }
     };
 
@@ -141,7 +140,7 @@ namespace
     struct LeaveWorldScript final : wxl::WorldScript
     {
         int leaves = 0;
-        void OnWorldLeave(const wxl_world_args&) override { ++leaves; }
+        void OnWorldLeave(uint32_t, wxl_vec3) override { ++leaves; }
     };
 
     struct PrivateWorldScript final : wxl::WorldScript
@@ -149,7 +148,7 @@ namespace
         int clicks = 0;
 
     private:
-        void OnWorldClick(const wxl_world_click_args&) override { ++clicks; }
+        void OnWorldClick(wxl_vec3, wxl_handle, uint32_t) override { ++clicks; }
     };
 
     struct ProtectedWorldScript final : wxl::WorldScript
@@ -157,13 +156,13 @@ namespace
         int sounds = 0;
 
     protected:
-        void OnSoundPlay(const wxl_sound_args&) override { ++sounds; }
+        void OnSoundPlay(uint32_t, std::string_view, wxl::Answer) override { ++sounds; }
     };
 
     struct MidWorldScript : wxl::WorldScript
     {
         int updates = 0;
-        void OnUpdate(const wxl_update_args&) override { ++updates; }
+        void OnUpdate(float) override { ++updates; }
     };
 
     struct LeafWorldScript final : MidWorldScript
@@ -178,7 +177,7 @@ namespace
         SecondWorldScript* remove     = nullptr;
         bool               removeSelf = false;
 
-        void OnUpdate(const wxl_update_args&) override
+        void OnUpdate(float) override
         {
             ++updates;
             if (add) wxl::ScriptMgr::Add(std::exchange(add, nullptr));
@@ -193,13 +192,13 @@ namespace
         int      closing     = 0;
         uint32_t lastContext = 0;
 
-        void OnScriptVmReady(const wxl_script_vm_args& args) override
+        void OnScriptVmReady(uint32_t context, void*) override
         {
             ++ready;
-            lastContext = args.context;
+            lastContext = context;
         }
 
-        void OnScriptVmClosing(const wxl_script_vm_args&) override { ++closing; }
+        void OnScriptVmClosing(uint32_t, void*) override { ++closing; }
     };
 
     /// A typed handler for the free-standing Subscribe.
@@ -207,10 +206,44 @@ namespace
     {
         int   ticks = 0;
         float last  = 0.0f;
-        void  operator()(const wxl_update_args& args)
+        void  operator()(float delta)
         {
             ++ticks;
-            last = args.delta;
+            last = delta;
+        }
+    };
+
+    /// Reads every kind of parameter a handler can be given, and answers through the writable ones.
+    struct ParameterScript final : wxl::AssetScript
+    {
+        std::string path;
+        std::string redirectSeen;
+        uint32_t    capacity = 0;
+        bool        wrote    = false;
+        std::string body;
+
+        void OnFileOpen(std::string_view asked, wxl::Buffer redirect) override
+        {
+            path         = std::string(asked);
+            redirectSeen = std::string(redirect.Value());
+            capacity     = redirect.Capacity();
+            wrote        = redirect.Write("Textures\\swapped.blp");
+        }
+
+        void OnMapObjectLoad(std::string_view, wxl::Bytes data) override
+        {
+            body.assign(data.View());
+            for (uint8_t byte : data) body += static_cast<char>('0' + byte % 10);
+        }
+    };
+
+    /// Sees what an earlier handler answered.
+    struct LateNetScript final : wxl::NetScript
+    {
+        bool sawAnswer = false;
+        void OnMessageReceived(uint32_t, wxl::Bytes, wxl::Answer suppressed) override
+        {
+            sawAnswer = suppressed.Value();
         }
     };
 
@@ -296,6 +329,48 @@ int main()
               "EventArgs binds each id to its args struct");
     }
 
+    Section("handler parameters");
+    {
+        Check(std::is_same_v<wxl::HandlerOf<WXL_EV_Update>, void(float)>,
+              "a handler takes the members as parameters");
+        Check(std::is_same_v<wxl::HandlerOf<WXL_EV_MessageReceived>,
+                             void(uint32_t, wxl::Bytes, wxl::Answer)>,
+              "a bytes member is a view, and the member holding its length is not a parameter");
+        Check(std::is_same_v<wxl::HandlerOf<WXL_EV_FileOpen>, void(std::string_view, wxl::Buffer)>,
+              "a str is a string_view, a buffer a view whose capacity is not a parameter");
+        Check(std::is_same_v<wxl::HandlerOf<WXL_EV_WorldEnter>, void(uint32_t, wxl_vec3)> &&
+                  std::is_same_v<wxl::HandlerOf<WXL_EV_UnitAuraChanged>,
+                                 void(wxl_handle, uint32_t, bool)>,
+              "values, vectors, handles and booleans keep their order");
+        Check(std::is_same_v<wxl::HandlerOf<WXL_EV_ModelLoad>,
+                             void(std::string_view, wxl::Bytes, const void**, uint32_t*)>,
+              "a ptr member keeps its C type");
+
+        uint8_t     raw[3] = {1, 2, 3};
+        wxl::Bytes  bytes(raw, 3);
+        wxl::Bytes  none(nullptr, 5);
+        Check(bytes.size() == 3 && bytes[2] == 3 && !bytes.empty() && none.empty() &&
+                  none.View().empty(),
+              "Bytes is a range, and empty over a null pointer whatever the length says");
+
+        wxl_bool    flag = WXL_FALSE;
+        wxl::Answer answer(&flag);
+        Check(!answer.Value() && answer.Set() && flag == WXL_TRUE && answer.Value(),
+              "Answer reads the flag and sets it");
+        Check(!wxl::Answer(nullptr).Set() && !wxl::Answer(nullptr).Value(),
+              "an Answer without a flag answers nothing");
+
+        char        storage[8] = {};
+        wxl::Buffer buffer(storage, sizeof storage);
+        Check(buffer.Value().empty() && buffer.Capacity() == 8, "a Buffer starts empty");
+        Check(buffer.Write("1234567") && buffer.Value() == "1234567" && storage[7] == '\0',
+              "a string that fits with its terminator is written");
+        Check(!buffer.Write("12345678") && buffer.Value() == "1234567",
+              "one that does not is refused and leaves the buffer as it was");
+        Check(!wxl::Buffer(nullptr, 8).Write("") && wxl::Buffer(nullptr, 8).Capacity() == 0,
+              "a Buffer without storage takes nothing");
+    }
+
     Section("version negotiation");
     {
         const wxl_runtime_info* info = host.Table()->runtime();
@@ -358,6 +433,20 @@ int main()
 
         Check(!wxl::Subscribe<WXL_EV_Update>(static_cast<TickHandler*>(nullptr)),
               "a null handler yields an empty subscription");
+
+        uint32_t seenOpcode = 0, seenSize = 0;
+        auto     onMessage  = [&](uint32_t opcode, wxl::Bytes data, wxl::Answer suppressed) {
+            seenOpcode = opcode;
+            seenSize   = data.size();
+            suppressed.Set();
+        };
+        wxl::Subscription message = wxl::Subscribe<WXL_EV_MessageReceived>(&onMessage);
+        wxl_bool               kept    = WXL_FALSE;
+        const uint8_t          body[2] = {7, 8};
+        const wxl_message_args args{0x42, body, sizeof body, &kept};
+        host.Raise(WXL_EV_MessageReceived, &args);
+        Check(seenOpcode == 0x42 && seenSize == 2 && kept == WXL_TRUE,
+              "a lambda takes the parameters and answers through them");
     }
 
     Section("script dispatch");
@@ -406,6 +495,30 @@ int main()
         host.Raise(WXL_EV_MessageReceived, &message);
         Check(net.received == 1 && net.lastOpcode == 0xF001, "the net family runs");
         Check(suppressed == WXL_TRUE, "a mod can take an opcode the client does not know");
+
+        LateNetScript late;
+        wxl::ScriptMgr::Add(&late);
+        suppressed = WXL_FALSE;
+        host.Raise(WXL_EV_MessageReceived, &message);
+        Check(late.sawAnswer, "a later handler sees the answer an earlier one gave");
+        wxl::ScriptMgr::Remove(&late);
+
+        ParameterScript asset;
+        wxl::ScriptMgr::Add(&asset);
+        char                     redirect[32] = "Textures\\first.blp";
+        const char*              asked        = "Textures\\asked.blp";
+        const wxl_file_open_args open{wxl::Str(asked), redirect, sizeof redirect};
+        host.Raise(WXL_EV_FileOpen, &open);
+        Check(asset.path == asked && asset.redirectSeen == "Textures\\first.blp" &&
+                  asset.capacity == sizeof redirect,
+              "a str and a buffer arrive as views, with what an earlier handler wrote");
+        Check(asset.wrote && std::strcmp(redirect, "Textures\\swapped.blp") == 0,
+              "and a handler answers by writing into the buffer");
+        const uint8_t             root[3] = {'a', 1, 12};
+        const wxl_map_object_args mapObject{wxl::Str("x.wmo"), root, sizeof root};
+        host.Raise(WXL_EV_MapObjectLoad, &mapObject);
+        Check(asset.body == std::string("a\x01\x0c", 3) + "712", "bytes arrive with their length");
+        wxl::ScriptMgr::Remove(&asset);
 
         const wxl_script_vm_args vm{WXL_SCRIPT_CONTEXT_GAME, nullptr};
         host.Raise(WXL_EV_ScriptVmReady, &vm);

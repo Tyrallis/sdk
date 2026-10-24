@@ -150,13 +150,42 @@ code it points into.
 ### Events
 
 Derive from a script family (`WorldScript`, `RenderScript`, `ObjectScript`, `AssetScript`,
-`NetScript`, `LuaScript`), override the events you want, `wxl::ScriptMgr::Add(&script)`. `Add`
-subscribes only the events the script overrides, decided at compile time, so an event you leave
-alone costs nothing at all. That needs the script's own type: pass `&script`, not a pointer to its
-family, which hides what it overrides and makes `Add` subscribe the whole family to be safe. For one
-event outside a family, `wxl::Subscribe<WXL_EV_TargetChanged>(&handler)` calls
-`(*handler)(const wxl_target_args&)` and returns a `wxl::Subscription` that unsubscribes in its
-destructor. `wxl::EventArgsOf<WXL_EV_...>` names the args struct of any event.
+`NetScript`, `LuaScript`, `CombatScript`), override the events you want,
+`wxl::ScriptMgr::Add(&script)`. `Add` subscribes only the events the script overrides, decided at
+compile time, so an event you leave alone costs nothing at all. That needs the script's own type:
+pass `&script`, not a pointer to its family, which hides what it overrides and makes `Add`
+subscribe the whole family to be safe.
+
+A handler takes the event's args as parameters, one per member of its struct in `fields.def`
+order:
+
+```cpp
+void OnMessageReceived(uint32_t opcode, wxl::Bytes data, wxl::Answer suppressed) override
+{
+    if (opcode == 0x1234 && !data.empty()) suppressed.Set(); // the client never sees it
+}
+```
+
+| Kind in `fields.def` | Parameter |
+|---|---|
+| `u32`, `i32`, `u64`, `i64`, `f32` | `uint32_t`, `int32_t`, `uint64_t`, `int64_t`, `float` |
+| `bool` | `bool` |
+| `handle`, `guid`, `vec3` | `wxl_handle`, `wxl_guid`, `wxl_vec3`; `wxl::Unit(handle)` reads the object |
+| `str` | `std::string_view`, valid for the call |
+| `bytes` | `wxl::Bytes`: `data()`, `size()`, a range of `uint8_t`, `View()` as characters; valid for the call |
+| `answer` | `wxl::Answer`: `Value()` is what earlier handlers decided, `Set()` answers |
+| `buffer` | `wxl::Buffer`: `Value()` is what it holds, `Write(text)` answers when the text and its terminator fit in `Capacity()` |
+| `ptr` | the member's C type |
+
+A member that only gives the length of a bytes member or the capacity of a buffer is not a
+parameter: the view carries it. `wxl::HandlerOf<WXL_EV_...>` is the whole list as a function type.
+A member function named like a handler but taking other parameters would hide the family's virtual
+instead of overriding it; `Add` refuses it at compile time.
+
+For one event outside a family, `wxl::Subscribe<WXL_EV_TargetChanged>(&handler)` calls the
+handler with the same parameters and returns a `wxl::Subscription` that unsubscribes in its
+destructor. `wxl::EventArgsOf<WXL_EV_...>` names the args struct of any event: what a C handler
+receives, and what `wxl::Emit` raises.
 
 ### Reads that can fail
 
