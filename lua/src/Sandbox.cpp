@@ -7,6 +7,7 @@
 #include <fstream>
 #include <new>
 #include <sstream>
+#include <utility>
 
 #include "wxl/sdk.hpp"
 
@@ -16,9 +17,10 @@ namespace wxl::lua
     {
         /// Runs in every state right after the libraries are opened. Receives the C functions
         /// it builds on as arguments: resolve(path) -> full path | nil, reason; loadchunk(full,
-        /// name) -> function | nil, error; write(text).
+        /// name) -> function | nil, error; write(text); watch(full), told of each file code is
+        /// loaded from.
         constexpr const char* kPrelude = R"lua(
-local resolve, loadchunk, write = ...
+local resolve, loadchunk, write, watch = ...
 
 local rawopen, rawlines = io.open, io.lines
 local rawload = load
@@ -61,6 +63,7 @@ end
 loadfile = function(path, mode, env)
     local full, why = resolve(path)
     if not full then return nil, why end
+    watch(full)
     local chunk, err = loadchunk(full, path)
     if not chunk then return nil, err end
     if env ~= nil then setfenv(chunk, env) end
@@ -81,22 +84,26 @@ loadstring = function(text, name)
     return rawload(text, name, "t")
 end
 
+-- A module not found is watched too: adding the file is what makes the require work.
 local function search(name)
     local rel = name:gsub("%.", "/")
-    local tried = {}
+    local tried, missing = {}, {}
     for _, candidate in ipairs({ rel .. ".lua", rel .. "/init.lua" }) do
         local full = resolve(candidate)
         if full then
             local file = rawopen(full, "rb")
             if file then
                 file:close()
+                watch(full)
                 local chunk, err = loadchunk(full, candidate)
                 if not chunk then error(err, 0) end
                 return chunk
             end
+            missing[#missing + 1] = full
         end
         tried[#tried + 1] = "\n\tno file '" .. candidate .. "' in the mod folder"
     end
+    for _, full in ipairs(missing) do watch(full) end
     return table.concat(tried)
 end
 
@@ -110,11 +117,13 @@ package.loaders = { preload, search }
 package.searchers = package.loaders
 )lua";
 
-        /// The folder the sandbox is bound to and the tag its lines carry, kept as upvalues.
+        /// The folder the sandbox is bound to, the tag its lines carry and who is told of the
+        /// files code is loaded from, kept as upvalues.
         struct Bound
         {
             std::filesystem::path directory;
             std::string           tag;
+            Watch                 watch;
         };
 
         Bound* BoundOf(lua_State* L)
@@ -159,6 +168,13 @@ package.searchers = package.loaders
             return 0;
         }
 
+        int WatchFile(lua_State* L)
+        {
+            const Bound* bound = BoundOf(L);
+            if (bound->watch) bound->watch(std::filesystem::u8path(luaL_checkstring(L, 1)));
+            return 0;
+        }
+
         int CollectBound(lua_State* L)
         {
             static_cast<Bound*>(lua_touserdata(L, 1))->~Bound();
@@ -198,14 +214,15 @@ package.searchers = package.loaders
         return luaL_loadbufferx(L, text.data(), text.size(), chunk.c_str(), "t");
     }
 
-    void OpenSandbox(lua_State* L, const std::filesystem::path& directory, const std::string& tag)
+    void OpenSandbox(lua_State* L, const std::filesystem::path& directory, const std::string& tag,
+                     Watch watch)
     {
         const int top = lua_gettop(L);
         luaL_openlibs(L);
 
         // The bound folder, owned by the state: freed with it through the metatable's __gc.
         Bound* bound = static_cast<Bound*>(lua_newuserdata(L, sizeof(Bound)));
-        new (bound) Bound{directory, tag};
+        new (bound) Bound{directory, tag, std::move(watch)};
         lua_newtable(L);
         lua_pushcfunction(L, &CollectBound);
         lua_setfield(L, -2, "__gc");
@@ -225,7 +242,9 @@ package.searchers = package.loaders
         lua_pushcclosure(L, &LoadChunk, 1);
         lua_pushvalue(L, boundIndex);
         lua_pushcclosure(L, &Write, 1);
-        if (lua_pcall(L, 3, 0, 0) != 0)
+        lua_pushvalue(L, boundIndex);
+        lua_pushcclosure(L, &WatchFile, 1);
+        if (lua_pcall(L, 4, 0, 0) != 0)
             wxl::Log(WXL_LOG_ERROR, "lua", std::string("the sandbox prelude failed: ") +
                                                lua_tostring(L, -1));
         lua_settop(L, top);

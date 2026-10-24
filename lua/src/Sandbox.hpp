@@ -8,12 +8,16 @@
 #define WXL_LUA_SANDBOX_HPP
 
 #include <filesystem>
+#include <functional>
 #include <string>
 
 #include "Lua.hpp"
 
 namespace wxl::lua
 {
+    /// Told of a file a mod's code is loaded from.
+    using Watch = std::function<void(const std::filesystem::path& file)>;
+
     /**
      * @brief Opens the standard libraries in a state and closes the doors.
      *
@@ -23,9 +27,12 @@ namespace wxl::lua
      * a path that leaves it; load and loadstring take text only. io.write goes to the log.
      *
      * Leaves the stack as it found it. @p directory is the mod's folder; @p tag is what its log
-     * lines are tagged with.
+     * lines are tagged with. @p watch is told every file loadfile, dofile and require load code
+     * from, before it is read, and the files a require looked for and did not find; a file
+     * io.open or io.lines reaches is not code and is not reported.
      */
-    void OpenSandbox(lua_State* L, const std::filesystem::path& directory, const std::string& tag);
+    void OpenSandbox(lua_State* L, const std::filesystem::path& directory, const std::string& tag,
+                     Watch watch = Watch());
 
     /// A path relative to a mod's folder, resolved; false with @p reason when it leaves the
     /// folder: absolute, rooted, or with a ".." component.

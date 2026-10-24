@@ -12,6 +12,8 @@
 #include "Objects.hpp"
 #include "Runtime.hpp"
 #include "Sandbox.hpp"
+#include "wxl/host/admission.hpp"
+#include "wxl/host/manifest.hpp"
 #include "wxl/reflect.hpp"
 
 namespace wxl::lua
@@ -84,9 +86,12 @@ namespace wxl::lua
         }
     } // namespace
 
-    ScriptMod::ScriptMod(Runtime& runtime, host::ModCandidate candidate)
-        : runtime_(runtime), candidate_(std::move(candidate))
+    ScriptMod::ScriptMod(Runtime& runtime, host::ModCandidate candidate, uint32_t rank)
+        : runtime_(runtime), candidate_(std::move(candidate)), rank_(rank)
     {
+        // A folder is found by its init.lua alone only when it has no mod.json.
+        std::error_code ignored;
+        manifested_ = std::filesystem::exists(candidate_.directory / host::kManifestFileName, ignored);
     }
 
     ScriptMod::~ScriptMod() { Close(); }
@@ -94,6 +99,33 @@ namespace wxl::lua
     std::filesystem::path ScriptMod::Entry() const
     {
         return candidate_.directory / std::filesystem::u8path(candidate_.manifest.lua);
+    }
+
+    bool ScriptMod::Reread(std::string& problem)
+    {
+        if (!manifested_) return true;
+        host::Manifest manifest;
+        if (!host::ReadManifest(candidate_.directory / host::kManifestFileName, manifest, problem))
+        {
+            problem = "its mod.json no longer reads: " + problem;
+        }
+        else if (manifest.id != Id())
+        {
+            problem = "its mod.json now gives the id '" + manifest.id +
+                      "', and a mod's id cannot change while the client runs; restart the client "
+                      "to load it under the new one";
+        }
+        else if (manifest.lua.empty())
+        {
+            problem = "its mod.json no longer names a 'lua' entry; restart the client for the "
+                      "runtime to take it as a native mod";
+        }
+        else
+        {
+            candidate_.manifest = std::move(manifest);
+            return true;
+        }
+        return false;
     }
 
     // --- loading -----------------------------------------------------------------------------
@@ -104,6 +136,9 @@ namespace wxl::lua
         disabled_ = false;
         errors_   = 0;
 
+        // Recorded before anything is read: a change made while the mod loads is a change.
+        Rewatch();
+
         state_ = luaL_newstate();
         if (!state_)
         {
@@ -111,7 +146,8 @@ namespace wxl::lua
             return false;
         }
 
-        OpenSandbox(state_, candidate_.directory, Id());
+        OpenSandbox(state_, candidate_.directory, Id(),
+                    [this](const std::filesystem::path& file) { Watch(file); });
         OpenObjects(state_);
         Install();
 
@@ -180,6 +216,12 @@ namespace wxl::lua
                     lua_pop(L, 3);
                     return false;
                 }
+                if (const std::string newer = TooNew(*event); !newer.empty())
+                {
+                    error = family + "." + key + " " + newer;
+                    lua_pop(L, 3);
+                    return false;
+                }
                 lua_pushvalue(L, -1);
                 const int ref = luaL_ref(L, LUA_REGISTRYINDEX);
                 runtime_.Observe(*this, *event, ref, Answerable(*event), self);
@@ -237,24 +279,54 @@ namespace wxl::lua
                                         " times since it was loaded");
     }
 
-    // --- the folder watch ------------------------------------------------------------------
+    // --- the files its code comes from ------------------------------------------------------
 
-    ScriptMod::Signature ScriptMod::Scan() const
+    ScriptMod::Watched ScriptMod::Look(const std::filesystem::path& file)
     {
-        namespace fs = std::filesystem;
-        Signature       signature;
+        Watched         seen;
         std::error_code ec;
-        for (fs::recursive_directory_iterator it(candidate_.directory, ec), end; it != end && !ec;
-             it.increment(ec))
-        {
-            std::error_code ignored;
-            if (!it->is_regular_file(ignored)) continue;
-            ++signature.files;
-            signature.bytes += it->file_size(ignored);
-            const int64_t written = it->last_write_time(ignored).time_since_epoch().count();
-            if (written > signature.newest) signature.newest = written;
-        }
-        return signature;
+        seen.file   = file;
+        seen.exists = std::filesystem::is_regular_file(file, ec);
+        if (!seen.exists) return seen;
+        const uintmax_t size = std::filesystem::file_size(file, ec);
+        seen.size            = ec ? 0 : static_cast<uint64_t>(size);
+        const auto written   = std::filesystem::last_write_time(file, ec);
+        seen.written         = ec ? 0 : static_cast<int64_t>(written.time_since_epoch().count());
+        return seen;
+    }
+
+    void ScriptMod::Watch(const std::filesystem::path& file)
+    {
+        for (const Watched& known : watched_)
+            if (known.file == file) return;
+        watched_.push_back(Look(file));
+    }
+
+    void ScriptMod::Rewatch()
+    {
+        watched_.clear();
+        if (manifested_) Watch(candidate_.directory / host::kManifestFileName);
+        Watch(Entry());
+    }
+
+    std::filesystem::path ScriptMod::Changed() const
+    {
+        for (const Watched& known : watched_)
+            if (!Look(known.file).Same(known)) return known.file.lexically_relative(candidate_.directory);
+        return std::filesystem::path();
+    }
+
+    std::string ScriptMod::TooNew(const reflect::Event& event) const
+    {
+        const host::AbiVersion since = host::EventSince(event.id);
+        const host::AbiVersion asked = candidate_.manifest.abi;
+        if (host::AtLeast(asked, since)) return std::string();
+        if (!manifested_)
+            return "came with abi " + host::AbiText(since) + ", newer than the " +
+                   host::AbiText(asked) + " this runtime serves";
+        return "came with abi " + host::AbiText(since) + ", and this mod's mod.json asks for " +
+               host::AbiText(asked) + "; to use it, set \"abi\": \"" + host::AbiText(since) +
+               "\" there";
     }
 
     // --- the API -----------------------------------------------------------------------------
@@ -434,6 +506,9 @@ namespace wxl::lua
         if (!event)
             return luaL_error(L, "%s: %s has no '%s'; its events are %s", verb, family, method,
                               MethodsOf(stem.c_str()).c_str());
+
+        if (const std::string newer = TooNew(*event); !newer.empty())
+            return luaL_error(L, "%s: %s of %s %s", verb, method, family, newer.c_str());
 
         if (override && !Answerable(*event))
             return luaL_error(L, "Override: %s of %s cannot be overridden: its args carry no "

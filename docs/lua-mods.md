@@ -39,14 +39,31 @@ parameters.
 
 ---
 
-## 📦 1. Put `wxl.lua` in place
+## 📦 1. Check that `wxl.lua` is in place
 
-`wxl.lua` is built once, from this SDK, and then serves every Lua mod you write. If you already
-have a `Mods/wxl.lua/` folder from someone else, skip to step 2.
+`wxl.lua` ships with both runtimes: a build of either puts it in its `Mods/` folder, ready to run
+every Lua mod you write. Look for this folder next to the client's executable:
 
-Building it needs the same tools as a C++ mod: CMake 3.21 or newer and Visual Studio 2022 or newer
-with the *Desktop development with C++* workload, x86 and x64 build tools both ([Building a
-mod](building-a-mod.md) says which components). From the SDK's checkout:
+```
+Mods/wxl.lua/
+    mod.json
+    bin/x86/wxl-lua.dll       with the stock Wow.exe
+    bin/x64/wxl-lua.dll       with WowClient64.exe
+    LICENSE-LuaJIT.txt
+```
+
+Each runtime takes the DLL for its own architecture, so a folder holding both serves both
+clients. If the folder is there, go on to step 2.
+
+If it is missing, copy it from the runtime's build: core's `build/dist/Mods/wxl.lua/` for the stock
+client, the client's `bin/Win/Mods/wxl.lua/` for the recompiled one.
+
+### Building it yourself
+
+You only need this to change `wxl.lua` itself, or to build it against another SDK. It takes the
+same tools as a C++ mod: CMake 3.21 or newer and Visual Studio 2022 or newer with the *Desktop
+development with C++* workload, x86 and x64 build tools both ([Building a mod](building-a-mod.md)
+says which components). From the SDK's checkout:
 
 ```sh
 cmake -S lua -B build-lua
@@ -54,19 +71,8 @@ cmake --build build-lua --config Release
 ```
 
 The first configure downloads LuaJIT at a fixed commit and builds it for each architecture. The
-result is one folder:
-
-```
-build-lua/dist/wxl.lua/
-    mod.json
-    bin/x64/wxl-lua.dll
-    bin/x86/wxl-lua.dll
-    LICENSE-LuaJIT.txt
-```
-
-Copy that whole folder into `Mods/` next to the client's executable, keeping its name. Each
-runtime takes the DLL for its own architecture and ignores the other, so the same folder serves
-both clients.
+result is one folder, `build-lua/dist/wxl.lua/`, laid out as above: copy it into `Mods/` in place
+of the one there, keeping its name.
 
 ---
 
@@ -451,11 +457,18 @@ The events that can be answered, as the SDK stands:
 
 ### The order handlers run in
 
-For one event, handlers run in the order they were subscribed. Mods are loaded in an order the
-manifests decide (`loadAfter`, then folder names in alphabetical order), and within a mod, the
-`Observe` and `Override` calls the entry file makes come first, in order, then its family
-methods. A mod that reloads is loaded last, so its handlers move after every other mod's until the
-client restarts.
+For one event, handlers run mod by mod, in the order the mods were loaded, and within a mod in the
+order it subscribed them:
+
+1. Mods are loaded in an order the manifests decide: `loadAfter`, then folder names in
+   alphabetical order. Every handler of a mod runs before any handler of the mods loaded after
+   it.
+2. Within a mod, the `Observe` and `Override` calls the entry file makes come first, in order,
+   then its family methods, then whatever it subscribes later (from `onInit`, or from a handler),
+   in the order it does.
+
+A mod keeps its place when it reloads: its new handlers run where its old ones did, between the
+same two mods, until the client closes.
 
 Lua mods all run inside `wxl.lua`, so next to C++ mods they run where `wxl.lua` runs.
 
@@ -569,7 +582,8 @@ When the client starts, the runtime loads `wxl.lua`, which reads `Mods/` and for
    `init.lua`, naming the mod after the folder: lowercase, letters and digits, runs of anything
    else as one `-` (`My Mod_One` is `my-mod-one`);
 2. refuses it, with the reason in the log, if its `abi` cannot be served or a service it
-   `requires` is missing;
+   `requires` is missing (a `mod.json` that names both `binaries` and `lua` is refused by the
+   runtime before `wxl.lua` sees it);
 3. orders the mods by `loadAfter` and folder name;
 4. for each, creates a Lua state, runs the entry file, and subscribes its family methods.
 
@@ -585,6 +599,17 @@ The `abi` a Lua mod is checked against is the lower of the runtime's and the one
 built with: an event newer than your `wxl.lua` is not available, whatever the runtime offers.
 `wxl.runtime.abi` says what your mod is served.
 
+The `abi` your manifest asks for is also what your mod may use. Subscribing to an event that came
+with a later feature is an error at the call, which names the event, the version that brought it,
+and what to write instead:
+
+```
+Observe: OnChatMessage of ChatScript came with abi 0.1.6, and this mod's mod.json asks for 0.1.5; to use it, set "abi": "0.1.6" there
+```
+
+Asking for `0.1.6` then makes a `0.1.5` runtime refuse the mod at the start, saying why, rather
+than run it without the event. A folder without a manifest may use everything its runtime serves.
+
 ### When each part runs
 
 | What | When |
@@ -598,14 +623,25 @@ built with: an event newer than your `wxl.lua` is not available, whatever the ru
 
 ### Reloading
 
-Once a second, `wxl.lua` compares each Lua mod's folder with what it saw last (how many files,
-their sizes, the latest change time). When it differs, the mod reloads: `onShutdown` runs, its
-handlers are removed, its Lua state is closed, then the entry file runs in a new state and
-`onInit` runs. Other mods are not touched.
+Once a second, `wxl.lua` looks at the files each Lua mod's code comes from: its `mod.json`, its
+entry file, and every file it loaded with `require`, `dofile` or `loadfile`, including a module
+`require` looked for and did not find. When one of them has changed, the mod reloads: the log
+names the file, `onShutdown` runs, its handlers are removed, its Lua state is closed, then the
+entry file runs in a new state and `onInit` runs. Other mods are not touched.
 
-Nothing in Lua memory survives a reload. A file the mod writes into its own folder does (see
-the sandbox below), but writing one is itself a change: a mod that writes a file while it runs
-reloads a second later. Write at `onShutdown`, which runs before the folder is looked at again.
+```
+[wxl.lua] mod wxl.lua-hello: lib/tally.lua changed
+[wxl.lua] reloading wxl.lua-hello
+```
+
+A changed `mod.json` is read again and checked as at the start. One that no longer reads, gives
+another `id`, or asks for an `abi` this runtime cannot serve leaves the mod unloaded, with the
+reason in the log, until you save a fix.
+
+Nothing in Lua memory survives a reload, the fields you stored on objects included: in the new
+state, an object still in view is a new value with none of them. A file the mod writes into its own
+folder does (see the sandbox below), and writing one never reloads the mod, nor does changing a file
+it reads with `io.open`: those are data, not code. Save settings whenever it suits you.
 
 ### Errors
 
@@ -685,8 +721,8 @@ built with, so it describes the events your `wxl.lua` knows.
 | `id` | yes | the mod's identity: lowercase letters and digits, separated by single `.` or `-`, 3 to 64 characters. It tags its log lines and is what `loadAfter` names |
 | `name` | yes | the name shown in the log |
 | `version` | yes | the mod's own version, `1.2.3` |
-| `abi` | yes | the lowest contract version the mod needs, `major.minor.feature`, such as `"0.1.5"`: the feature that brought the newest event it uses. A runtime of another major, or another minor while the major is 0, refuses it; so does one whose feature is lower. A two-part version (`"0.5"`) is refused as the old numbering |
-| `lua` | yes, for a Lua mod | the entry file, relative to the folder; it may not leave it |
+| `abi` | yes | the lowest contract version the mod needs, `major.minor.feature`, such as `"0.1.5"`: the feature that brought the newest event it uses. A runtime of another major, or another minor while the major is 0, refuses it; so does one whose feature is lower. The mod may subscribe only to the events this version has. A two-part version (`"0.5"`) is refused as the old numbering |
+| `lua` | yes, for a Lua mod | the entry file, relative to the folder; it may not leave it. A Lua mod names no `binaries`: a manifest with both is refused |
 | `requires` | no | services the mod cannot run without, `{ "service": "wxl.object", "version": 1 }`. A runtime without one refuses the mod |
 | `optional` | no | services the mod uses when they are there; informational |
 | `loadAfter` | no | ids of mods to load before this one when they are present; a missing one is ignored |
@@ -708,7 +744,8 @@ name is an error listing these four.
 
 Subscribes `fn` to an event and returns its id, a number. `family` is a family's name as a string
 (`"WorldScript"`), `event` the event's (`"OnUpdate"`). `fn` receives the event's parameters. A
-handler subscribed while the event is being delivered runs from the next time.
+handler subscribed while the event is being delivered runs from the next time. An error for an
+event newer than the manifest's `abi`.
 
 #### `Override(family, event, fn)`
 
@@ -725,8 +762,9 @@ id (it was already removed). Safe from inside the handler itself.
 `WorldScript`, `RenderScript`, `ObjectScript`, `AssetScript`, `NetScript`, `LuaScript`,
 `CombatScript`, `PlayerScript`, `GlueScript`, `ChatScript`. A function defined on one under an event's name is subscribed after the entry file
 has run, as an `Override` on an event that can be answered and as an `Observe` otherwise, and is
-called with `self` first. Anything else on these tables, or replacing one with something that is
-not a table, stops the mod from loading.
+called with `self` first. Anything else on these tables, a method for an event newer than the
+manifest's `abi`, or replacing one with something that is not a table, stops the mod from
+loading.
 
 #### `print(...)`
 
@@ -792,8 +830,9 @@ A few to start from:
 The families `PlayerScript`, `GlueScript` and `ChatScript`, and `WorldScript`'s `OnZoneChanged`,
 `OnMouseoverChanged` and `OnCVarChanged`, came with `0.1.6`: a mod that uses one asks for
 `"abi": "0.1.6"`, so that an older runtime refuses it with a reason rather than failing at the
-unknown name. `ChatScript`'s `OnChatAddonMessage`, and `OnChatMessage`'s last two parameters, came
-with `0.1.7`: a mod that uses them asks for `"abi": "0.1.7"`.
+unknown name. A mod asking for less cannot subscribe to them. `ChatScript`'s `OnChatAddonMessage`,
+and `OnChatMessage`'s last two parameters, came with `0.1.7`: a mod that uses them asks for
+`"abi": "0.1.7"`.
 
 Not every runtime raises every event. Subscribing to one that yours does not raise logs a warning
 naming it, and the handler never runs.
@@ -813,10 +852,12 @@ your mod's id first.
 
 | The log says | What it means |
 |---|---|
-| nothing about your mod at all | `wxl.lua` is not in `Mods/`, or your folder has neither a `mod.json` with `lua` nor an `init.lua`. Look for `[wxl.lua] scanning` |
+| nothing about your mod at all | `wxl.lua` is not in `Mods/` (step 1), or your folder has neither a `mod.json` with `lua` nor an `init.lua`. Look for `[wxl.lua] scanning` |
+| `[host] refused <folder>: ... 'binaries' and 'lua' cannot both be given` | a manifest names one or the other: `lua` for a Lua mod |
 | `mod <id> failed to load init.lua: ...` | the entry file has a syntax error, or raised one while running; the rest of the line is Lua's message, with the line number |
 | `<Family>.<name> is not an event of <Family>; its events are ...` | a misspelt family method, or something other than a handler on a family table |
 | `refused <id>: needs abi ...` | the manifest's `abi` is newer than your `wxl.lua` or the runtime, or of another minor. The line gives both versions |
+| `On<Event> of <Family> came with abi ...` | the event is newer than your manifest's `abi`; the line says what to ask for |
 | `refused <id>: requires service ...` | a service under `requires` is missing from this runtime |
 | `folder '<name>' holds an init.lua but its name makes no mod id` | rename the folder, or give it a `mod.json` with an `id` |
 | `this runtime does not raise On<Event> of <Family>Script` | the handler is valid but will never run on this runtime |
@@ -824,7 +865,7 @@ your mod's id first.
 | `mod <id> is disabled: it errored 25 times` | fix the error and save a file of the mod: it reloads and runs again |
 | `the Override of On<Event> returned ...` | a return value of the wrong kind, too many of them, or a string too long for the buffer |
 | `On<Event> was raised off the main thread` | that event happened on another thread, and its answer could not be taken ([Events from other threads](#events-from-other-threads)) |
-| your mod reloads every second | it writes a file into its own folder while it runs; write at `onShutdown` |
+| `mod <id> stays unloaded: its mod.json ...` | after a reload, the changed manifest no longer reads, gives another id, or asks for what the runtime cannot serve; save a fix and it loads |
 
 ---
 

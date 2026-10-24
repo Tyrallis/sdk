@@ -26,6 +26,7 @@
 #include "wxl/host/manifest.hpp"
 #include "wxl/host/mod_host.hpp"
 #include "wxl/lua.h"
+#include "wxl/reflect.hpp"
 
 #include "../lua/src/ObjectNames.hpp"
 
@@ -269,6 +270,82 @@ Observe("WorldScript", "OnUpdate", function() print("probe v2 update") end)
 Observe("WorldScript", "OnUpdate", function() error("always") end)
 registerForEvent("onUpdate", function() print("broken still updates") end)
 )lua";
+
+    constexpr const char* kWatcher = R"lua(
+local part = require("lib.part")
+local later = pcall(require, "lib.later")
+local data = io.open("data.txt"):read("*a")
+registerForEvent("onInit", function()
+    local notes = io.open("notes.txt", "w")
+    notes:write("written at init")
+    notes:close()
+    print("watcher init " .. part .. " later=" .. tostring(later) .. " data=" .. data .. " " .. wxl.mod.version)
+end)
+)lua";
+
+    constexpr const char* kOrderFirst = R"lua(
+local added = false
+Observe("WorldScript", "OnUpdate", function()
+    print("order a1")
+    if not added then
+        added = true
+        Observe("WorldScript", "OnUpdate", function() print("order a2") end)
+    end
+end)
+)lua";
+
+    constexpr const char* kOrderSecond = R"lua(
+Observe("WorldScript", "OnUpdate", function() print("order b") end)
+)lua";
+
+    constexpr const char* kOlder = R"lua(
+local ok, err = pcall(Observe, "ChatScript", "OnChatMessage", function() end)
+print("observe " .. tostring(ok) .. ": " .. err)
+ok, err = pcall(Override, "ChatScript", "OnChatSend", function() end)
+print("override " .. tostring(ok) .. ": " .. err)
+ok = pcall(Observe, "CombatScript", "OnCombatMiss", function() end)
+print("older event " .. tostring(ok))
+)lua";
+
+    constexpr const char* kCacheFirst = R"lua(
+Observe("ObjectScript", "OnObjectCreate", function(object) object.tag = "first state" end)
+Observe("ObjectScript", "OnTargetChanged", function(previous, current)
+    if not current then return end
+    print("order a target tag " .. tostring(current.tag))
+    current.tag = "reloaded state"
+end)
+Observe("ObjectScript", "OnObjectDestroy", function(object)
+    print("order a destroy tag " .. tostring(object.tag) .. " health " .. tostring(object:Health()))
+end)
+)lua";
+
+    constexpr const char* kCacheSecond = R"lua(
+local held
+Observe("ObjectScript", "OnTargetChanged", function(previous, current) held = current end)
+Observe("ObjectScript", "OnObjectDestroy", function(object)
+    print("order b destroy same " .. tostring(rawequal(object, held)) .. " valid " .. tostring(object:Valid()))
+end)
+registerForEvent("onUpdate", function()
+    if held and not held:Valid() then
+        print("order b " .. tostring(select(2, held:Health())))
+        held = nil
+    end
+end)
+)lua";
+
+    /// The "order " lines logged from @p from on, as one string: "a1 b a1 a2 b".
+    std::string OrderSince(const std::vector<std::string>& lines, size_t from)
+    {
+        std::string seen;
+        for (size_t i = from; i < lines.size(); ++i)
+        {
+            const size_t at = lines[i].find("] order ");
+            if (at == std::string::npos) continue;
+            if (!seen.empty()) seen += ' ';
+            seen += lines[i].substr(at + 8);
+        }
+        return seen;
+    }
 
     constexpr const char* kBench = R"lua(
 local sum = 0
@@ -769,6 +846,194 @@ int main(int argc, char** argv)
         host.Raise(WXL_EV_TargetChanged, &target);
         Check(sink.Has("[wxl.noservice] no service nil unsupported nil unsupported"),
               "without the object service Valid() answers like every read: nil, \"unsupported\"");
+    }
+
+    Section("what a reload watches");
+    {
+        const fs::path mods = MakeTree(scratch, "watch", binary, fs::path());
+        const fs::path watcher = mods / "watcher";
+        WriteFile(watcher / "mod.json", LuaManifest("wxl.watcher"));
+        WriteFile(watcher / "init.lua", kWatcher);
+        WriteFile(watcher / "lib" / "part.lua", "return 'one'\n");
+        WriteFile(watcher / "data.txt", "first");
+
+        CaptureSink sink;
+        ModHost     host(Config(mods, sink));
+        host.LoadAll();
+        host.Stage(WXL_STAGE_READY);
+        const wxl_lua_api* api = static_cast<const wxl_lua_api*>(host.Table()->get_service(WXL_LUA_SERVICE, WXL_LUA_SERVICE_VERSION));
+        Check(sink.Has("[wxl.watcher] watcher init one later=false data=first 1.0.0"), "the watcher loads");
+        Check(api && fs::exists(watcher / "notes.txt") && api->poll() == 0,
+              "a file the mod writes into its own folder does not reload it");
+        WriteFile(watcher / "data.txt", "second, longer");
+        WriteFile(watcher / "notes.txt", "written by someone else");
+        WriteFile(watcher / "other.lua", "print('never loaded')\n");
+        Check(api && api->poll() == 0, "nor does a data file it read, or a file it never loaded");
+
+        WriteFile(watcher / "lib" / "part.lua", "return 'version two'\n");
+        Check(api && api->poll() == 1 && sink.Has("[INFO ] [wxl.lua] mod wxl.watcher: lib/part.lua changed") &&
+                  sink.Has("[wxl.watcher] watcher init version two later=false data=second, longer"),
+              "a module it required reloads it when it changes, and the log names the file");
+        WriteFile(watcher / "lib" / "later.lua", "return true\n");
+        Check(api && api->poll() == 1 && sink.Has("[wxl.watcher] watcher init version two later=true"),
+              "and so does a module it required and did not find, once it appears");
+        Check(api && api->poll() == 0, "and then nothing has changed");
+
+        std::string manifest = LuaManifest("wxl.watcher");
+        manifest.replace(manifest.find("1.0.0"), 5, "1.0.1");
+        WriteFile(watcher / "mod.json", manifest);
+        Check(api && api->poll() == 1 && sink.Has("[wxl.lua] loaded wxl.watcher 1.0.1") &&
+                  sink.Has("[wxl.watcher] watcher init version two later=true data=second, longer 1.0.1"),
+              "a changed mod.json is read again at the reload");
+
+        std::string both = manifest;
+        both.replace(both.find("\"lua\""), 0, "\"binaries\": { \"win-x64\": \"bin/w.dll\" },\n  ");
+        WriteFile(watcher / "mod.json", both);
+        Check(api && api->poll() == 1 &&
+                  sink.Has("[ERROR] [wxl.lua] mod wxl.watcher stays unloaded: its mod.json no longer reads: ") &&
+                  sink.Has("'binaries' and 'lua' cannot both be given") &&
+                  sink.Has("; it loads again when its files change"),
+              "a mod.json that no longer reads leaves the mod unloaded, saying why");
+        Check(api && api->poll() == 0, "without trying again until it changes");
+        std::string renamed = manifest;
+        renamed.replace(renamed.find("wxl.watcher"), 11, "wxl.renamed");
+        WriteFile(watcher / "mod.json", renamed);
+        Check(api && api->poll() == 1 &&
+                  sink.Has("mod wxl.watcher stays unloaded: its mod.json now gives the id 'wxl.renamed', and a mod's id cannot change while the client runs"),
+              "an id cannot change under a running mod");
+        WriteFile(watcher / "mod.json", manifest + " ");
+        const size_t inits = sink.Count("[wxl.watcher] watcher init");
+        Check(api && api->poll() == 1 && sink.Count("[wxl.watcher] watcher init") == inits + 1,
+              "a mod.json put right loads it again");
+
+        host.Shutdown();
+        if (g_failures) sink.Dump();
+    }
+
+    Section("handler order across reloads");
+    {
+        const fs::path mods = MakeTree(scratch, "order", binary, fs::path());
+        WriteFile(mods / "order-a" / "mod.json", LuaManifest("wxl.order-a"));
+        WriteFile(mods / "order-a" / "init.lua", kOrderFirst);
+        WriteFile(mods / "order-b" / "mod.json", LuaManifest("wxl.order-b"));
+        WriteFile(mods / "order-b" / "init.lua", kOrderSecond);
+        WriteFile(mods / "both" / "mod.json",
+                  "{ \"id\": \"wxl.both\", \"name\": \"Both\", \"version\": \"1.0.0\", \"abi\": \"" +
+                      std::string(kAbi) + "\",\n  \"binaries\": { \"" + CurrentTarget() +
+                      "\": \"bin/both.dll\" },\n  \"lua\": \"init.lua\" }\n");
+        WriteFile(mods / "both" / "init.lua", "print('both ran')\n");
+
+        CaptureSink sink;
+        ModHost     host(Config(mods, sink));
+        host.LoadAll();
+        host.Stage(WXL_STAGE_READY);
+        const wxl_lua_api* api = static_cast<const wxl_lua_api*>(host.Table()->get_service(WXL_LUA_SERVICE, WXL_LUA_SERVICE_VERSION));
+
+        Check(sink.Has("[WARN ] [host] refused both: ") && sink.Has("line 2: 'binaries' and 'lua' cannot both be given") &&
+                  !sink.Has("both ran") && api && api->count() == 2,
+              "a manifest with both binaries and lua is refused, and neither side runs it");
+
+        const wxl_update_args tick{0.1f};
+        size_t from = sink.lines.size();
+        host.Raise(WXL_EV_Update, &tick);
+        host.Raise(WXL_EV_Update, &tick);
+        Check(OrderSince(sink.lines, from) == "a1 b a1 a2 b",
+              "mods run in load order; a handler a mod adds runs after its own and before the next mod's");
+
+        Check(api && api->reload("wxl.order-a") == WXL_OK, "the first mod reloads");
+        from = sink.lines.size();
+        host.Raise(WXL_EV_Update, &tick);
+        host.Raise(WXL_EV_Update, &tick);
+        const std::string after = OrderSince(sink.lines, from);
+        Check(after == "a1 b a1 a2 b", ("a reloaded mod keeps its place: " + after).c_str());
+
+        host.Shutdown();
+        if (g_failures) sink.Dump();
+    }
+
+    Section("objects across a reload");
+    {
+        using wxltest::FakeObjects;
+        const fs::path mods = MakeTree(scratch, "cache", binary, fs::path());
+        WriteFile(mods / "cache-a" / "mod.json", LuaManifest("wxl.cache-a"));
+        WriteFile(mods / "cache-a" / "init.lua", kCacheFirst);
+        WriteFile(mods / "cache-b" / "mod.json", LuaManifest("wxl.cache-b"));
+        WriteFile(mods / "cache-b" / "init.lua", kCacheSecond);
+
+        CaptureSink sink;
+        ModHost     host(Config(mods, sink));
+        host.LoadAll();
+        host.Stage(WXL_STAGE_READY);
+        const wxl_lua_api* api = static_cast<const wxl_lua_api*>(host.Table()->get_service(WXL_LUA_SERVICE, WXL_LUA_SERVICE_VERSION));
+
+        FakeObjects::Spawn(80, 0x800);
+        const wxl_object_args wolf{80, 0x800, WXL_OBJECT_UNIT};
+        const wxl_target_args target{WXL_HANDLE_NONE, 80};
+        host.Raise(WXL_EV_ObjectCreate, &wolf);
+        size_t from = sink.lines.size();
+        host.Raise(WXL_EV_TargetChanged, &target);
+        Check(OrderSince(sink.lines, from) == "a target tag first state", "the first mod's field is on the object");
+
+        Check(api && api->reload("wxl.cache-a") == WXL_OK, "the first mod reloads");
+        from = sink.lines.size();
+        host.Raise(WXL_EV_TargetChanged, &target);
+        const std::string fresh = OrderSince(sink.lines, from);
+        Check(fresh == "a target tag nil", ("a reloaded mod's new state holds none of the old fields: " + fresh).c_str());
+
+        const wxl_update_args tick{0.1f};
+        from = sink.lines.size();
+        host.Raise(WXL_EV_ObjectDestroy, &wolf);
+        FakeObjects::Despawn(80);
+        host.Raise(WXL_EV_Update, &tick);
+        const std::string gone = OrderSince(sink.lines, from);
+        Check(gone == "a destroy tag reloaded state health 50 b destroy same true valid true b gone",
+              ("after a reload, ObjectDestroy still reaches the reloaded mod first, then the next, and only then "
+               "is the object gone in each state: " + gone).c_str());
+
+        host.Shutdown();
+        if (g_failures) sink.Dump();
+    }
+
+    Section("what a mod's abi lets it use");
+    {
+        const wxl::reflect::Version since = wxl::reflect::SinceOf(WXL_EV_ChatMessage);
+        const std::string           newer = std::to_string(since.major) + "." + std::to_string(since.minor) + "." +
+                                  std::to_string(since.feature);
+        const std::string older = std::to_string(since.major) + "." + std::to_string(since.minor) + "." +
+                                  std::to_string(since.feature - 1);
+
+        const fs::path mods = MakeTree(scratch, "abi", binary, fs::path());
+        std::string    manifest = LuaManifest("wxl.older");
+        manifest.replace(manifest.find(kAbi), std::strlen(kAbi), older);
+        WriteFile(mods / "older" / "mod.json", manifest);
+        WriteFile(mods / "older" / "init.lua", kOlder);
+        std::string family = LuaManifest("wxl.older-family");
+        family.replace(family.find(kAbi), std::strlen(kAbi), older);
+        WriteFile(mods / "older-family" / "mod.json", family);
+        WriteFile(mods / "older-family" / "init.lua", "function ChatScript:OnChatMessage() end\n");
+        WriteFile(mods / "current" / "mod.json", LuaManifest("wxl.current"));
+        WriteFile(mods / "current" / "init.lua",
+                  "print('current ' .. tostring(pcall(Observe, 'ChatScript', 'OnChatMessage', function() end)))\n");
+
+        CaptureSink sink;
+        ModHost     host(Config(mods, sink));
+        host.LoadAll();
+
+        const std::string observe = "[wxl.older] observe false: Observe: OnChatMessage of ChatScript came with abi " + newer +
+                                    ", and this mod's mod.json asks for " + older + "; to use it, set \"abi\": \"" +
+                                    newer + "\" there";
+        Check(sink.Has(observe.c_str()), "an Observe of an event newer than the mod's abi is refused, naming both");
+        Check(sink.Has(("[wxl.older] override false: Override: OnChatSend of ChatScript came with abi " + newer).c_str()),
+              "and so is an Override");
+        Check(sink.Has("[wxl.older] older event true"), "an event its abi has is served");
+        Check(sink.Has(("mod wxl.older-family failed to load init.lua: ChatScript.OnChatMessage came with abi " + newer +
+                        ", and this mod's mod.json asks for " + older)
+                           .c_str()),
+              "a family method of a newer event stops the mod from loading");
+        Check(sink.Has("[wxl.current] current true"), "a mod asking for that abi gets the event");
+
+        host.Shutdown();
+        if (g_failures) sink.Dump();
     }
 
     Section("cost of one dispatch");

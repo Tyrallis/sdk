@@ -2,7 +2,7 @@
 // Copyright (c) 2026 WarcraftXL
 //
 // The Lua mods together: found and ordered by the host's rules, each in its own state, fed from
-// one native subscription per event, reloaded when their files change.
+// one native subscription per event, reloaded when the files their code comes from change.
 
 #ifndef WXL_LUA_RUNTIME_HPP
 #define WXL_LUA_RUNTIME_HPP
@@ -70,7 +70,9 @@ namespace wxl::lua
         // --- what a mod's Observe and Override do -------------------------------------------
 
         /// Keeps a handler for an event and returns its id. @p self is the table a family
-        /// method is called on, as a registry ref, or LUA_NOREF for a plain function.
+        /// method is called on, as a registry ref, or LUA_NOREF for a plain function. Handlers
+        /// run by the mods' load order, then in the order each mod subscribed them; a mod that
+        /// reloads keeps its place.
         uint32_t Observe(ScriptMod& mod, const reflect::Event& event, int ref, bool override,
                          int self = LUA_NOREF);
 
@@ -109,9 +111,10 @@ namespace wxl::lua
             const reflect::Event*              event   = nullptr;
             std::vector<const reflect::Field*> writable; ///< what an Override answers through, in order
             wxl::Subscription                  native;
-            std::vector<Handler>               handlers;
+            std::vector<Handler>               handlers; ///< by the mod's rank, then subscription order
+            std::vector<Handler>               arriving; ///< subscribed during a dispatch, placed after it
             int                                depth = 0;     ///< dispatches walking `handlers` right now
-            bool                               dirty = false; ///< a handler died during a dispatch
+            bool                               dirty = false; ///< a handler died or arrived during a dispatch
         };
 
         /// An event raised off the main thread, waiting for the next Update.
@@ -134,7 +137,11 @@ namespace wxl::lua
         /// writable members: the first value to the first member, and so on.
         void TakeAnswers(lua_State* L, ScriptMod& mod, const Slot& slot, const void* args, int first,
                          int count);
+        /// Drops the dead handlers and places the arriving ones. Never during a dispatch.
         void Compact(Slot& slot);
+
+        /// Puts a handler after every handler of its mod and of the mods ranked before it.
+        static void Place(Slot& slot, const Handler& handler);
 
         /// Subscribes the native handler for a slot when it has none. @p requester names the
         /// mod in the warning when the runtime does not raise the event; null for nobody.
@@ -158,6 +165,10 @@ namespace wxl::lua
 
         /// Checks a candidate the way the host checks a binary mod, and keeps it when it passes.
         void Admit(const host::ModCandidate& candidate);
+
+        /// Why a script mod's manifest cannot be served, or empty: what Admit checks, and what a
+        /// reload checks again when the manifest changed.
+        std::string Refusal(const host::Manifest& manifest) const;
 
         /// Adds the folders holding an init.lua and no manifest, as mods named after them.
         void AddBareFolders(const std::filesystem::path& directory,

@@ -14,6 +14,7 @@
 
 #include "Lua.hpp"
 #include "wxl/host/discovery.hpp"
+#include "wxl/reflect.hpp"
 
 namespace wxl::lua
 {
@@ -37,7 +38,8 @@ namespace wxl::lua
         /// Handler errors a mod may make before it is disabled, counted since its last load.
         static constexpr uint32_t kErrorLimit = 25;
 
-        ScriptMod(Runtime& runtime, host::ModCandidate candidate);
+        /// @p rank is its place in the load order: 0 for the first mod loaded.
+        ScriptMod(Runtime& runtime, host::ModCandidate candidate, uint32_t rank);
         ~ScriptMod();
 
         ScriptMod(const ScriptMod&)            = delete;
@@ -49,6 +51,21 @@ namespace wxl::lua
 
         /// The entry file, from the manifest's "lua".
         std::filesystem::path Entry() const;
+
+        /// Its place in the load order, kept across reloads: its handlers run after those of
+        /// every mod of a lower rank and before those of every mod of a higher one.
+        uint32_t Rank() const { return rank_; }
+
+        /// Whether it came with a mod.json; false for a folder found by its init.lua alone.
+        bool HasManifest() const { return manifested_; }
+
+        /**
+         * @brief Reads the mod.json again, for a reload.
+         *
+         * False with @p problem set when it no longer parses, gives another id, or names no
+         * "lua" entry. True, the manifest kept as it was, for a mod without one.
+         */
+        bool Reread(std::string& problem);
 
         bool       Loaded() const { return state_ != nullptr; }
         bool       Disabled() const { return disabled_; }
@@ -81,29 +98,25 @@ namespace wxl::lua
          */
         void ReportError(std::string_view what, std::string_view message);
 
-        // --- the folder watch -------------------------------------------------------------
+        // --- the files its code comes from ------------------------------------------------
 
-        /// What a scan of the folder sees; the same before and after means nothing changed.
-        struct Signature
-        {
-            uint64_t files = 0;
-            uint64_t bytes = 0;
-            int64_t  newest = 0; ///< the latest write time, in the filesystem clock's ticks
+        /**
+         * @brief Watches a file the mod's code comes from, as it is now.
+         *
+         * Its mod.json, its entry file, and every file the sandbox loads code from for it
+         * (loadfile, dofile, require), recorded as each is loaded; a module require looked for
+         * and did not find is watched for its appearance. What the mod reads or writes with
+         * io.open is data, never watched: a mod writing into its own folder does not reload.
+         * Load starts the list over.
+         */
+        void Watch(const std::filesystem::path& file);
 
-            bool operator==(const Signature& other) const
-            {
-                return files == other.files && bytes == other.bytes && newest == other.newest;
-            }
-            bool operator!=(const Signature& other) const { return !(*this == other); }
-        };
+        /// The first watched file that differs from when it was watched (written, created,
+        /// removed), relative to the mod's folder; empty when none does.
+        std::filesystem::path Changed() const;
 
-        Signature Scan() const;
-
-        /// Whether the folder differs from the last @ref Mark.
-        bool Changed() const { return Scan() != signature_; }
-
-        /// Records the folder as it is now.
-        void Mark() { signature_ = Scan(); }
+        /// Starts the list over with its mod.json and its entry file, as they are now.
+        void Rewatch();
 
     private:
         static ScriptMod& Self(lua_State* L);
@@ -133,14 +146,36 @@ namespace wxl::lua
 
         void PushClosure(lua_CFunction fn);
 
-        Runtime&            runtime_;
-        host::ModCandidate  candidate_;
-        lua_State*          state_     = nullptr;
-        bool                disabled_  = false;
-        uint32_t            errors_    = 0;
-        int                 traceback_ = LUA_NOREF;
-        std::vector<int>    callbacks_[static_cast<size_t>(Callback::Count)];
-        Signature           signature_;
+        /// Empty when the mod may subscribe to @p event, otherwise why not: the event came with a
+        /// later contract than the "abi" its manifest asks for.
+        std::string TooNew(const reflect::Event& event) const;
+
+        /// A watched file as it was: whether it existed, its size and its last write.
+        struct Watched
+        {
+            std::filesystem::path file;
+            bool                  exists  = false;
+            uint64_t              size    = 0;
+            int64_t               written = 0; ///< in the filesystem clock's ticks
+
+            bool Same(const Watched& other) const
+            {
+                return exists == other.exists && size == other.size && written == other.written;
+            }
+        };
+
+        static Watched Look(const std::filesystem::path& file);
+
+        Runtime&             runtime_;
+        host::ModCandidate   candidate_;
+        uint32_t             rank_       = 0;
+        bool                 manifested_ = false;
+        lua_State*           state_      = nullptr;
+        bool                 disabled_   = false;
+        uint32_t             errors_     = 0;
+        int                  traceback_  = LUA_NOREF;
+        std::vector<int>     callbacks_[static_cast<size_t>(Callback::Count)];
+        std::vector<Watched> watched_;
     };
 } // namespace wxl::lua
 
