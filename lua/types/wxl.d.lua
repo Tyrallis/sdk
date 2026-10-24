@@ -118,8 +118,9 @@ PlayerScript = {}
 GlueScript = {}
 
 ---@class ChatScript
----@field OnChatMessage fun(self: ChatScript, type: integer, language: integer, sender: wxl.Object|nil, sender_guid: wxl.Guid, sender_name: string, target_guid: wxl.Guid, target_name: string, channel: string, text: string, tag: integer, achievement_id: integer, gm: boolean)
+---@field OnChatMessage fun(self: ChatScript, type: integer, language: integer, sender: wxl.Object|nil, sender_guid: wxl.Guid, sender_name: string, target_guid: wxl.Guid, target_name: string, channel: string, text: string, tag: integer, achievement_id: integer, gm: boolean, line_id: integer, shown_text: string)
 ---@field OnChatSend fun(self: ChatScript, text: string, type: string, language: string, target: string, prefix: string, addon: boolean, suppressed: boolean|nil): boolean|nil answers through suppressed
+---@field OnChatAddonMessage fun(self: ChatScript, type: integer, sender: wxl.Object|nil, sender_guid: wxl.Guid, sender_name: string, prefix: string, text: string, channel: string, gm: boolean)
 ChatScript = {}
 
 ---@alias wxl.Family "WorldScript"|"RenderScript"|"ObjectScript"|"AssetScript"|"NetScript"|"LuaScript"|"CombatScript"|"PlayerScript"|"GlueScript"|"ChatScript"
@@ -196,9 +197,10 @@ ChatScript = {}
 ---@overload fun(family: "GlueScript", method: "OnGlueRealm", handler: fun(index: integer, count: integer, name: string, address: string, type: integer, flags: integer, locked: boolean, population: number, characters: integer, category: integer, realm_id: integer, version_major: integer, version_minor: integer, version_revision: integer, version_build: integer, region_id: integer, battlegroup_id: integer, build: integer)): integer
 ---@overload fun(family: "GlueScript", method: "OnGlueAuthResult", handler: fun(result: integer, queue_position: integer, billing_time_remaining: integer, billing_flags: integer, billing_time_rested: integer, expansion: integer, free_character_migration: boolean)): integer
 ---@overload fun(family: "GlueScript", method: "OnGlueEnterWorld", handler: fun(character_guid: wxl.Guid)): integer
----@overload fun(family: "ChatScript", method: "OnChatMessage", handler: fun(type: integer, language: integer, sender: wxl.Object|nil, sender_guid: wxl.Guid, sender_name: string, target_guid: wxl.Guid, target_name: string, channel: string, text: string, tag: integer, achievement_id: integer, gm: boolean)): integer
+---@overload fun(family: "ChatScript", method: "OnChatMessage", handler: fun(type: integer, language: integer, sender: wxl.Object|nil, sender_guid: wxl.Guid, sender_name: string, target_guid: wxl.Guid, target_name: string, channel: string, text: string, tag: integer, achievement_id: integer, gm: boolean, line_id: integer, shown_text: string)): integer
 ---@overload fun(family: "ChatScript", method: "OnChatSend", handler: fun(text: string, type: string, language: string, target: string, prefix: string, addon: boolean, suppressed: boolean|nil)): integer
 ---@overload fun(family: "CombatScript", method: "OnCombatEnergize", handler: fun(source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, power_type: integer, amount: integer, periodic: boolean, drain: boolean, multiplier: number)): integer
+---@overload fun(family: "ChatScript", method: "OnChatAddonMessage", handler: fun(type: integer, sender: wxl.Object|nil, sender_guid: wxl.Guid, sender_name: string, prefix: string, text: string, channel: string, gm: boolean)): integer
 ---@param family wxl.Family
 ---@param method string
 ---@param handler function

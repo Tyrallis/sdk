@@ -691,34 +691,63 @@ WXL_ARGS_FIELD(wxl_enter_world_args, character_guid, guid)
 WXL_ARGS_END(wxl_enter_world_args)
 
 /**
- * @brief A chat message as the server sent it, as the client is about to show it.
+ * @brief A line of the chat that a chat message of the server became: the line the client shows.
  *
- * Raised once the client has decided to show the message, just before it reaches the chat
- * frames, and only then: a message the client drops is not raised -- one from an ignored
- * player (a GM's excepted), a creature's said to an ignored player, a whisper the client's
- * stranger filter refuses, a message with bytes left over. The chat frames' own filters come
- * after it: a line the spam filter or the UTF-8 check then refuses has been raised. An addon
- * message is raised too, with its language, before the client turns it into CHAT_MSG_ADDON.
+ * Raised when the client commits the line, after every filter it runs and just before the chat
+ * frames receive it as their CHAT_MSG_* event, and only then. A message the client drops raises
+ * nothing: one from an ignored player (a GM's excepted), a creature's said to an ignored player,
+ * a whisper the client's stranger filter refuses, a message with bytes left over, a line the spam
+ * filter or the UTF-8 check refuses. A line the client holds until it knows a name (the sender's
+ * or the target's is not in its name cache yet, or the world is still loading) is raised when it
+ * is shown, from the copy the client kept; one it then gives up on raises nothing. An addon
+ * message is not a line: it raises ChatAddonMessage.
  *
- * @ref type is the CHAT_MSG_* code the client shows it under: a foreign whisper (8 on the wire)
- * arrives as a whisper, 7. The names are present only where the message carries them: a
- * creature's, and a player's on a GM message; a player's name otherwise comes from the name
- * cache, which this does not consult. The strings are valid for the call only.
+ * @ref type is the CHAT_MSG_* code the line is shown under: a foreign whisper (8 on the wire)
+ * is a whisper, 7; a say or a yell with no text is an emote, 10. @ref text is the text as the
+ * server sent it, @ref shown_text the line as the frames receive it: in the languages the
+ * player knows, with the profanity filter applied. @ref sender_name is the name the line shows,
+ * the message's own or the client's name cache's; @ref target_name only as the message carries
+ * it. The strings are valid for the call only.
  */
 WXL_ARGS(wxl_chat_args)
-WXL_ARGS_FIELD(wxl_chat_args, type, u32)            ///< CHAT_MSG_*: 0 system, 1 say, 2 party, 5 yell, 7 whisper, 17 channel, ...
-WXL_ARGS_FIELD(wxl_chat_args, language, u32)        ///< Languages id; 0xFFFFFFFF for an addon message
+WXL_ARGS_FIELD(wxl_chat_args, type, u32)            ///< CHAT_MSG_*: 0 system, 1 say, 2 party, 5 officer, 6 yell, 7 whisper, 10 emote, 17 channel, ...
+WXL_ARGS_FIELD(wxl_chat_args, language, u32)        ///< Languages id the message was said in
 WXL_ARGS_FIELD(wxl_chat_args, sender, handle)       ///< WXL_HANDLE_NONE when the sender is not in view
 WXL_ARGS_FIELD(wxl_chat_args, sender_guid, guid)    ///< 0 for a system message
-WXL_ARGS_FIELD(wxl_chat_args, sender_name, str)     ///< empty when the message carries none
+WXL_ARGS_FIELD(wxl_chat_args, sender_name, str)     ///< empty when the line shows none
 WXL_ARGS_FIELD(wxl_chat_args, target_guid, guid)    ///< the unit the message is said to, 0 for none
 WXL_ARGS_FIELD(wxl_chat_args, target_name, str)     ///< empty when the message carries none
 WXL_ARGS_FIELD(wxl_chat_args, channel, str)         ///< the channel's name for type 17, empty otherwise
-WXL_ARGS_FIELD(wxl_chat_args, text, str)
+WXL_ARGS_FIELD(wxl_chat_args, text, str)            ///< as the server sent it
 WXL_ARGS_FIELD(wxl_chat_args, tag, u32)             ///< the sender's chat tag: 1 AFK, 2 DND, 4 GM, 16 dev
 WXL_ARGS_FIELD(wxl_chat_args, achievement_id, u32)  ///< for an achievement message, 0 otherwise
 WXL_ARGS_FIELD(wxl_chat_args, gm, bool)             ///< WXL_TRUE for SMSG_GM_MESSAGECHAT
+WXL_ARGS_FIELD(wxl_chat_args, line_id, u32)         ///< the client's number for the line, the lineID of its CHAT_MSG_* event
+WXL_ARGS_FIELD(wxl_chat_args, shown_text, str)      ///< as the chat frames receive it
 WXL_ARGS_END(wxl_chat_args)
+
+/**
+ * @brief An addon message of the server, as the client delivers it to the interface as
+ * CHAT_MSG_ADDON.
+ *
+ * A chat message in the addon language (0xFFFFFFFF) is not shown: the client splits its text at
+ * the first tab into the prefix and the message and fires CHAT_MSG_ADDON with them. Raised just
+ * before it does, with what the interface receives, and only then: a message the client drops
+ * raises nothing (one from an ignored player, a message with bytes left over), and one it holds
+ * until it knows the sender's name is raised when it delivers it, with that name. The spam
+ * filter and the UTF-8 check do not apply to addon messages. The strings are valid for the call
+ * only.
+ */
+WXL_ARGS(wxl_chat_addon_args)
+WXL_ARGS_FIELD(wxl_chat_addon_args, type, u32)          ///< the CHAT_MSG_* code it came as: 2 party, 3 raid, 4 guild, 7 whisper, 44 battleground, ...
+WXL_ARGS_FIELD(wxl_chat_addon_args, sender, handle)     ///< WXL_HANDLE_NONE when the sender is not in view
+WXL_ARGS_FIELD(wxl_chat_addon_args, sender_guid, guid)
+WXL_ARGS_FIELD(wxl_chat_addon_args, sender_name, str)   ///< the name CHAT_MSG_ADDON carries; empty when the client has none
+WXL_ARGS_FIELD(wxl_chat_addon_args, prefix, str)        ///< the text before the first tab
+WXL_ARGS_FIELD(wxl_chat_addon_args, text, str)          ///< the text after it; empty without a tab
+WXL_ARGS_FIELD(wxl_chat_addon_args, channel, str)       ///< "PARTY", "RAID", "GUILD", "WHISPER", "BATTLEGROUND" or "UNKNOWN"
+WXL_ARGS_FIELD(wxl_chat_addon_args, gm, bool)           ///< WXL_TRUE for SMSG_GM_MESSAGECHAT
+WXL_ARGS_END(wxl_chat_addon_args)
 
 /**
  * @brief The local player sending a message from the interface: SendChatMessage or

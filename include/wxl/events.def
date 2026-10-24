@@ -278,7 +278,7 @@ WXL_EVENT(Glue, GlueEnterWorld,     69, wxl_enter_world_args)
 
 // --- Chat: what is said ---------------------------------------------------------------------
 
-/** A chat message arrived: SMSG_MESSAGECHAT or SMSG_GM_MESSAGECHAT, as the client shows it; nothing for one it drops. */
+/** A chat message of the server (SMSG_MESSAGECHAT, SMSG_GM_MESSAGECHAT) became a line the client shows, as it shows it; nothing for one it drops. */
 WXL_EVENT(Chat, ChatMessage, 70, wxl_chat_args)
 /** The local player sends a chat or addon message from the interface. A handler may suppress it. */
 WXL_EVENT(Chat, ChatSend,    71, wxl_chat_send_args)
@@ -287,6 +287,11 @@ WXL_EVENT(Chat, ChatSend,    71, wxl_chat_send_args)
 
 /** Power was given or drained: SMSG_SPELLENERGIZELOG, or an energize or drain tick of SMSG_PERIODICAURALOG. */
 WXL_EVENT(Combat, CombatEnergize, 72, wxl_combat_energize_args)
+
+// --- Chat, continued ------------------------------------------------------------------------
+
+/** An addon message of the server is delivered to the interface as CHAT_MSG_ADDON, with its prefix, text and sender. */
+WXL_EVENT(Chat, ChatAddonMessage, 73, wxl_chat_addon_args)
 
 // Give back whatever was defaulted above, so the file can be included again right after with a
 // different selector. What the consumer defined itself is left alone: undefining it here would

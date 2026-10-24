@@ -749,13 +749,15 @@ A few to start from:
 | `AssetScript` | `OnFileOpen` | `path`, `redirect` | a file is about to be opened; answer with another path |
 | `LuaScript` | `OnUiEvent` | `index`, `name`, `format`, `values`, `value_count` | the client fires an event to its interface (`PLAYER_TARGET_CHANGED`...) |
 | `PlayerScript` | `OnPlayerMoneyChanged` | `player`, `previous`, `current` | your money changed, in copper (abi `0.1.6`) |
-| `ChatScript` | `OnChatMessage` | `type`, `language`, `sender`, `sender_guid`, `sender_name`, ... `text`, ... | a chat message arrived (abi `0.1.6`) |
+| `ChatScript` | `OnChatMessage` | `type`, `language`, `sender`, `sender_guid`, `sender_name`, ... `text`, ... | a chat message of the server became a line the chat shows (abi `0.1.6`; `line_id`, `shown_text` `0.1.7`) |
+| | `OnChatAddonMessage` | `type`, `sender`, `sender_guid`, `sender_name`, `prefix`, `text`, `channel`, `gm` | an addon message reached the interface as `CHAT_MSG_ADDON` (abi `0.1.7`) |
 | `GlueScript` | `OnGlueScreenChanged` | `screen`, `previous` | the login screens moved on: `"login"`, `"charselect"`... (abi `0.1.6`) |
 
 The families `PlayerScript`, `GlueScript` and `ChatScript`, and `WorldScript`'s `OnZoneChanged`,
 `OnMouseoverChanged` and `OnCVarChanged`, came with `0.1.6`: a mod that uses one asks for
 `"abi": "0.1.6"`, so that an older runtime refuses it with a reason rather than failing at the
-unknown name.
+unknown name. `ChatScript`'s `OnChatAddonMessage`, and `OnChatMessage`'s last two parameters, came
+with `0.1.7`: a mod that uses them asks for `"abi": "0.1.7"`.
 
 Not every runtime raises every event. Subscribing to one that yours does not raise logs a warning
 naming it, and the handler never runs.
