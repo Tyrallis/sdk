@@ -29,6 +29,7 @@
 #include "wxl/host/manifest.hpp"
 #include "wxl/host/mod_host.hpp"
 #include "wxl/host/registry.hpp"
+#include "wxl/reflect.hpp"
 
 namespace fs = std::filesystem;
 using namespace wxl::host;
@@ -298,6 +299,25 @@ namespace
     }
 
 
+    // --- a binary built against older headers -------------------------------------------------
+
+    /// What the headers before the newest event's version carried, as wxl_mod_info reports it.
+    constexpr uint32_t kOlderFeature = wxl::reflect::SinceOf(WXL_EV_ChatMessage).feature - 1;
+
+    wxl_mod_info g_olderInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
+                             "wxl.older", "Older", 1, kOlderFeature};
+    wxl_subscription g_olderNew = WXL_SUBSCRIPTION_NONE;
+    wxl_subscription g_olderOld = WXL_SUBSCRIPTION_NONE;
+
+    const wxl_mod_info* WXL_CALL OlderQuery(void) { return &g_olderInfo; }
+    wxl_result WXL_CALL OlderLoad(const wxl_host* host)
+    {
+        g_olderNew = host->subscribe(WXL_EV_ChatMessage, &Record, nullptr, 0);
+        host->subscribe(WXL_EV_ChatMessage, &Record, nullptr, 0);
+        g_olderOld = host->subscribe(WXL_EV_Update, &Record, nullptr, 0);
+        return WXL_OK;
+    }
+
     // --- mods that fault, for the crash guard ----------------------------------------------
 
     wxl_mod_info g_steadyInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
@@ -513,7 +533,6 @@ int main(int argc, char** argv)
             "\"requires\": [ { \"service\": \"wxl.object\", \"version\": 1 } ],\n"
             "  \"optional\": [ { \"service\": \"wxl.script\", \"version\": 2 } ],\n"
             "  \"loadAfter\": [ \"wxl.base\", \"wxl.other\" ],\n"
-            "  \"lua\": \"main.lua\",\n"
             "  \"description\": \"An example.\",\n"
             "  \"authors\": [ \"a\", \"b\" ],\n"
             "  \"homepage\": \"https://example.test\",\n"
@@ -539,7 +558,7 @@ int main(int argc, char** argv)
         Check(manifest.optional.size() == 1 && manifest.optional[0].version == 2, "optional is read");
         Check(manifest.load_after.size() == 2 && manifest.load_after[1] == "wxl.other",
               "loadAfter is read");
-        Check(manifest.lua == "main.lua" && manifest.description == "An example." &&
+        Check(manifest.lua.empty() && manifest.description == "An example." &&
                   manifest.authors.size() == 2 && manifest.homepage == "https://example.test",
               "the descriptive fields are read");
 
@@ -553,6 +572,11 @@ int main(int argc, char** argv)
                       "'binaries' is missing"),
               "without either, binaries is still required");
         Check(Rejects(ManifestText("wxl.x", "\"lua\": \"\""), "at least 1"), "an empty lua entry is refused");
+        std::string both;
+        Check(Rejects(ManifestText("wxl.x", "\"lua\": \"init.lua\""), "'binaries' and 'lua' cannot both be given",
+                      &both) &&
+                  Contains(both, "line 6") && Contains(both, "would run twice"),
+              "a manifest with both binaries and lua is refused, at the binaries' line, saying why");
 
         Manifest minimal;
         Check(ParseManifest(ManifestText("wxl.min"), minimal, error), "a minimal manifest parses");
@@ -1192,6 +1216,48 @@ int main(int argc, char** argv)
 
         host.LoadAll();
         Check(host.Loaded().empty(), "LoadAll is a one-shot");
+    }
+
+    Section("a binary's headers bound the events it subscribes to");
+    if (scratch.empty())
+    {
+        std::printf("  (skipped: no scratch directory given)\n");
+    }
+    else
+    {
+        const fs::path mods = scratch / "older";
+        fs::remove_all(mods);
+        const std::string older = std::to_string(WXL_ABI_VERSION_MAJOR) + "." +
+                                  std::to_string(WXL_ABI_VERSION_MINOR) + "." + std::to_string(kOlderFeature);
+        WriteFile(mods / "older" / "mod.json", ManifestText("wxl.older", "", older.c_str(), "older.dll"));
+
+        FakeLoader loader;
+        loader.images.push_back({"older.dll", Fn(&OlderQuery), Fn(&OlderLoad), nullptr, nullptr});
+        CaptureSink sink;
+        HostConfig  config;
+        config.mods_directory = mods;
+        config.runtime_id     = "test";
+        config.runtime_name   = "Test runtime";
+        config.log_sink       = &sink;
+        config.events         = AllEvents();
+        config.loader         = &loader;
+
+        ModHost host(config);
+        host.LoadAll();
+        Check(host.Loaded().size() == 1 && host.Loaded()[0].built_abi.feature == kOlderFeature,
+              "the binary loads, its built abi kept");
+        Check(g_olderNew == WXL_SUBSCRIPTION_NONE && g_olderOld != WXL_SUBSCRIPTION_NONE,
+              "an event newer than its headers is refused, an older one is not");
+        const AbiVersion  since = EventSince(WXL_EV_ChatMessage);
+        const std::string line  = "[WARN ] [host] mod wxl.older subscribed to ChatMessage, which came with abi " +
+                                 AbiText(since) + "; its binary was built against abi " + older +
+                                 ", whose headers do not have that event: the subscription is refused";
+        Check(CountLines(sink.lines, line.c_str()) == 1, "the refusal is logged once, naming both versions");
+        Check(AtLeast(AbiVersion{0, 1, 6}, AbiVersion{0, 1, 5}) && AtLeast(AbiVersion{0, 1, 5}, AbiVersion{0, 1, 5}) &&
+                  !AtLeast(AbiVersion{0, 1, 5}, AbiVersion{0, 1, 6}) && AtLeast(AbiVersion{0, 2, 0}, AbiVersion{0, 1, 9}) &&
+                  !AtLeast(AbiVersion{0, 9, 9}, AbiVersion{1, 0, 0}),
+              "versions compare major, then minor, then feature");
+        host.Shutdown();
     }
 
     Section("crash guard");

@@ -50,6 +50,12 @@ namespace wxl::host
      */
     std::string AbiRefusal(const AbiVersion& needed, const AbiVersion& served);
 
+    /// Whether @p version is @p floor or comes after it, in the order versions follow each other.
+    bool AtLeast(const AbiVersion& version, const AbiVersion& floor);
+
+    /// The version of the contract that brought an event, from events.def's WXL_EVENTS_SINCE rows.
+    AbiVersion EventSince(wxl_event event);
+
     /**
      * @brief The checks a manifest alone can answer.
      *

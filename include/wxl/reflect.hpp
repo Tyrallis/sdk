@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 WarcraftXL
 //
-// The event contract as data: every event with its family, name and args, and every member of
-// its args with what it carries. Generated from events.def and fields.def. A handler's
-// parameters are the members IsExtent leaves, in this order.
+// The event contract as data: every event with its family, name and args, the version of the
+// contract that brought it, and every member of its args with what it carries. Generated from
+// events.def and fields.def. A handler's parameters are the members IsExtent leaves, in this
+// order.
 
 #pragma once
 
@@ -45,6 +46,21 @@ namespace wxl::reflect
         /// The member holding a bytes field's length or a buffer field's capacity; null otherwise.
         const char* extent;
         uint32_t    extent_offset; ///< offsetof that member, 0 when there is none
+    };
+
+    /// A version of the contract, major.minor.feature, as abi.h numbers it.
+    struct Version
+    {
+        uint32_t major;
+        uint32_t minor;
+        uint32_t feature;
+    };
+
+    /// A WXL_EVENTS_SINCE row of events.def: the version that brought the events from `first` on.
+    struct Since
+    {
+        Version  version;
+        uint32_t first; ///< the id of the first event it brought
     };
 
     /// One event of the contract.
@@ -124,6 +140,12 @@ namespace wxl::reflect
 #include "wxl/events.def"
 #undef WXL_EVENT
         };
+
+        inline constexpr Since kSince[] = {
+#define WXL_EVENTS_SINCE(major, minor, feature, first) { { major, minor, feature }, first },
+#include "wxl/events.def"
+#undef WXL_EVENTS_SINCE
+        };
     }
 
     /// Every member row of fields.def, in table order.
@@ -138,6 +160,23 @@ namespace wxl::reflect
     {
         *count = uint32_t(sizeof detail::kEvents / sizeof detail::kEvents[0]);
         return detail::kEvents;
+    }
+
+    /// Every WXL_EVENTS_SINCE row of events.def, in table order, which is ascending.
+    inline const Since* Sinces(uint32_t* count)
+    {
+        *count = uint32_t(sizeof detail::kSince / sizeof detail::kSince[0]);
+        return detail::kSince;
+    }
+
+    /// The version of the contract that brought an event: the row of events.def with the
+    /// highest first id at or below this one.
+    constexpr Version SinceOf(wxl_event id)
+    {
+        Version version = detail::kSince[0].version;
+        for (const Since& since : detail::kSince)
+            if (since.first <= uint32_t(id)) version = since.version;
+        return version;
     }
 
     /// The event with this id, or null.

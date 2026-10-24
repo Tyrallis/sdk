@@ -16,6 +16,20 @@
 // happens to be built is published by that runtime as a service of its own, not added below.
 //
 // Handlers run on the client's main thread, except where a row says it may be raised elsewhere.
+//
+// Which version of the contract brought which events is written once, in rows of a second shape
+// placed among the events:
+//
+//   WXL_EVENTS_SINCE(major, minor, feature, first)
+//
+// abi major.minor.feature brought the events from id `first` on. The row sits right above the
+// event of id `first`; since ids are appended, every event from that id up to the next such row
+// came with that version. A feature that appends events opens them with one of these rows, the
+// version abi.h is raised to and the first new id; a feature that appends no event adds none.
+// wxl/reflect.hpp reads them (wxl::reflect::Since), so that wxl.lua refuses a script mod's
+// subscription to an event newer than the "abi" its manifest asks for, and the host one from a
+// binary built against headers that did not have the event; tests/reflect.cpp checks that each
+// row sits above its first event and that none is newer than abi.h.
 
 // Two ways to consume it, and nothing to remember:
 //
@@ -28,13 +42,17 @@
 #if !defined(WXL_EVENT) && !defined(WXL_EVENT_World) && !defined(WXL_EVENT_Render) && \
     !defined(WXL_EVENT_Object) && !defined(WXL_EVENT_Asset) && !defined(WXL_EVENT_Net) && \
     !defined(WXL_EVENT_Lua) && !defined(WXL_EVENT_Combat) && !defined(WXL_EVENT_Player) && \
-    !defined(WXL_EVENT_Glue) && !defined(WXL_EVENT_Chat)
-    #error "define WXL_EVENT(family, name, id, args) or a WXL_EVENT_<family> before events.def"
+    !defined(WXL_EVENT_Glue) && !defined(WXL_EVENT_Chat) && !defined(WXL_EVENTS_SINCE)
+    #error "define WXL_EVENT(family, name, id, args), a WXL_EVENT_<family> or WXL_EVENTS_SINCE before events.def"
 #endif
 
 #ifndef WXL_EVENT
     #define WXL_EVENT(family, name, id, args) WXL_EVENT_##family(name, id, args)
     #define WXL_EVENT_DEFAULTED
+#endif
+#ifndef WXL_EVENTS_SINCE
+    #define WXL_EVENTS_SINCE(major, minor, feature, first)
+    #define WXL_EVENTS_SINCE_DEFAULTED
 #endif
 #ifndef WXL_EVENT_World
     #define WXL_EVENT_World(name, id, args)
@@ -78,6 +96,9 @@
 #endif
 
 // --- World: the game's own facts -----------------------------------------------------------
+
+// Everything numbered before the three-part version came with the first contract under it.
+WXL_EVENTS_SINCE(0, 1, 5, 0)
 
 /** The logic tick advanced. */
 WXL_EVENT(World, Update,        0, wxl_update_args)
@@ -238,6 +259,8 @@ WXL_EVENT(Combat, CombatMiss,        54, wxl_combat_miss_args)
 
 // --- World, continued: where the player is, what the mouse is over, the console -----------
 
+WXL_EVENTS_SINCE(0, 1, 6, 55)
+
 /** The player's zone, subzone or indoor state changed, as the client announces it to its interface. */
 WXL_EVENT(World, ZoneChanged,      55, wxl_zone_args)
 /** The object under the mouse changed: a unit, a game object, or nothing. */
@@ -300,6 +323,10 @@ WXL_EVENT(Chat, ChatAddonMessage, 73, wxl_chat_addon_args)
 #ifdef WXL_EVENT_DEFAULTED
     #undef WXL_EVENT
     #undef WXL_EVENT_DEFAULTED
+#endif
+#ifdef WXL_EVENTS_SINCE_DEFAULTED
+    #undef WXL_EVENTS_SINCE
+    #undef WXL_EVENTS_SINCE_DEFAULTED
 #endif
 #ifdef WXL_EVENT_World_DEFAULTED
     #undef WXL_EVENT_World

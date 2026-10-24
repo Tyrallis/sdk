@@ -182,6 +182,21 @@ namespace wxl::host
                                                       void* user, int32_t priority)
     {
         if (!current_) return WXL_SUBSCRIPTION_NONE;
+
+        // A binary cannot know an event its headers did not carry: refused with a reason rather
+        // than handed args it would read with a layout it never had.
+        AbiVersion built;
+        if (handler && static_cast<uint32_t>(event) < static_cast<uint32_t>(WXL_EV_COUNT) &&
+            current_->BuiltAbiOf(t_currentMod, built))
+        {
+            const AbiVersion since = EventSince(event);
+            if (!AtLeast(built, since))
+            {
+                current_->WarnNewer(t_currentMod, event, built, since);
+                return WXL_SUBSCRIPTION_NONE;
+            }
+        }
+
         const wxl_subscription token =
             current_->events_.Subscribe(event, handler, user, priority, t_currentMod);
         if (token == WXL_SUBSCRIPTION_NONE && handler &&
@@ -221,6 +236,36 @@ namespace wxl::host
         if (const LoadedMod* mod = ModOf(token)) return mod->id;
         if (token == loaded_.size() + 1) return loadingId_;
         return std::string();
+    }
+
+    bool ModHost::BuiltAbiOf(ModToken token, AbiVersion& out) const
+    {
+        if (const LoadedMod* mod = ModOf(token))
+        {
+            out = mod->built_abi;
+            return true;
+        }
+        if (token == loaded_.size() + 1 && loadingAbiKnown_)
+        {
+            out = loadingAbi_;
+            return true;
+        }
+        return false;
+    }
+
+    void ModHost::WarnNewer(ModToken token, wxl_event event, const AbiVersion& built,
+                            const AbiVersion& since)
+    {
+        {
+            std::lock_guard<std::mutex> lock(stateLock_);
+            if (!warnedNewer_.insert({token, static_cast<uint32_t>(event)}).second) return;
+        }
+        logger_.Warn(kHostTag, "mod " + IdOf(token) + " subscribed to " + EventName(event) +
+                                   ", which came with abi " + AbiText(since) +
+                                   "; its binary was built against abi " + AbiText(built) +
+                                   ", whose headers do not have that event: the subscription is "
+                                   "refused. Rebuild it against headers of " + AbiText(since) +
+                                   " or later");
     }
 
     void ModHost::WarnUnraised(ModToken token, wxl_event event)
@@ -356,8 +401,13 @@ namespace wxl::host
         struct Loading
         {
             std::string& id;
-            ~Loading() { id.clear(); }
-        } loading{loadingId_};
+            bool&        abiKnown;
+            ~Loading()
+            {
+                id.clear();
+                abiKnown = false;
+            }
+        } loading{loadingId_, loadingAbiKnown_};
         loadingId_ = manifest.id;
 
         // The first mod code to run, and by contract side-effect free.
@@ -380,8 +430,14 @@ namespace wxl::host
             return;
         }
 
+        const AbiVersion built{query.result->abi_major, query.result->abi_minor,
+                               query.result->abi_feature};
+        loadingAbi_      = built;
+        loadingAbiKnown_ = true;
+
         LoadedMod loaded;
         loaded.id             = manifest.id;
+        loaded.built_abi      = built;
         loaded.name           = query.result->name ? query.result->name : manifest.name;
         loaded.version        = query.result->version;
         loaded.directory_name = candidate.directory_name;

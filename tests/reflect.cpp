@@ -108,6 +108,30 @@ namespace
 #undef WXL_EVENT
     };
 
+    /// events.def in table order, both shapes: a WXL_EVENTS_SINCE row as its first id, an event
+    /// as its id, told apart by `since`.
+    struct Row
+    {
+        bool     since;
+        uint32_t id;
+    };
+
+    constexpr Row kRows[] = {
+#define WXL_EVENT(family, name, id, args)              { false, id },
+#define WXL_EVENTS_SINCE(major, minor, feature, first) { true, first },
+#include "wxl/events.def"
+#undef WXL_EVENTS_SINCE
+#undef WXL_EVENT
+    };
+
+    /// a < b, in the order versions follow each other.
+    bool Before(const wxl::reflect::Version& a, const wxl::reflect::Version& b)
+    {
+        if (a.major != b.major) return a.major < b.major;
+        if (a.minor != b.minor) return a.minor < b.minor;
+        return a.feature < b.feature;
+    }
+
     char LetterOf(Kind kind)
     {
         switch (kind)
@@ -197,6 +221,61 @@ int main()
                 std::snprintf(what, sizeof what, "%s's rows are split", fields[i].args);
                 Check(false, what);
             }
+
+    std::printf("each event knows the version that brought it\n");
+    {
+        uint32_t                   sinceCount = 0;
+        const wxl::reflect::Since* sinces     = wxl::reflect::Sinces(&sinceCount);
+        Check(sinceCount > 0 && sinces[0].first == 0, "a WXL_EVENTS_SINCE row covers id 0");
+        for (uint32_t i = 1; i < sinceCount; ++i)
+        {
+            char what[200];
+            std::snprintf(what, sizeof what, "WXL_EVENTS_SINCE(%u, %u, %u, %u) comes after the row before it, "
+                          "in version and in id", sinces[i].version.major, sinces[i].version.minor,
+                          sinces[i].version.feature, sinces[i].first);
+            Check(Before(sinces[i - 1].version, sinces[i].version) && sinces[i - 1].first < sinces[i].first, what);
+        }
+        const wxl::reflect::Version abi{WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR, WXL_ABI_VERSION_FEATURE};
+        Check(sinceCount > 0 && !Before(abi, sinces[sinceCount - 1].version),
+              "no WXL_EVENTS_SINCE row is newer than abi.h");
+
+        constexpr size_t rowCount = sizeof kRows / sizeof kRows[0];
+        uint32_t         seen     = 0;
+        for (size_t i = 0; i < rowCount; ++i)
+        {
+            if (!kRows[i].since) continue;
+            char what[200];
+            std::snprintf(what, sizeof what, "WXL_EVENTS_SINCE(..., %u) sits right above the event of id %u",
+                          kRows[i].id, kRows[i].id);
+            Check(i + 1 < rowCount && !kRows[i + 1].since && kRows[i + 1].id == kRows[i].id, what);
+            ++seen;
+        }
+        Check(seen == sinceCount, "one Since per WXL_EVENTS_SINCE row");
+
+        // Below each row, every event has an id at or past its first: an event appended above
+        // the row of its version would be counted to an older one.
+        uint32_t floor = 0;
+        for (size_t i = 0; i < rowCount; ++i)
+        {
+            if (kRows[i].since)
+            {
+                floor = kRows[i].id;
+                continue;
+            }
+            char what[200];
+            std::snprintf(what, sizeof what, "event %u sits below WXL_EVENTS_SINCE(..., %u), so its id "
+                          "is at least that", kRows[i].id, floor);
+            Check(kRows[i].id >= floor, what);
+        }
+
+        constexpr wxl::reflect::Version first = wxl::reflect::SinceOf(WXL_EV_Update);
+        static_assert(first.major == 0 && first.minor == 1 && first.feature == 5,
+                      "Update came with the first contract");
+        Check(wxl::reflect::SinceOf(WXL_EV_CombatMiss).feature == 5 &&
+                  wxl::reflect::SinceOf(WXL_EV_ZoneChanged).feature == 6 &&
+                  wxl::reflect::SinceOf(WXL_EV_ChatMessage).feature == 6,
+              "CombatMiss came with 0.1.5, ZoneChanged and ChatMessage with 0.1.6");
+    }
 
     std::printf("lookups\n");
     const wxl::reflect::Event* death = wxl::reflect::Find("Object", "UnitDeath");

@@ -7,6 +7,8 @@
 #include <cstring>
 #include <filesystem>
 
+#include "wxl/reflect.hpp"
+
 namespace wxl::host
 {
     const char* VerdictName(Verdict verdict)
@@ -55,6 +57,19 @@ namespace wxl::host
             return wanted + ", newer than this runtime's " + has + ": it uses what was appended after " +
                    has;
         return std::string();
+    }
+
+    bool AtLeast(const AbiVersion& version, const AbiVersion& floor)
+    {
+        if (version.major != floor.major) return version.major > floor.major;
+        if (version.minor != floor.minor) return version.minor > floor.minor;
+        return version.feature >= floor.feature;
+    }
+
+    AbiVersion EventSince(wxl_event event)
+    {
+        const reflect::Version since = reflect::SinceOf(event);
+        return AbiVersion{since.major, since.minor, since.feature};
     }
 
     namespace

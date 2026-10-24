@@ -44,7 +44,9 @@ namespace wxl::host
         LogSink*      log_sink    = nullptr; ///< not owned; null drops every line
         wxl_log_level log_minimum = WXL_LOG_TRACE;
 
-        /// The events this runtime raises. A subscribe to any other gets WXL_SUBSCRIPTION_NONE.
+        /// The events this runtime raises. A subscribe to any other gets WXL_SUBSCRIPTION_NONE,
+        /// and so does one from a mod whose binary was built against headers older than the
+        /// event (wxl_mod_info's abi against events.def's WXL_EVENTS_SINCE rows).
         std::vector<wxl_event> events;
 
         /// Published before any mod loads, so a manifest's `requires` can be answered.
@@ -64,6 +66,7 @@ namespace wxl::host
         std::filesystem::path directory;
         std::filesystem::path binary;
         Manifest              manifest;
+        AbiVersion            built_abi;          ///< what wxl_mod_info reports: the headers it was built against
         bool                  has_stage  = false; ///< exports wxl_mod_stage
         bool                  has_unload = false; ///< exports wxl_mod_unload
         bool                  disabled   = false; ///< faulted; no more of its code is called
@@ -217,8 +220,17 @@ namespace wxl::host
         /// raises that event: the handler is real code that will never run.
         void WarnUnraised(ModToken token, wxl_event event);
 
+        /// Logs, once per mod and event, a subscription refused because the event is newer than
+        /// the headers the mod's binary was built against.
+        void WarnNewer(ModToken token, wxl_event event, const AbiVersion& built,
+                       const AbiVersion& since);
+
         /// The id of a loaded mod, or of the one loading; empty for nobody.
         std::string IdOf(ModToken token) const;
+
+        /// The abi a loaded mod's binary, or the loading one's once its query answered, was built
+        /// against. False for nobody, and for a mod still inside wxl_mod_query.
+        bool BuiltAbiOf(ModToken token, AbiVersion& out) const;
 
         void Refuse(const std::string& id, const std::string& directoryName,
                     const std::filesystem::path& directory, Verdict verdict,
@@ -243,13 +255,16 @@ namespace wxl::host
         std::vector<RefusedMod> refused_;
         bool                    loadedAll_   = false;
         std::string             loadingId_;  ///< the mod inside wxl_mod_query or wxl_mod_load
+        AbiVersion              loadingAbi_;           ///< its built abi, once wxl_mod_query answered
+        bool                    loadingAbiKnown_ = false;
         DisableFn               disableFn_   = nullptr;
         void*                   disableUser_ = nullptr;
         std::thread::id         mainThread_;
 
-        mutable std::mutex                              stateLock_; ///< guards the two below
+        mutable std::mutex                              stateLock_; ///< guards the three below
         std::vector<std::pair<ModToken, std::string>>   pendingDisables_;
         std::set<std::pair<ModToken, uint32_t>>         warnedUnraised_;
+        std::set<std::pair<ModToken, uint32_t>>         warnedNewer_;
         std::atomic<bool>                               disablesPending_{false};
     };
 } // namespace wxl::host

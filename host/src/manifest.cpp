@@ -179,12 +179,19 @@ namespace wxl::host
                     !Require("version", seenVersion_) || !Require("abi", seenAbi_))
                     return false;
 
-                // A script mod has no binary: its code is the "lua" entry.
+                // A mod is native or a script, never both: its code is the "binaries" or the
+                // "lua" entry, and both together would run twice.
                 if (!seenBinaries_ && out_.lua.empty())
                 {
                     error_ = "required field 'binaries' is missing (a script mod names 'lua' instead)";
                     return false;
                 }
+                if (seenBinaries_ && !out_.lua.empty())
+                    return Fail(*binaries_, "'binaries' and 'lua' cannot both be given: a mod is "
+                                            "either a binary the runtime loads or a Lua entry "
+                                            "wxl.lua runs, and with both its code would run twice. "
+                                            "Keep 'binaries' for a C++ mod, 'lua' for a Lua mod, "
+                                            "or make two mods");
                 return true;
             }
 
@@ -357,6 +364,7 @@ namespace wxl::host
                 if (key == "binaries")
                 {
                     seenBinaries_ = true;
+                    binaries_     = &value;
                     return ReadBinaries(value);
                 }
                 if (key == "requires") return ReadServiceRefs(value, key, out_.required);
@@ -381,6 +389,7 @@ namespace wxl::host
             bool               seenVersion_  = false;
             bool               seenAbi_      = false;
             bool               seenBinaries_ = false;
+            const json::Value* binaries_     = nullptr;
         };
     } // namespace
 
