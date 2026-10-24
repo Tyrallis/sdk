@@ -4,7 +4,7 @@
   "name": "Lua hello",
   "version": "1.0.0",
   "abi": "0.1.5",
-  "description": "A Lua mod: it watches the world, answers two events and reloads when edited.",
+  "description": "A Lua mod: it counts deaths, reports targets, answers two events and reloads when edited.",
   "lua": "init.lua",
   "optional": [
     { "service": "wxl.object", "version": 1 }

@@ -229,6 +229,7 @@ end)
 
 -- objects
 Observe("ObjectScript", "OnTargetChanged", function(previous, current)
+    if not current or current:Type() ~= "Player" then return end
     print("target " .. tostring(previous) .. " -> " .. current:Name() .. " " .. current:Type() ..
           " hp " .. current:Health() .. "/" .. current:MaxHealth() .. " target " .. tostring(current:Target()))
     local hp, why = current:Target():Health()
@@ -373,7 +374,8 @@ int main(int argc, char** argv)
         host.Stage(WXL_STAGE_EARLY);
         Check(!sink.Has("probe init v1"), "onInit waits for the ready stage");
         host.Stage(WXL_STAGE_READY);
-        Check(sink.Has("[wxl.lua-hello] hello from Lua hello on Test runtime"), "the example's onInit ran, through require");
+        Check(sink.Has(("[wxl.lua-hello] hello from Lua hello on Test runtime, abi " + std::string(kAbi)).c_str()),
+              "the example's onInit ran and read wxl.mod and wxl.runtime");
         Check(sink.Has("[wxl.probe] probe init v1"), "onInit runs at WXL_STAGE_READY");
         Check(sink.Has("[bare-folder-one] bare init bare-folder-one 0.0.0"), "the manifest-less mod runs too");
 
@@ -393,6 +395,11 @@ int main(int argc, char** argv)
                   sink.Has("boom 530") && sink.Has("stack traceback:"),
               "an error names the mod, the event and carries a traceback");
         Check(sink.Has("[wxl.probe] after-error 1,2,3"), "the handler after it still runs, and reads a vec3");
+        Check(sink.Has("[wxl.lua-hello] first world: map 530 at 1.0, 2.0, 3.0"),
+              "the example's Observe of OnWorldEnter reads a number and a vec3");
+        host.Raise(WXL_EV_WorldEnter, &enter);
+        Check(sink.Count("[wxl.lua-hello] first world") == 1,
+              "and Unobserve from inside that handler stops it after the first world");
 
         // Values outlive the call: they are copies.
         host.Raise(WXL_EV_WorldLeave, &enter);
@@ -428,10 +435,13 @@ int main(int argc, char** argv)
         // The example's Override returning true.
         wxl_bool         kept = WXL_FALSE;
         const char       body[] = "abcd";
-        wxl_message_args message{0x1234, body, 4, &kept};
+        wxl_message_args message{0x33D, body, 4, &kept};
         host.Raise(WXL_EV_MessageReceived, &message);
-        Check(kept == WXL_TRUE && sink.Has("[wxl.lua-hello] opcode 0x1234 with 4 bytes, kept from the client"),
+        Check(kept == WXL_TRUE && sink.Has("[wxl.lua-hello] message of the day hidden (4 bytes)"),
               "returning true from an Override writes WXL_TRUE; bytes arrive as a string");
+        host.Raise(WXL_EV_MessageReceived, &message);
+        Check(sink.Count("[wxl.lua-hello] message of the day hidden") == 1,
+              "the answer parameter carries what was decided before the handler");
         kept = WXL_FALSE;
         message.opcode = 0x1;
         host.Raise(WXL_EV_MessageReceived, &message);
@@ -446,6 +456,16 @@ int main(int argc, char** argv)
               "returning a string from an Override fills the buffer");
         Check(sink.Has("[wxl.probe] file open Interface\\Icons\\INV_Misc_QuestionMark.blp redirect Interface\\Icons\\INV_Misc_Coin_01.blp"),
               "an Observe of the same event sees the buffer an earlier Override filled");
+        const char*        lower = "interface\\icons\\inv_misc_questionmark.blp";
+        wxl_file_open_args openLower{wxl_str{lower, static_cast<uint32_t>(std::strlen(lower))}, redirect, sizeof redirect};
+        redirect[0] = '\0';
+        host.Raise(WXL_EV_FileOpen, &openLower);
+        Check(std::strcmp(redirect, "Interface\\Icons\\INV_Misc_Coin_01.blp") == 0,
+              "the example compares the path without regard to case");
+        std::strcpy(redirect, "Interface\\Icons\\Other.blp");
+        host.Raise(WXL_EV_FileOpen, &open);
+        Check(std::strcmp(redirect, "Interface\\Icons\\Other.blp") == 0,
+              "and leaves a path an earlier handler wrote");
         const char*        longPath = "long";
         wxl_file_open_args tooLong{wxl_str{longPath, 4}, redirect, sizeof redirect};
         redirect[0] = '\0';
@@ -483,6 +503,14 @@ int main(int argc, char** argv)
         Check(sink.Has("[wxl.probe] target nil -> Thorgrim Player hp 0/5000 target Unit(0x000000000000002B)"),
               "handle members are objects with the generated getters and the hand-written ones");
         Check(sink.Has("[wxl.probe] boar target 90 nil"), "a read through Target() reads the boar");
+        Check(sink.Has("[wxl.lua-hello] target Thorgrim: 0/5000 health"), "the example reads its target's health");
+        const wxl_target_args toChest{wxltest::FakeObjects::kPlayer, wxltest::FakeObjects::kChest};
+        host.Raise(WXL_EV_TargetChanged, &toChest);
+        Check(sink.Has("[wxl.lua-hello] target GameObject(0x000000000000002C) has no health: a GameObject has no Health"),
+              "and says why a read gave nothing");
+        const wxl_target_args cleared{wxltest::FakeObjects::kChest, WXL_HANDLE_NONE};
+        host.Raise(WXL_EV_TargetChanged, &cleared);
+        Check(sink.Has("[wxl.lua-hello] target cleared"), "a handle member with no object is nil");
         Check(sink.Has("[wxl.probe] entry nil unsupported"), "a getter the runtime's table does not carry says so");
         Check(sink.Has("[wxl.probe] units in view 1 local Thorgrim guid 0x0000000000000100 same true"),
               "wxl.object lists, finds the local player, resolves a guid, and compares by handle");
@@ -494,7 +522,13 @@ int main(int argc, char** argv)
               "a unit getter on a game object answers nil and why");
         const wxl_unit_args death{wxltest::FakeObjects::kPlayer};
         host.Raise(WXL_EV_UnitDeath, &death);
-        Check(sink.Has("[wxl.lua-hello] Thorgrim died at level 80"), "the example reads a unit from a handle");
+        Check(sink.Has("[wxl.lua-hello] Thorgrim died at level 80 (1 so far)"), "the example reads a unit from a handle");
+        const wxl_unit_args boarDeath{wxltest::FakeObjects::kBoar};
+        host.Raise(WXL_EV_UnitDeath, &boarDeath);
+        host.Raise(WXL_EV_UnitDeath, &death);
+        Check(sink.Has("[wxl.lua-hello] Boar died at level 3 (1 so far)") &&
+                  sink.Has("[wxl.lua-hello] Thorgrim died at level 80 (2 so far)"),
+              "and keeps its tally, from a module, across events");
         int                vm = 0;
         wxl_script_vm_args ready{WXL_SCRIPT_CONTEXT_GAME, &vm};
         host.Raise(WXL_EV_ScriptVmReady, &ready);
@@ -541,7 +575,8 @@ int main(int argc, char** argv)
         Check(sink.Count("[wxl.broken] broken still updates") == 25, "a disabled mod reloaded runs again");
 
         host.Shutdown();
-        Check(sink.Has("[wxl.lua-hello] bye"), "onShutdown runs at WXL_STAGE_SHUTDOWN");
+        Check(sink.Has("[wxl.lua-hello] deaths 3 seen: Thorgrim x2, Boar x1"),
+              "onShutdown runs at WXL_STAGE_SHUTDOWN, with the state the handlers built");
         Check(sink.Has("[host] unloaded wxl.lua") && host.Loaded().empty(), "and wxl.lua unloads");
 
         if (g_failures) sink.Dump();
