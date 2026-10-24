@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
+//
+// wxl.patch as data: one row per member of wxl_patch_api, in member order. The shapes and their
+// columns are described in wxl/services/rows.hpp.
+//
+// Unsafe: a Lua mod reaches it only when its mod.json declares the service.
+
+#ifndef WXL_API
+#error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including patch.def"
+#endif
+
+WXL_API_SERVICE(patch, WXL_PATCH_SERVICE, WXL_PATCH_SERVICE_VERSION, unsafe,
+                "Bytes written into the client's image over the bytes expected there, journaled.")
+
+// An applied write, from apply, undone by restore; a Lua mod's are restored, newest first, when
+// it unloads or reloads, and never because it let go of one.
+WXL_API_RESOURCE(patch, Patch, wxl_patch, WXL_PATCH_NONE)
+
+WXL_API(patch, apply, Apply, Patch,
+        (cstr name, uptr address, bytes expected, bytes replacement, bytes_size size), generated, by_hand,
+        "Writes the replacement bytes at an address that holds the expected ones; refused otherwise.")
+WXL_API_CLOSE(patch, restore, Restore, result, Patch, unloaded,
+              "Puts back the bytes the patch replaced; a mod's are put back, newest first, when it unloads.")
+WXL_API(patch, matches, Matches, boolean, (uptr address, bytes expected, bytes_size size), generated, by_hand,
+        "Whether an address holds the expected bytes right now.")
+WXL_API(patch, find, Find, address, (bytes pattern, bytes_size size, uptr after), generated, by_hand,
+        "The address of a byte pattern in the image's read-only data, after an earlier one or from the start.")

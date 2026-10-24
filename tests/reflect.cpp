@@ -2,6 +2,8 @@
 // Copyright (c) 2026 WarcraftXL
 //
 // The field table against the structs it describes: every member listed, in order, of its kind.
+// The service tables against the service structs: every member listed, in order, with the
+// signature its kinds make.
 
 #include <cstdio>
 #include <cstring>
@@ -12,6 +14,7 @@
 #include "wxl/objects/fields.hpp"
 #include "wxl/reflect.hpp"
 #include "wxl/sdk.hpp"
+#include "wxl/services/rows.hpp"
 
 namespace
 {
@@ -152,6 +155,38 @@ namespace
         }
     }
 }
+
+// Every row's kinds make the member's C type: a header and its table cannot drift.
+namespace service_signatures
+{
+    using namespace wxl::api::kind;
+
+#define WXL_API_SERVICE(svc, name, version, access, doc)
+#define WXL_API_RESOURCE(svc, Name, ctype, none_value)
+#define WXL_API_FIELD(Struct, member, field_kind)                                         \
+    static_assert(std::is_same_v<decltype(Struct::member),                                \
+                                 wxl::api::Value<wxl::api::kind::field_kind>::type>,      \
+                  #Struct "." #member " is not of kind " #field_kind);
+#define WXL_API(svc, member, Name, answer, params, lua, cxx, doc)                              \
+    static_assert(std::is_same_v<decltype(wxl_##svc##_api::member),                       \
+                                 wxl::api::SignatureOf<answer params>>,                   \
+                  "wxl_" #svc "_api::" #member " is not " #answer " " #params);
+#define WXL_API_CLOSE(svc, member, Name, answer, Resource, when, doc)                          \
+    static_assert(std::is_same_v<decltype(wxl_##svc##_api::member),                       \
+                                 wxl::api::SignatureOf<answer(Resource)>>,                \
+                  "wxl_" #svc "_api::" #member " is not " #answer " (" #Resource ")");
+#include "wxl/services/script.def"
+#include "wxl/services/storage.def"
+#include "wxl/services/data.def"
+#include "wxl/services/hook.def"
+#include "wxl/services/hook_raw.def"
+#include "wxl/services/patch.def"
+#undef WXL_API_CLOSE
+#undef WXL_API
+#undef WXL_API_FIELD
+#undef WXL_API_RESOURCE
+#undef WXL_API_SERVICE
+} // namespace service_signatures
 
 int main()
 {
@@ -448,6 +483,72 @@ int main()
           "a bytes field knows where its length is");
     const wxl::reflect::Field* flag = sent ? wxl::reflect::FieldOf(*sent, "suppressed") : nullptr;
     Check(flag && flag->kind == Kind::answer, "and an answer is told apart from a value");
+
+    std::printf("service tables\n");
+    {
+        uint32_t                     serviceCount = 0, rowCount = 0;
+        const wxl::api::ServiceRow*  services     = wxl::api::Services(&serviceCount);
+        const wxl::api::Row*         rows         = wxl::api::Rows(&rowCount);
+        Check(serviceCount == 6, "six service tables: script, storage, data, hook, hook.raw, patch");
+
+        // A service's rows follow each other, from the first member after struct_size to the
+        // last, one function pointer apart: a member missing from its table, or one the table
+        // has twice, breaks the run.
+        uint32_t at = 0;
+        for (uint32_t s = 0; s < serviceCount; ++s)
+        {
+            const wxl::api::ServiceRow& service = services[s];
+            uint32_t expected = uint32_t(sizeof(void*)); // struct_size, padded to a pointer
+            bool     ordered  = true;
+            uint32_t count    = 0;
+            for (; at < rowCount && std::strcmp(rows[at].service, service.id) == 0; ++at, ++count)
+            {
+                if (rows[at].offset != expected) ordered = false;
+                expected = rows[at].offset + uint32_t(sizeof(void*));
+            }
+            const std::string what = std::string("wxl_") + service.id +
+                                     "_api: every member has a row, in member order, and no more";
+            Check(count > 0 && ordered && expected == service.api_size, what.c_str());
+            const std::string named = std::string("wxl.") + service.id + " is published as " + service.name;
+            Check(std::strncmp(service.name, "wxl.", 4) == 0, named.c_str());
+        }
+        Check(at == rowCount, "every row belongs to the table it follows");
+
+        // A resource is handed out by one row and given back by one close row of its service.
+        uint32_t                     resourceCount = 0;
+        const wxl::api::ResourceRow* resources     = wxl::api::Resources(&resourceCount);
+        for (uint32_t r = 0; r < resourceCount; ++r)
+        {
+            uint32_t closers = 0, givers = 0;
+            for (uint32_t i = 0; i < rowCount; ++i)
+            {
+                if (std::strcmp(rows[i].service, resources[r].service) != 0) continue;
+                if (rows[i].closes != wxl::api::When::never &&
+                    std::string(rows[i].params) == std::string("(") + resources[r].name + " self)")
+                    ++closers;
+                if (std::strcmp(rows[i].answer, resources[r].name) == 0) ++givers;
+            }
+            const std::string what = std::string("the ") + resources[r].name +
+                                     " of wxl." + resources[r].service +
+                                     " is handed out by a row and given back by exactly one";
+            Check(closers == 1 && givers >= 1, what.c_str());
+        }
+
+        const wxl::api::Row* add = nullptr;
+        for (uint32_t i = 0; i < rowCount; ++i)
+            if (std::strcmp(rows[i].member, "add_search_path") == 0) add = &rows[i];
+        Check(add && std::strcmp(add->name, "AddSearchPath") == 0 && std::strcmp(add->answer, "result") == 0 &&
+                  std::strcmp(add->params, "(str directory, i32 priority)") == 0 &&
+                  add->lua == wxl::api::Lua::generated && add->cxx == wxl::api::Cxx::generated &&
+                  add->offset == offsetof(wxl_storage_api, add_search_path),
+              "a row reads back as written: its name, kinds, parameter names and columns");
+
+        uint32_t                  fieldCount = 0;
+        const wxl::api::FieldRow* fields     = wxl::api::Fields(&fieldCount);
+        Check(fieldCount == 2 && fields[0].of == &wxl::api::TypeTag<wxl_hook_point> &&
+                  fields[1].offset == offsetof(wxl_hook_point, signature),
+              "a struct's fields name it by type, for a list<struct> answer to find them");
+    }
 
     if (g_failures == 0)
     {

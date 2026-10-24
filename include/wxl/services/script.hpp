@@ -12,7 +12,18 @@
 #include <type_traits>
 
 #include "wxl/sdk.hpp"
+#include "wxl/services/rows.hpp"
 #include "wxl/services/script.h"
+
+namespace wxl::api::facade
+{
+    template <>
+    struct Methods<wxl_script_api>
+    {
+#define WXL_API_TABLE "wxl/services/script.def"
+#include "wxl/services/methods.inc"
+    };
+} // namespace wxl::api::facade
 
 namespace wxl
 {
@@ -111,20 +122,20 @@ namespace wxl
      *
      * Registrations do not survive a context: register again on every ScriptVmReady. Every call
      * answers WXL_E_UNSUPPORTED while the runtime does not publish the service.
+     *
+     * Three methods are rows of script.def, and answer as script.h says:
+     *
+     *   Context()             Expected<wxl_script_context>  which context is live
+     *   RegisterEvent(name)   wxl_result                    declares an event frames can listen to
+     *   Run(chunk, name)      wxl_result                    runs script text in the live context;
+     *                                                       @p name labels it in errors
      */
-    class ScriptService : public detail::Facade<ScriptService, wxl_script_api>
+    class ScriptService : public detail::Facade<ScriptService, wxl_script_api>,
+                          public api::facade::Methods<wxl_script_api>
     {
     public:
         static constexpr const char* kName    = WXL_SCRIPT_SERVICE;
         static constexpr uint32_t    kVersion = WXL_SCRIPT_SERVICE_VERSION;
-
-        /// Which context is live.
-        Expected<wxl_script_context> Context() const
-        {
-            const wxl_script_api* api = Raw();
-            if (!api) return Unexpected{WXL_E_UNSUPPORTED};
-            return static_cast<wxl_script_context>(api->context());
-        }
 
         /// Registers a raw function, with its user pointer.
         wxl_result RegisterFunction(const char* name, wxl_script_fn fn, void* user) const
@@ -182,13 +193,6 @@ namespace wxl
             return RegisterFunction(name, &HandlerThunk<Handler>, handler);
         }
 
-        wxl_result RegisterEvent(const char* name) const
-        {
-            const wxl_script_api* api = Raw();
-            if (!api) return WXL_E_UNSUPPORTED;
-            return api->register_event(name);
-        }
-
         wxl_result FireEvent(const char* name, const wxl_value* args, uint32_t count) const
         {
             const wxl_script_api* api = Raw();
@@ -202,19 +206,11 @@ namespace wxl
             return FireEvent(name, args.begin(), static_cast<uint32_t>(args.size()));
         }
 
-        /// Runs a chunk of script text in the live context; @p name labels it in errors.
-        wxl_result Run(std::string_view chunk, const char* name) const
-        {
-            const wxl_script_api* api = Raw();
-            if (!api) return WXL_E_UNSUPPORTED;
-            return api->run(Str(chunk), name);
-        }
-
     private:
         /// Runs a registered function. What it throws fails the call, with what() as the
         /// script's error, and is logged: the script side never sees a C++ exception.
         template <class F>
-        static void Run(wxl_script_call* call, F&& f)
+        static void Contained(wxl_script_call* call, F&& f)
         {
             ScriptCall      typed(Raw(), call);
             detail::Thrown thrown;
@@ -230,19 +226,20 @@ namespace wxl
         template <void (*Fn)(ScriptCall&)>
         static void WXL_CALL FunctionThunk(wxl_script_call* call, void*)
         {
-            Run(call, [](ScriptCall& typed) { Fn(typed); });
+            Contained(call, [](ScriptCall& typed) { Fn(typed); });
         }
 
         template <auto Method, class C>
         static void WXL_CALL MethodThunk(wxl_script_call* call, void* user)
         {
-            Run(call, [user](ScriptCall& typed) { (static_cast<C*>(user)->*Method)(typed); });
+            Contained(call,
+                      [user](ScriptCall& typed) { (static_cast<C*>(user)->*Method)(typed); });
         }
 
         template <class Handler>
         static void WXL_CALL HandlerThunk(wxl_script_call* call, void* user)
         {
-            Run(call, [user](ScriptCall& typed) { (*static_cast<Handler*>(user))(typed); });
+            Contained(call, [user](ScriptCall& typed) { (*static_cast<Handler*>(user))(typed); });
         }
     };
 } // namespace wxl

@@ -762,6 +762,10 @@ int main()
         Check(!wxl::HookService().Attach("Thing", &ThingDetour, static_cast<ThingFn*>(nullptr)),
               "so is a Hook");
         Check(wxl::NetService().Claim(0x600).IsUnsupported(), "and a claim says why");
+        Check(wxl::DataService::ServeTable("Spell.dbc", "x") == WXL_E_UNSUPPORTED &&
+                  !wxl::DataService::IsLoaded("Spell.dbc") && wxl::DataService::ServedFrom("Spell.dbc").empty() &&
+                  wxl::StorageService::Size("x").IsUnsupported(),
+              "a generated method without its service answers as the hand-written ones did");
         Check(wxl::UiService().AddPanel<&DrawPanel>("P").IsUnsupported(), "as does a panel");
     }
 
@@ -792,6 +796,7 @@ int main()
         host.Table()->publish_service(WXL_HOOK_SERVICE, WXL_HOOK_SERVICE_VERSION, wxltest::FakeHooks::Table());
         host.Table()->publish_service(WXL_HOOK_RAW_SERVICE, WXL_HOOK_RAW_SERVICE_VERSION, wxltest::FakeHooks::RawTable());
         host.Table()->publish_service(WXL_PATCH_SERVICE, WXL_PATCH_SERVICE_VERSION, wxltest::FakePatch::Table());
+        host.Table()->publish_service(WXL_DATA_SERVICE, WXL_DATA_SERVICE_VERSION, wxltest::FakeData::Table());
     }
 
     Section("reads that can fail");
@@ -1131,6 +1136,34 @@ int main()
         }
         Check(wxltest::FakeStorage::Closes() == closes + 2, "a scoped file closes at the end of its scope");
         Check(!storage.Open("nope"), "a missing file opens as an empty File");
+
+        Check(storage.AddSearchPath("no such folder", 1) == WXL_E_NOT_FOUND,
+              "a generated method passes the runtime's answer through");
+        Check(storage.MountArchive("Data\\patch-x.MPQ", 2) == WXL_OK, "and its arguments");
+    }
+
+    Section("wxl.data: methods generated from data.def");
+    {
+        const wxl::DataService data;
+        Check(data.IsLoaded("Spell.dbc") && !data.IsLoaded("DBFilesClient\\Item.dbc"),
+              "IsLoaded answers a bool");
+        Check(data.ServeTable("Item.dbc", "Interface\\hello.txt") == WXL_OK &&
+                  data.ServeTable("item.dbc", "Interface\\hello.txt") == WXL_E_FAILED,
+              "ServeTable answers the runtime's wxl_result");
+        Check(data.ServedFrom("DBFilesClient\\Item.dbc") == "Interface\\hello.txt" && data.ServedFrom("x.dbc").empty(),
+              "ServedFrom copies the path into a std::string, empty for the client's own file");
+        Check(data.RestoreTable("Item.dbc") == WXL_OK && data.RestoreTable("Item.dbc") == WXL_E_NOT_FOUND,
+              "RestoreTable gives it back once");
+
+        // A runtime whose table stops short of a member answers for it as for no service.
+        static wxl_data_api shorter = *wxltest::FakeData::Table();
+        shorter.struct_size         = offsetof(wxl_data_api, served_from);
+        static wxl_data_api holed   = *wxltest::FakeData::Table();
+        holed.is_loaded             = nullptr;
+        Check(!wxl::detail::Carries(&shorter, &wxl_data_api::served_from) &&
+                  wxl::detail::Carries(&shorter, &wxl_data_api::restore_table) &&
+                  !wxl::detail::Carries(&holed, &wxl_data_api::is_loaded),
+              "what the generated methods check before calling: the table's size, then the member");
     }
 
     Section("wxl.net");

@@ -11,13 +11,18 @@
 
 #include <cstddef>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <iterator>
 #include <map>
 #include <set>
+#include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "wxl/services/data.h"
 #include "wxl/services/hook.h"
 #include "wxl/services/net.h"
 #include "wxl/services/object.h"
@@ -520,9 +525,70 @@ namespace wxltest
     };
 
     // --- wxl.storage ------------------------------------------------------------------------
+    //
+    // Two files of the client's own, and the folders a mod adds, read from the disk: a name found
+    // in a folder of a priority above 0 wins over the client's, one below only fills a gap.
 
     struct FakeStorage
     {
+        /// The folders added, in the order they were.
+        static std::vector<std::pair<std::string, int32_t>>& SearchPaths()
+        {
+            static std::vector<std::pair<std::string, int32_t>> paths;
+            return paths;
+        }
+
+        /// Files opened from a folder, by handle; their handles start above the client's.
+        static std::map<wxl_handle, std::string>& OpenFromDisk()
+        {
+            static std::map<wxl_handle, std::string> open;
+            return open;
+        }
+
+        static constexpr wxl_handle kDiskHandles = 1000;
+
+        static bool Slurp(const std::filesystem::path& file, std::string& out)
+        {
+            std::error_code ec;
+            if (!std::filesystem::is_regular_file(file, ec)) return false;
+            std::ifstream      stream(file, std::ios::binary);
+            std::ostringstream text;
+            text << stream.rdbuf();
+            out = text.str();
+            return true;
+        }
+
+        /// The file a folder serves for a client name, the highest priority first: above 0
+        /// when @p winning, otherwise any.
+        static bool FromFolder(const std::string& name, bool winning, std::string& out)
+        {
+            std::string relative = name;
+            for (char& c : relative)
+                if (c == '\\') c = '/';
+            const std::pair<std::string, int32_t>* best = nullptr;
+            for (const auto& folder : SearchPaths())
+            {
+                if (winning && folder.second <= 0) continue;
+                std::error_code ec;
+                if (!std::filesystem::is_regular_file(std::filesystem::path(folder.first) / relative, ec)) continue;
+                if (!best || folder.second > best->second) best = &folder;
+            }
+            return best && Slurp(std::filesystem::path(best->first) / relative, out);
+        }
+
+        /// What a name reads as: a winning folder's file, the client's, or a folder's.
+        static bool Contents(const std::string& name, std::string& out)
+        {
+            if (FromFolder(name, true, out)) return true;
+            const auto found = Files().find(name);
+            if (found != Files().end())
+            {
+                out = found->second;
+                return true;
+            }
+            return FromFolder(name, false, out);
+        }
+
         static std::map<std::string, std::string>& Files()
         {
             static std::map<std::string, std::string> files = {
@@ -548,29 +614,39 @@ namespace wxltest
 
         static wxl_bool WXL_CALL Exists(wxl_str path)
         {
-            return Files().count(Key(path)) ? WXL_TRUE : WXL_FALSE;
+            std::string ignored;
+            return Contents(Key(path), ignored) ? WXL_TRUE : WXL_FALSE;
         }
 
         static wxl_result WXL_CALL Size(wxl_str path, uint64_t* out)
         {
-            const auto found = Files().find(Key(path));
-            if (found == Files().end()) return WXL_E_NOT_FOUND;
-            *out = found->second.size();
+            std::string data;
+            if (!Contents(Key(path), data)) return WXL_E_NOT_FOUND;
+            *out = data.size();
             return WXL_OK;
         }
 
         static wxl_result WXL_CALL Read(wxl_str path, void* buffer, uint64_t capacity, uint64_t* out_read)
         {
-            const auto found = Files().find(Key(path));
-            if (found == Files().end()) return WXL_E_NOT_FOUND;
-            *out_read = found->second.size();
-            if (capacity < found->second.size()) return WXL_E_INVALID;
-            std::memcpy(buffer, found->second.data(), found->second.size());
+            std::string data;
+            if (!Contents(Key(path), data)) return WXL_E_NOT_FOUND;
+            *out_read = data.size();
+            if (capacity < data.size()) return WXL_E_INVALID;
+            if (!data.empty()) std::memcpy(buffer, data.data(), data.size());
             return WXL_OK;
         }
 
         static wxl_handle WXL_CALL Open(wxl_str path)
         {
+            std::string data;
+            if (FromFolder(Key(path), true, data) ||
+                (!Files().count(Key(path)) && FromFolder(Key(path), false, data)))
+            {
+                ++Opens();
+                const wxl_handle handle = kDiskHandles + OpenFromDisk().size() + 1;
+                OpenFromDisk()[handle]  = data;
+                return handle;
+            }
             const auto found = Files().find(Key(path));
             if (found == Files().end()) return WXL_HANDLE_NONE;
             ++Opens();
@@ -580,10 +656,12 @@ namespace wxltest
         static wxl_result WXL_CALL ReadAt(wxl_handle file, uint64_t offset, void* buffer, uint64_t size,
                                           uint64_t* out_read)
         {
-            if (file == WXL_HANDLE_NONE || file > Files().size()) return WXL_E_NOT_FOUND;
+            const auto disk = OpenFromDisk().find(file);
+            if (file == WXL_HANDLE_NONE || (disk == OpenFromDisk().end() && file > Files().size()))
+                return WXL_E_NOT_FOUND;
             auto it = Files().begin();
-            std::advance(it, static_cast<std::ptrdiff_t>(file - 1));
-            const std::string& data = it->second;
+            if (disk == OpenFromDisk().end()) std::advance(it, static_cast<std::ptrdiff_t>(file - 1));
+            const std::string& data = disk != OpenFromDisk().end() ? disk->second : it->second;
             if (offset >= data.size())
             {
                 *out_read = 0;
@@ -595,9 +673,37 @@ namespace wxltest
             return WXL_OK;
         }
 
-        static void WXL_CALL Close(wxl_handle) { ++Closes(); }
+        static void WXL_CALL Close(wxl_handle file)
+        {
+            ++Closes();
+            OpenFromDisk().erase(file);
+        }
 
-        static wxl_result WXL_CALL AddSearchPath(wxl_str, int32_t) { return WXL_OK; }
+        /// A folder as this system writes it: a Windows path also works where '/' separates.
+        static std::string Native(std::string path)
+        {
+#ifndef _WIN32
+            for (char& c : path)
+                if (c == '\\') c = '/';
+#endif
+            return path;
+        }
+
+        static wxl_result WXL_CALL AddSearchPath(wxl_str directory, int32_t priority)
+        {
+            const std::string folder = Native(Key(directory));
+            std::error_code   ec;
+            if (!std::filesystem::is_directory(folder, ec)) return WXL_E_NOT_FOUND;
+            for (auto& known : SearchPaths())
+                if (known.first == folder)
+                {
+                    known.second = priority;
+                    return WXL_OK;
+                }
+            SearchPaths().emplace_back(folder, priority);
+            return WXL_OK;
+        }
+
         static wxl_result WXL_CALL MountArchive(wxl_str, int32_t) { return WXL_OK; }
 
         static uint32_t WXL_CALL Find(wxl_str pattern, wxl_str* out, uint32_t capacity)
@@ -628,6 +734,69 @@ namespace wxltest
                 t.add_search_path = &AddSearchPath;
                 t.mount_archive   = &MountArchive;
                 t.find            = &Find;
+                return t;
+            }();
+            return &api;
+        }
+    };
+
+    // --- wxl.data ---------------------------------------------------------------------------
+    //
+    // Spell.dbc is read already, every other table is not; a table is served from a path the
+    // storage fake can read.
+
+    struct FakeData
+    {
+        static std::map<std::string, std::string>& Served()
+        {
+            static std::map<std::string, std::string> served;
+            return served;
+        }
+
+        static std::string Key(wxl_str table)
+        {
+            std::string key(table.data ? table.data : "", table.size);
+            const size_t slash = key.find_last_of('\\');
+            if (slash != std::string::npos) key = key.substr(slash + 1);
+            for (char& c : key) c = static_cast<char>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c);
+            return key;
+        }
+
+        static wxl_result WXL_CALL ServeTable(wxl_str table, wxl_str path)
+        {
+            if (!table.size || !path.size) return WXL_E_INVALID;
+            if (FakeStorage::Exists(path) != WXL_TRUE) return WXL_E_NOT_FOUND;
+            if (Served().count(Key(table))) return WXL_E_FAILED;
+            Served()[Key(table)] = std::string(path.data, path.size);
+            return WXL_OK;
+        }
+
+        static wxl_result WXL_CALL RestoreTable(wxl_str table)
+        {
+            return Served().erase(Key(table)) ? WXL_OK : WXL_E_NOT_FOUND;
+        }
+
+        static wxl_str WXL_CALL ServedFrom(wxl_str table)
+        {
+            const auto found = Served().find(Key(table));
+            if (found == Served().end()) return wxl_str{nullptr, 0};
+            return wxl_str{found->second.c_str(), static_cast<uint32_t>(found->second.size())};
+        }
+
+        static wxl_bool WXL_CALL IsLoaded(wxl_str table)
+        {
+            return Key(table) == "spell.dbc" ? WXL_TRUE : WXL_FALSE;
+        }
+
+        static const wxl_data_api* Table()
+        {
+            static wxl_data_api api = [] {
+                wxl_data_api t{};
+                t.struct_size   = sizeof(wxl_data_api);
+                t.serve_table   = &ServeTable;
+                t.restore_table = &RestoreTable;
+                t.served_from   = &ServedFrom;
+                t.is_loaded     = &IsLoaded;
                 return t;
             }();
             return &api;

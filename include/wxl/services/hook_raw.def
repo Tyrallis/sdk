@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
+//
+// wxl.hook.raw as data: one row per member of wxl_hook_raw_api, in member order. The shapes and
+// their columns are described in wxl/services/rows.hpp.
+//
+// Native only: every member is a detour by address or what a detour by address needs.
+
+#ifndef WXL_API
+#error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including hook_raw.def"
+#endif
+
+WXL_API_SERVICE(hook_raw, WXL_HOOK_RAW_SERVICE, WXL_HOOK_RAW_SERVICE_VERSION, unsafe,
+                "Detours at an address of a binary whose addresses mean something.")
+
+WXL_API(hook_raw, image_base, ImageBase, uptr, (), native, generated, "")
+WXL_API(hook_raw, image_build, ImageBuild, u32, (), native, generated, "")
+WXL_API(hook_raw, attach_at, AttachAt, u32, (cstr name, uptr target, ptr detour, ptr_out original, i32 priority),
+        native, by_hand, "")
+WXL_API(hook_raw, detach, Detach, result, (u32 hook), native, by_hand, "")

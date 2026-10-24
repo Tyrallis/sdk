@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
+//
+// wxl.hook as data: one row per member of wxl_hook_api, in member order. The shapes and their
+// columns are described in wxl/services/rows.hpp.
+//
+// Lua reads the named points; attaching a detour stays native, since a detour is native code.
+
+#ifndef WXL_API
+#error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including hook.def"
+#endif
+
+WXL_API_SERVICE(hook, WXL_HOOK_SERVICE, WXL_HOOK_SERVICE_VERSION, safe,
+                "The points a runtime names for a native detour.")
+
+WXL_API_FIELD(wxl_hook_point, name, str)
+WXL_API_FIELD(wxl_hook_point, signature, str)
+
+WXL_API(hook, points, Points, list<wxl_hook_point>, (), generated, by_hand,
+        "The points this runtime names, each with its detour's C signature.")
+WXL_API(hook, has_point, HasPoint, boolean, (cstr name), generated, generated,
+        "Whether this runtime names a point.")
+WXL_API(hook, attach, Attach, u32, (cstr name, ptr detour, ptr_out original, i32 priority), native, by_hand, "")
+WXL_API(hook, detach, Detach, result, (u32 hook), native, by_hand, "")
