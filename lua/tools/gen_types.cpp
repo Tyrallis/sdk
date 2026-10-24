@@ -2,8 +2,8 @@
 // Copyright (c) 2026 WarcraftXL
 //
 // Writes the editor definitions of the Lua API -- a lua-language-server meta file -- from the
-// event table of reflect.hpp and the getter table of object_reads.def, so that what an editor
-// completes is what wxl.lua serves.
+// event table of reflect.hpp, the getter table of object_reads.def and the service tables of
+// wxl/services/*.def, so that what an editor completes is what wxl.lua serves.
 //
 //     wxl-lua-types                  the file on stdout
 //     wxl-lua-types <file>           written there, only when it differs
@@ -20,6 +20,7 @@
 #include "../src/ObjectNames.hpp"
 #include "wxl/objects/fields.hpp"
 #include "wxl/reflect.hpp"
+#include "wxl/services/rows.hpp"
 
 namespace
 {
@@ -164,6 +165,252 @@ namespace
         if (std::strcmp(type, "wxl_guid") == 0) return "string";
         if (std::strcmp(type, "wxl_vec3") == 0) return "wxl.Vec3";
         return "any";
+    }
+
+    // --- the service modules (wxl/services/*.def) --------------------------------------------
+
+    /// "wxl.HookPoint" for wxl_hook_point.
+    std::string ClassOf(const char* type)
+    {
+        std::string name = "wxl.";
+        if (std::strncmp(type, "wxl_", 4) == 0) type += 4;
+        bool upper = true;
+        for (; *type; ++type)
+        {
+            if (*type == '_')
+            {
+                upper = true;
+                continue;
+            }
+            name += upper && *type >= 'a' && *type <= 'z' ? static_cast<char>(*type - 'a' + 'A') : *type;
+            upper = false;
+        }
+        return name;
+    }
+
+    /// What is between the brackets of "list<wxl_str>", or empty.
+    std::string Inside(const std::string& kind, const char* outer)
+    {
+        const std::string prefix = std::string(outer) + "<";
+        if (kind.compare(0, prefix.size(), prefix) != 0 || kind.back() != '>') return std::string();
+        return kind.substr(prefix.size(), kind.size() - prefix.size() - 1);
+    }
+
+    bool IsResourceKind(const std::string& kind)
+    {
+        uint32_t                          count     = 0;
+        const wxl::api::ResourceRow* const resources = wxl::api::Resources(&count);
+        for (uint32_t i = 0; i < count; ++i)
+            if (kind == resources[i].name) return true;
+        return false;
+    }
+
+    /// One parameter of a row: its kind and its name, from "(str path, i32 priority)".
+    struct Parameter
+    {
+        std::string kind;
+        std::string name;
+    };
+
+    std::vector<Parameter> ParametersOf(const char* text)
+    {
+        std::vector<Parameter> parameters;
+        std::string            inner(text);
+        if (inner.size() >= 2) inner = inner.substr(1, inner.size() - 2);
+        size_t at = 0;
+        while (at < inner.size())
+        {
+            size_t end = inner.find(',', at);
+            if (end == std::string::npos) end = inner.size();
+            std::string piece = inner.substr(at, end - at);
+            while (!piece.empty() && piece.front() == ' ') piece.erase(piece.begin());
+            while (!piece.empty() && piece.back() == ' ') piece.pop_back();
+            const size_t space = piece.find(' ');
+            if (!piece.empty())
+                parameters.push_back(space == std::string::npos ? Parameter{piece, "value"}
+                                                                : Parameter{piece.substr(0, space), piece.substr(space + 1)});
+            at = end + 1;
+        }
+        return parameters;
+    }
+
+    /// A parameter as lua-language-server reads it, or empty for one that is no argument.
+    std::string LuaParam(const Parameter& parameter)
+    {
+        const std::string& k = parameter.kind;
+        if (k == "bytes_size") return std::string();
+        if (k == "values") return "---@param ... nil|number|string|boolean the values it carries\n";
+        if (k == "str" || k == "cstr") return "---@param " + parameter.name + " string\n";
+        if (k == "bytes") return "---@param " + parameter.name + " string the bytes, as a string\n";
+        if (k == "i32" || k == "u32" || k == "u64" || k == "uptr")
+            return "---@param " + parameter.name + "? integer 0 when left out\n";
+        if (k == "f64") return "---@param " + parameter.name + " number\n";
+        if (k == "boolean") return "---@param " + parameter.name + " boolean\n";
+        if (IsResourceKind(k)) return "---@param " + parameter.name + " wxl." + k + "\n";
+        return "---@param " + parameter.name + " any\n";
+    }
+
+    std::string ArgumentName(const Parameter& parameter)
+    {
+        if (parameter.kind == "bytes_size") return std::string();
+        if (parameter.kind == "values") return "...";
+        return parameter.name;
+    }
+
+    /// The value an answer kind gives, as a Lua type; empty for none.
+    std::string LuaAnswer(const std::string& k)
+    {
+        if (k == "none") return std::string();
+        if (k == "result") return "true|nil ok";
+        if (k == "boolean") return "boolean|nil";
+        if (k == "u32" || k == "uptr") return "integer|nil";
+        if (k == "address") return "integer|nil address";
+        if (k == "str") return "string|nil";
+        if (k == "whole_bytes" || k == "read_bytes") return "string|nil bytes";
+        if (IsResourceKind(k)) return "wxl." + k + "|nil";
+        const std::string listed = Inside(k, "list");
+        if (!listed.empty()) return (listed == "wxl_str" ? std::string("string") : ClassOf(listed.c_str())) + "[]|nil";
+        const std::string out = Inside(k, "out");
+        if (!out.empty()) return out == "str" ? "string|nil" : "integer|nil";
+        const std::string named = Inside(k, "enumeration");
+        if (!named.empty())
+            if (const wxl::reflect::Enum* e = wxl::reflect::FindEnum(named.c_str())) return AliasOf(*e) + "|integer|nil";
+        return "any";
+    }
+
+    /// What a shim row takes and gives, as the shims in sdk/lua/src/Shims.cpp serve it.
+    std::string ShimDefinition(const wxl::api::Row& row, const std::string& owner)
+    {
+        const std::string name = row.name;
+        if (name == "RegisterFunction")
+            return "---Makes a Lua function callable from the client's own script, under a global name: in every\n"
+                   "---script context the client makes from now on, or only in `context`. Kept until the mod\n"
+                   "---unloads or reloads; its arguments and returns are numbers, strings, booleans and nil.\n"
+                   "---@param name string the global's name\n---@param fn function\n"
+                   "---@param context? wxl.ScriptContext\n---@return true|nil ok\n---@return string|nil reason\n"
+                   "function " + owner + ".RegisterFunction(name, fn, context) end\n\n";
+        if (name == "RegisterEvent")
+            return "---Declares an event the client's frames can listen to, in every script context the client\n"
+                   "---makes from now on, or only in `context`. FireEvent raises it.\n"
+                   "---@param name string\n---@param context? wxl.ScriptContext\n"
+                   "---@return true|nil ok\n---@return string|nil reason\n"
+                   "function " + owner + ".RegisterEvent(name, context) end\n\n";
+        return std::string();
+    }
+
+    std::string Services()
+    {
+        std::ostringstream out;
+        uint32_t           serviceCount = 0, rowCount = 0, resourceCount = 0, fieldCount = 0;
+        const wxl::api::ServiceRow*  services  = wxl::api::Services(&serviceCount);
+        const wxl::api::Row*         rows      = wxl::api::Rows(&rowCount);
+        const wxl::api::ResourceRow* resources = wxl::api::Resources(&resourceCount);
+        const wxl::api::FieldRow*    fields    = wxl::api::Fields(&fieldCount);
+
+        out << "-- The service modules. Each function answers its value, or nil and the reason: \"unsupported\"\n"
+               "-- for a runtime without the service or the member, otherwise the result's name (\"invalid\",\n"
+               "-- \"not_found\", \"failed\"). A number left out is 0.\n\n";
+
+        // The structs a list answer is made of.
+        std::vector<std::string> structs;
+        for (uint32_t i = 0; i < fieldCount; ++i)
+        {
+            bool seen = false;
+            for (const std::string& known : structs)
+                if (known == fields[i].type) seen = true;
+            if (seen) continue;
+            structs.push_back(fields[i].type);
+            out << "---@class " << ClassOf(fields[i].type) << "\n";
+            for (uint32_t j = 0; j < fieldCount; ++j)
+                if (std::strcmp(fields[j].type, fields[i].type) == 0)
+                    out << "---@field " << fields[j].member << " "
+                        << (std::strcmp(fields[j].kind, "str") == 0 ? "string" : "integer") << "\n";
+            out << "\n";
+        }
+
+        const auto writeRow = [&](const wxl::api::Row& row, const std::string& owner, const char* separator) {
+            std::vector<Parameter> parameters = ParametersOf(row.params);
+            if (std::string(separator) == ":" && !parameters.empty()) parameters.erase(parameters.begin());
+            if (row.doc && *row.doc) out << "---" << row.doc << "\n";
+            std::string arguments;
+            for (const Parameter& parameter : parameters)
+            {
+                out << LuaParam(parameter);
+                const std::string name = ArgumentName(parameter);
+                if (name.empty()) continue;
+                arguments += (arguments.empty() ? "" : ", ") + name;
+            }
+            if (std::strcmp(row.answer, "read_bytes") == 0)
+            {
+                out << "---@param count integer how many bytes, at most\n";
+                arguments += (arguments.empty() ? "" : ", ") + std::string("count");
+            }
+            const std::string answer = LuaAnswer(row.answer);
+            if (!answer.empty()) out << "---@return " << answer << "\n---@return string|nil reason\n";
+            out << "function " << owner << separator << row.name << "(" << arguments << ") end\n\n";
+        };
+
+        for (uint32_t r = 0; r < resourceCount; ++r)
+        {
+            out << "---A " << resources[r].name << " of wxl." << resources[r].service << ".\n---@class wxl."
+                << resources[r].name << "\nlocal " << resources[r].name << " = {}\n\n";
+            for (uint32_t i = 0; i < rowCount; ++i)
+            {
+                if (rows[i].lua != wxl::api::Lua::generated) continue;
+                const std::vector<Parameter> parameters = ParametersOf(rows[i].params);
+                if (parameters.empty() || parameters[0].kind != resources[r].name) continue;
+                writeRow(rows[i], resources[r].name, ":");
+            }
+        }
+
+        for (uint32_t s = 0; s < serviceCount; ++s)
+        {
+            std::ostringstream module;
+            bool               any = false;
+            for (uint32_t i = 0; i < rowCount; ++i)
+            {
+                const wxl::api::Row& row = rows[i];
+                if (std::strcmp(row.service, services[s].id) != 0 || row.lua == wxl::api::Lua::native) continue;
+                const std::vector<Parameter> parameters = ParametersOf(row.params);
+                if (!parameters.empty() && IsResourceKind(parameters[0].kind)) continue;
+                any = true;
+            }
+            if (!any) continue;
+            out << "---" << services[s].name << ". " << services[s].doc
+                << (services[s].unsafe ? "\n---Unsafe: present only when the mod's mod.json declares it, in "
+                                         "\"requires\" or \"optional\"."
+                                       : "")
+                << "\n---@class wxl." << services[s].id << "\nlocal " << services[s].id << " = {}\n\n";
+            for (uint32_t i = 0; i < rowCount; ++i)
+            {
+                const wxl::api::Row& row = rows[i];
+                if (std::strcmp(row.service, services[s].id) != 0 || row.lua == wxl::api::Lua::native) continue;
+                const std::vector<Parameter> parameters = ParametersOf(row.params);
+                if (!parameters.empty() && IsResourceKind(parameters[0].kind)) continue;
+                if (row.lua == wxl::api::Lua::shim)
+                    out << ShimDefinition(row, services[s].id);
+                else
+                    writeRow(row, services[s].id, ".");
+            }
+        }
+        return out.str();
+    }
+
+    /// The fields of the wxl class that hold the service modules.
+    std::string ServiceFields()
+    {
+        std::ostringstream out;
+        uint32_t           serviceCount = 0, rowCount = 0;
+        const wxl::api::ServiceRow* services = wxl::api::Services(&serviceCount);
+        const wxl::api::Row*        rows     = wxl::api::Rows(&rowCount);
+        for (uint32_t s = 0; s < serviceCount; ++s)
+        {
+            bool any = false;
+            for (uint32_t i = 0; i < rowCount; ++i)
+                if (std::strcmp(rows[i].service, services[s].id) == 0 && rows[i].lua != wxl::api::Lua::native) any = true;
+            if (any) out << "---@field " << services[s].id << " wxl." << services[s].id << "\n";
+        }
+        return out.str();
     }
 
     std::string Generate()
@@ -362,6 +609,7 @@ namespace
         }
 
         // --- the wxl table ------------------------------------------------------------------
+        out << Services();
         out << "---@class wxl.ModInfo\n---@field id string\n---@field name string\n---@field version string\n"
                "---@field directory string\n\n"
                "---@class wxl.RuntimeInfo\n---@field id string\n---@field name string\n---@field version integer\n"
@@ -388,7 +636,8 @@ namespace
                "---@field runtime wxl.RuntimeInfo the runtime that loaded wxl.lua\n"
                "---@field object wxl.object\n"
                "---@field field wxl.field every update field's dword index, by kind\n"
-               "---@field events table<wxl.Family, string[]> every family's events, as On<Event>\n"
+            << ServiceFields()
+            << "---@field events table<wxl.Family, string[]> every family's events, as On<Event>\n"
                "wxl = {}\n\n"
                "---Writes a line to the runtime's log, tagged with the mod's id.\n"
                "---@param level \"trace\"|\"debug\"|\"info\"|\"warn\"|\"error\"\n"

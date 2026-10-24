@@ -4,6 +4,7 @@
 #include "Runtime.hpp"
 
 #include "Objects.hpp"
+#include "Shims.hpp"
 
 #include "wxl/host/admission.hpp"
 #include "wxl/host/manifest.hpp"
@@ -62,6 +63,8 @@ namespace wxl::lua
         // An object's Lua identity and the fields stored on it end with it, once every handler
         // of every mod, Lua or not, has seen it leave.
         objectGone_ = wxl::Subscribe(WXL_EV_ObjectDestroy, &Runtime::OnObjectGone, this, INT32_MAX);
+        // What the mods registered with the client's script is registered again in each context.
+        shims::Start();
     }
 
     void WXL_CALL Runtime::OnObjectGone(void* user, const void* args)
@@ -273,6 +276,7 @@ namespace wxl::lua
     void Runtime::Stop()
     {
         objectGone_.Reset();
+        shims::Stop();
         for (size_t i = mods_.size(); i-- > 0;)
         {
             DropHandlers(*mods_[i]);
@@ -391,7 +395,8 @@ namespace wxl::lua
     {
         for (const Slot& slot : slots_)
             if (slot.depth != 0) return true;
-        return false;
+        // A script function a mod registered is running, called by the client's own script.
+        return shims::Calling();
     }
 
     void Runtime::WarnOnce(const ScriptMod& mod, const reflect::Event& event, int what,

@@ -1708,6 +1708,198 @@ function Object:Party() end
 ---@return integer|nil value, string|nil reason
 function Object:Guild() end
 
+-- The service modules. Each function answers its value, or nil and the reason: "unsupported"
+-- for a runtime without the service or the member, otherwise the result's name ("invalid",
+-- "not_found", "failed"). A number left out is 0.
+
+---@class wxl.HookPoint
+---@field name string
+---@field signature string
+
+---A File of wxl.storage.
+---@class wxl.File
+local File = {}
+
+---Reads at an offset: as many bytes as asked, or what is left.
+---@param offset? integer 0 when left out
+---@param count integer how many bytes, at most
+---@return string|nil bytes
+---@return string|nil reason
+function File:ReadAt(offset, count) end
+
+---Closes the file; one the mod lets go of is closed for it.
+function File:Close() end
+
+---A Patch of wxl.patch.
+---@class wxl.Patch
+local Patch = {}
+
+---Puts back the bytes the patch replaced; a mod's are put back, newest first, when it unloads.
+---@return true|nil ok
+---@return string|nil reason
+function Patch:Restore() end
+
+---wxl.script. The client's own script: functions and events added to it, text run in it.
+---@class wxl.script
+local script = {}
+
+---Which script context is live: the glue's (login, characters) or the game's.
+---@return wxl.ScriptContext|integer|nil
+---@return string|nil reason
+function script.Context() end
+
+---Makes a Lua function callable from the client's own script, under a global name: in every
+---script context the client makes from now on, or only in `context`. Kept until the mod
+---unloads or reloads; its arguments and returns are numbers, strings, booleans and nil.
+---@param name string the global's name
+---@param fn function
+---@param context? wxl.ScriptContext
+---@return true|nil ok
+---@return string|nil reason
+function script.RegisterFunction(name, fn, context) end
+
+---Declares an event the client's frames can listen to, in every script context the client
+---makes from now on, or only in `context`. FireEvent raises it.
+---@param name string
+---@param context? wxl.ScriptContext
+---@return true|nil ok
+---@return string|nil reason
+function script.RegisterEvent(name, context) end
+
+---Raises a declared event, with its values, to every frame listening.
+---@param name string
+---@param ... nil|number|string|boolean the values it carries
+---@return true|nil ok
+---@return string|nil reason
+function script.FireEvent(name, ...) end
+
+---Runs script text in the live context; the name labels it in errors.
+---@param chunk string
+---@param name string
+---@return true|nil ok
+---@return string|nil reason
+function script.Run(chunk, name) end
+
+---wxl.storage. The client's files, whatever they are packed in: named as the client names them.
+---@class wxl.storage
+local storage = {}
+
+---Whether a name resolves to a file, in an archive or in a folder.
+---@param path string
+---@return boolean|nil
+---@return string|nil reason
+function storage.Exists(path) end
+
+---A file's length in bytes, without reading it.
+---@param path string
+---@return integer|nil
+---@return string|nil reason
+function storage.Size(path) end
+
+---A whole file.
+---@param path string
+---@return string|nil bytes
+---@return string|nil reason
+function storage.Read(path) end
+
+---Opens a file to read it a piece at a time.
+---@param path string
+---@return wxl.File|nil
+---@return string|nil reason
+function storage.Open(path) end
+
+---Adds a folder inside the client's folder to the files searched: the higher priority wins a name, the client's own data is 0.
+---@param directory string
+---@param priority? integer 0 when left out
+---@return true|nil ok
+---@return string|nil reason
+function storage.AddSearchPath(directory, priority) end
+
+---Adds an archive to the files searched, at a priority as AddSearchPath's.
+---@param path string
+---@param priority? integer 0 when left out
+---@return true|nil ok
+---@return string|nil reason
+function storage.MountArchive(path, priority) end
+
+---The names matching a pattern, * standing for any run of characters, each once.
+---@param pattern string
+---@return string[]|nil
+---@return string|nil reason
+function storage.Find(pattern) end
+
+---wxl.data. The client's databases, served from a mod's own files before the client reads them.
+---@class wxl.data
+local data = {}
+
+---Serves a table from a file the client can read instead of its own: before the client reads it.
+---@param table string
+---@param path string
+---@return true|nil ok
+---@return string|nil reason
+function data.ServeTable(table, path) end
+
+---Gives a table back, so the client's own file is used again.
+---@param table string
+---@return true|nil ok
+---@return string|nil reason
+function data.RestoreTable(table) end
+
+---What a table is served from, empty when it is the client's own file.
+---@param table string
+---@return string|nil
+---@return string|nil reason
+function data.ServedFrom(table) end
+
+---Whether the client has read a table already, in which case serving it comes too late.
+---@param table string
+---@return boolean|nil
+---@return string|nil reason
+function data.IsLoaded(table) end
+
+---wxl.hook. The points a runtime names for a native detour.
+---@class wxl.hook
+local hook = {}
+
+---The points this runtime names, each with its detour's C signature.
+---@return wxl.HookPoint[]|nil
+---@return string|nil reason
+function hook.Points() end
+
+---Whether this runtime names a point.
+---@param name string
+---@return boolean|nil
+---@return string|nil reason
+function hook.HasPoint(name) end
+
+---wxl.patch. Bytes written into the client's image over the bytes expected there, journaled.
+---Unsafe: present only when the mod's mod.json declares it, in "requires" or "optional".
+---@class wxl.patch
+local patch = {}
+
+---Writes the replacement bytes at an address that holds the expected ones; refused otherwise.
+---@param name string
+---@param address? integer 0 when left out
+---@param expected string the bytes, as a string
+---@param replacement string the bytes, as a string
+---@return wxl.Patch|nil
+---@return string|nil reason
+function patch.Apply(name, address, expected, replacement) end
+
+---Whether an address holds the expected bytes right now.
+---@param address? integer 0 when left out
+---@param expected string the bytes, as a string
+---@return boolean|nil
+---@return string|nil reason
+function patch.Matches(address, expected) end
+
+---The address of a byte pattern in the image's read-only data, after an earlier one or from the start.
+---@param pattern string the bytes, as a string
+---@param after? integer 0 when left out
+---@return integer|nil address
+---@return string|nil reason
+function patch.Find(pattern, after) end
+
 ---@class wxl.ModInfo
 ---@field id string
 ---@field name string
@@ -1760,6 +1952,11 @@ function object.Watch(type, name) end
 ---@field runtime wxl.RuntimeInfo the runtime that loaded wxl.lua
 ---@field object wxl.object
 ---@field field wxl.field every update field's dword index, by kind
+---@field script wxl.script
+---@field storage wxl.storage
+---@field data wxl.data
+---@field hook wxl.hook
+---@field patch wxl.patch
 ---@field events table<wxl.Family, string[]> every family's events, as On<Event>
 wxl = {}
 

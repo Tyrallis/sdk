@@ -12,6 +12,8 @@
 #include "Objects.hpp"
 #include "Runtime.hpp"
 #include "Sandbox.hpp"
+#include "Services.hpp"
+#include "Shims.hpp"
 #include "wxl/host/admission.hpp"
 #include "wxl/host/manifest.hpp"
 #include "wxl/reflect.hpp"
@@ -234,7 +236,13 @@ namespace wxl::lua
 
     void ScriptMod::Close()
     {
-        if (state_) lua_close(state_);
+        if (state_)
+        {
+            // Its patches go back before its state does; its files close with the state.
+            CloseServiceResources(state_);
+            shims::Forget(*this);
+            lua_close(state_);
+        }
         state_     = nullptr;
         traceback_ = LUA_NOREF;
         for (std::vector<int>& refs : callbacks_) refs.clear();
@@ -373,6 +381,7 @@ namespace wxl::lua
         lua_setfield(L, -2, "object");
         PushFieldModule(L);
         lua_setfield(L, -2, "field");
+        PushServiceModules(L, *this);
 
         lua_createtable(L, 0, 4); // wxl.mod
         lua_pushstring(L, Id().c_str());

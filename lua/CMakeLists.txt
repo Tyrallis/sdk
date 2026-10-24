@@ -22,6 +22,8 @@ wxl_add_mod(wxl-lua
         src/Runtime.cpp
         src/Sandbox.cpp
         src/ScriptMod.cpp
+        src/Services.cpp
+        src/Shims.cpp
     MANIFEST mod.json
     OUTPUT_NAME wxl-lua
     TARGETS win-x64 win-x86

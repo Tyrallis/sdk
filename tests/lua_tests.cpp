@@ -10,8 +10,10 @@
 // written here that exercise what the example does not. The host loads wxl.lua through the OS
 // loader, the test raises events and reads the log.
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <initializer_list>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -428,6 +430,86 @@ Observe("ObjectScript", "OnTargetChanged", function(previous, current)
     print("guid forms " .. table.concat(forms, " "))
 end)
 )lua";
+
+    // --- the service modules -------------------------------------------------------------------
+
+    constexpr const char* kServices = R"lua(
+local s, d, h, sc, p = wxl.storage, wxl.data, wxl.hook, wxl.script, wxl.patch
+local function show(...)
+    local t = {}
+    for i = 1, select("#", ...) do t[#t + 1] = tostring((select(i, ...))) end
+    return table.concat(t, " ")
+end
+
+print("storage " .. show(s.Exists("Interface\\hello.txt"), s.Exists("nope"), s.Size("Interface\\hello.txt"), s.Size("nope")))
+print("read " .. show(s.Read("Interface\\hello.txt"), #s.Read("Interface\\big.bin"), s.Read("nope")))
+local f = s.Open("Interface\\hello.txt")
+print("file " .. show(f:ReadAt(1, 3), f:ReadAt(4, 10), f:ReadAt(9, 2) == "", tostring(f):match("^File") ~= nil))
+f:Close()
+f:Close()
+print("closed " .. show(pcall(f.ReadAt, f, 0, 1)))
+print("open missing " .. show(s.Open("nope")))
+print("find " .. show(#s.Find("Interface\\*"), #s.Find("nothing*"), s.Find("Interface\\h*")[1]))
+print("search " .. show(s.AddSearchPath(wxl.mod.directory .. "\\assets", 1), s.Read("Interface\\probe.txt"),
+                        s.Read("Interface\\hello.txt"), s.AddSearchPath(wxl.mod.directory .. "\\none", 1)))
+print("mount " .. show(s.MountArchive("Data\\x.MPQ")))
+print("no path " .. show(pcall(s.Exists)))
+print("bad priority " .. show(pcall(s.AddSearchPath, "x", 1.5)))
+
+print("data " .. show(d.IsLoaded("Spell.dbc"), d.ServeTable("Item.dbc", "Interface\\hello.txt"), d.ServedFrom("Item.dbc"),
+                      select(2, d.ServeTable("Item.dbc", "Interface\\hello.txt")), d.RestoreTable("Item.dbc"),
+                      d.ServedFrom("Item.dbc") == ""))
+
+local points = h.Points()
+print("hook " .. show(#points, points[1].name, points[1].signature, h.HasPoint("Thing"), h.HasPoint("Other"), h.Attach))
+
+print("script " .. show(sc.Context(), sc.RegisterFunction("ProbeAdd", function(a, b) return a + b, "sum" end),
+                        sc.RegisterEvent("PROBE_EVENT"), sc.FireEvent("PROBE_EVENT", 1, "x", true), select(2, sc.FireEvent("NOBODY")),
+                        sc.Run("print(1)", "probe"), sc.ArgCount))
+sc.RegisterFunction("ProbeFail", function() error("probe broke") end)
+sc.RegisterFunction("ProbeTable", function() return {} end)
+sc.RegisterFunction("ProbeGlue", function() return "glue only" end, "glue")
+print("taken " .. show(sc.RegisterFunction("Taken", function() end)))
+print("bad context " .. show(pcall(sc.RegisterFunction, "X", function() end, "nowhere")))
+print("bad value " .. show(pcall(sc.FireEvent, "PROBE_EVENT", {})))
+
+local patch = p.Apply("probe nop", 0x1000, "\144\144", "\204\204")
+print("patch " .. show(tostring(patch):match("^Patch") ~= nil, p.Matches(0x1000, "\204\204"), p.Find("\204"), p.Find("\204", 0x1000),
+                       p.Apply("again", 0x1000, "\144\144", "\1\1")))
+print("patch sizes " .. show(pcall(p.Apply, "x", 0x1000, "\204", "\1\1")))
+p.Apply("second", 0x1004, "\144", "\195")
+)lua";
+
+    constexpr const char* kServicesUndeclared = R"lua(
+local ok, why = pcall(function() return wxl.patch.Apply end)
+print("undeclared " .. tostring(ok) .. " " .. tostring(why))
+print("modules " .. type(wxl.storage) .. " " .. type(wxl.data) .. " " .. type(wxl.script) .. " " .. type(wxl.hook) ..
+      " " .. tostring(wxl.hook_raw))
+)lua";
+
+    constexpr const char* kServicesAbsent = R"lua(
+local a, b = wxl.storage.Exists("x")
+local c, e = wxl.script.RegisterFunction("Nope", function() end)
+print("absent " .. tostring(a) .. " " .. tostring(b) .. " " .. tostring(c) .. " " .. tostring(e))
+)lua";
+
+    /// A call the client's script makes, with its arguments.
+    wxl_script_call ScriptCallOf(std::initializer_list<wxl_value> args)
+    {
+        wxl_script_call call;
+        call.args.assign(args.begin(), args.end());
+        return call;
+    }
+
+    wxl_value Number(double number)
+    {
+        wxl_value value{};
+        value.type      = WXL_VALUE_NUMBER;
+        value.as.number = number;
+        return value;
+    }
+
+    void WXL_CALL FakeScriptTaken(wxl_script_call*, void*) {}
 
     constexpr const char* kNoService = R"lua(
 Observe("ObjectScript", "OnTargetChanged", function(previous, current)
@@ -880,6 +962,188 @@ int main(int argc, char** argv)
         host.Raise(WXL_EV_TargetChanged, &target);
         Check(sink.Has("[wxl.noservice] no service nil unsupported nil unsupported"),
               "without the object service Valid() answers like every read: nil, \"unsupported\"");
+    }
+
+    Section("the service modules");
+    {
+        using wxltest::FakePatch;
+        using wxltest::FakeScript;
+        using wxltest::FakeStorage;
+
+        const fs::path mods = MakeTree(scratch, "services", binary, fs::path());
+        fs::copy(fs::path(example).parent_path() / "lua-services", mods / "lua-services", fs::copy_options::recursive);
+        WriteFile(mods / "services" / "mod.json",
+                  LuaManifest("wxl.services", "\"requires\": [ { \"service\": \"wxl.patch\", \"version\": 1 } ]"));
+        WriteFile(mods / "services" / "init.lua", kServices);
+        WriteFile(mods / "services" / "assets" / "Interface" / "probe.txt", "from disk");
+        WriteFile(mods / "services" / "assets" / "Interface" / "hello.txt", "hello, overridden");
+        WriteFile(mods / "undeclared" / "mod.json", LuaManifest("wxl.undeclared"));
+        WriteFile(mods / "undeclared" / "init.lua", kServicesUndeclared);
+
+        const std::string toc = "## Interface: 30300\nGlobalStrings.lua\nFrameXML.xml\n";
+        FakeStorage::Files()["Interface\\FrameXML\\FrameXML.toc"] = toc;
+        FakeScript::Live() = WXL_SCRIPT_CONTEXT_GAME;
+        FakeScript::Functions().clear();
+        FakeScript::Functions()["Taken"] = FakeScript::Registered{&FakeScriptTaken, nullptr};
+
+        CaptureSink sink;
+        HostConfig  config = Config(mods, sink);
+        config.services.push_back(PublishedService{WXL_SCRIPT_SERVICE, WXL_SCRIPT_SERVICE_VERSION, FakeScript::Table()});
+        config.services.push_back(PublishedService{WXL_STORAGE_SERVICE, WXL_STORAGE_SERVICE_VERSION, FakeStorage::Table()});
+        config.services.push_back(PublishedService{WXL_DATA_SERVICE, WXL_DATA_SERVICE_VERSION, wxltest::FakeData::Table()});
+        config.services.push_back(PublishedService{WXL_HOOK_SERVICE, WXL_HOOK_SERVICE_VERSION, wxltest::FakeHooks::Table()});
+        config.services.push_back(PublishedService{WXL_PATCH_SERVICE, WXL_PATCH_SERVICE_VERSION, FakePatch::Table()});
+        ModHost host(std::move(config));
+        host.LoadAll();
+        host.Stage(WXL_STAGE_READY);
+        const auto raise = [&](wxl_event event, const void* args) { host.Raise(event, args); };
+        const wxl_lua_api* api =
+            static_cast<const wxl_lua_api*>(host.Table()->get_service(WXL_LUA_SERVICE, WXL_LUA_SERVICE_VERSION));
+
+        Check(sink.Has("[wxl.services] storage true false 5 nil not_found"),
+              "storage: a bool, an out-parameter as its value, a failure as nil and the result's name");
+        Check(sink.Has("[wxl.services] read hello 1000 nil not_found"), "a whole file reads into a string");
+        Check(sink.Has("[wxl.services] file ell o true true"),
+              "a File reads at an offset, as many bytes as asked or what is left, and says what it is");
+        Check(sink.Has("[wxl.services] closed false ") && sink.Has("was given back already") &&
+                  FakeStorage::Closes() == FakeStorage::Opens(),
+              "a File given back is closed once, and a read through it afterwards is an error");
+        Check(sink.Has("[wxl.services] open missing nil not_found"), "a file that is not there opens as nil, not_found");
+        Check(sink.Has("[wxl.services] find 3 0 Interface\\hello.txt"), "find answers an array of names");
+        Check(sink.Has("[wxl.services] search true from disk hello, overridden nil not_found"),
+              "a folder added to the search path serves its files, ahead of the client's at a priority above 0");
+        Check(sink.Has("[wxl.services] mount true"), "a number left out is 0");
+        Check(sink.Has("[wxl.services] no path false ") && sink.Has("bad argument #1"), "a missing argument is an error");
+        Check(sink.Has("[wxl.services] bad priority false ") && sink.Has("a whole number from -2147483648 to 2147483647"),
+              "a number that is not whole, or out of range, is an error that says what is wanted");
+        Check(sink.Has("[wxl.services] data true true Interface\\hello.txt failed true true"),
+              "data: every row of the table, its answers as wxl.data gives them");
+        Check(sink.Has("[wxl.services] hook 1 Thing int(int) true false nil"),
+              "hook: the points as tables of their fields; attaching stays native");
+        Check(sink.Has("[wxl.services] script game true true true not_found true nil"),
+              "script: the context by name, a function and an event registered, an event fired, a chunk run, "
+              "and no accessor of a call");
+        Check(FakeScript::Events().size() >= 2 && sink.Has("[wxl.services] taken nil invalid") &&
+                  sink.Has("RegisterFunction 'Taken': the name is taken in the client's script"),
+              "a name the client already holds is refused and logged");
+        Check(sink.Has("[wxl.services] bad context false ") && sink.Has("\"glue\" or \"game\""),
+              "a context is named, or left out for both");
+        Check(sink.Has("[wxl.services] bad value false ") && sink.Has("nil, a number, a string or a boolean"),
+              "an event carries what the client's script can take");
+        Check(sink.Has("[wxl.services] patch true true 4096 4097 nil not_found"),
+              "patch: applied, matched, found, refused over bytes that are not the expected ones");
+        Check(sink.Has("[wxl.services] patch sizes false ") && sink.Has("as many bytes as the string before it"),
+              "the expected and the replacement bytes are one length, which the call carries");
+        Check(sink.Has("[wxl.undeclared] undeclared false ") &&
+                  sink.Has("wxl.patch reaches the client's memory, so a mod uses it only when its mod.json declares it: "
+                           "add { \"service\": \"wxl.patch\", \"version\": 1 } to \"requires\""),
+              "an unsafe module the manifest does not declare refuses every use, saying how to declare it");
+        Check(sink.Has("[wxl.undeclared] modules table table table table nil"),
+              "the safe modules are there for every mod; a native-only table has no module");
+
+        // The example: what the guide quotes.
+        Check(sink.Has(("[wxl.lua-services] Interface\\FrameXML\\FrameXML.toc: " + std::to_string(toc.size()) +
+                        " bytes, 3 lines").c_str()),
+              "the example reads a whole file");
+        Check(sink.Has("[wxl.lua-services] from the assets folder: hello from the assets folder"),
+              "and one of its own, through the search path");
+        Check(sink.Has("[wxl.lua-services] it starts with \"## Interface\""), "and the first bytes of a file it opens");
+        Check(sink.Has("[wxl.lua-services] 1 table(s) of contents in Interface\\FrameXML") &&
+                  sink.Has("[wxl.lua-services] Spell.dbc read already: true") &&
+                  sink.Has("[wxl.lua-services] 1 hook point(s) named"),
+              "and finds names, asks about a table, counts the hook points");
+
+        // The client's script calls what the mods registered.
+        wxl_script_call add = ScriptCallOf({Number(2), Number(3)});
+        Check(FakeScript::Invoke("ProbeAdd", add) && add.results.size() == 2 &&
+                  add.results[0].type == WXL_VALUE_NUMBER && add.results[0].as.number == 5 &&
+                  add.results[1].type == WXL_VALUE_STRING &&
+                  std::string(add.results[1].as.string.data, add.results[1].as.string.size) == "sum",
+              "a registered Lua function gets the call's arguments and answers with its returns");
+        wxl_script_call broken = ScriptCallOf({});
+        Check(FakeScript::Invoke("ProbeFail", broken) && Contains(broken.error, "ProbeFail: ") &&
+                  Contains(broken.error, "probe broke") && !Contains(broken.error, "stack traceback") &&
+                  sink.Has("mod wxl.services errored in its script function ProbeFail (1/25)"),
+              "a Lua error fails the call with its message, and counts against the mod with its traceback");
+        wxl_script_call table = ScriptCallOf({});
+        Check(FakeScript::Invoke("ProbeTable", table) && table.results.size() == 1 &&
+                  table.results[0].type == WXL_VALUE_NIL &&
+                  sink.Has("script function ProbeTable returned a table, which the client's script cannot take"),
+              "a value the client's script cannot take crosses as nil, and is logged once");
+        Check(!FakeScript::Functions().count("ProbeGlue"), "a function for another context waits for it");
+        wxl_script_call greet = ScriptCallOf({});
+        Check(FakeScript::Invoke("LuaServicesGreet", greet) && greet.results.size() == 1 &&
+                  std::string(greet.results[0].as.string.data, greet.results[0].as.string.size) ==
+                      "hello nil, from Lua services",
+              "the example's function answers the client's script");
+        Check(std::find(FakeScript::Events().begin(), FakeScript::Events().end(), "PROBE_EVENT n s b") !=
+                  FakeScript::Events().end() &&
+                  std::find(FakeScript::Chunks().begin(), FakeScript::Chunks().end(), "probe: print(1)") !=
+                      FakeScript::Chunks().end(),
+              "an event fired carries its values, a chunk runs under its name");
+
+        const wxl_world_args world{530, {1.0f, 2.0f, 3.0f}};
+        host.Raise(WXL_EV_WorldEnter, &world);
+        Check(std::find(FakeScript::Events().begin(), FakeScript::Events().end(), "LUA_SERVICES_WORLD n") !=
+                      FakeScript::Events().end() &&
+                  std::find(FakeScript::Chunks().begin(), FakeScript::Chunks().end(),
+                            "lua-services: DEFAULT_CHAT_FRAME:AddMessage('lua-services: entered map 530')") !=
+                      FakeScript::Chunks().end(),
+              "the example fires its event and runs its line when the world is entered");
+
+        // A new context: what was registered is registered again, before any handler of it runs.
+        FakeScript::Close(raise);
+        FakeScript::Open(WXL_SCRIPT_CONTEXT_GLUE, raise);
+        Check(FakeScript::Functions().count("ProbeAdd") && FakeScript::Functions().count("ProbeGlue") &&
+                  FakeScript::Functions().count("LuaServicesGreet") && FakeScript::Declared().count("PROBE_EVENT") &&
+                  FakeScript::Declared().count("LUA_SERVICES_WORLD"),
+              "every function and event is registered again in each new context it belongs to");
+        FakeScript::Close(raise);
+        FakeScript::Open(WXL_SCRIPT_CONTEXT_GAME, raise);
+        Check(!FakeScript::Functions().count("ProbeGlue") && FakeScript::Functions().count("ProbeAdd"),
+              "and only in those");
+
+        // A reload: the patches go back, newest first; the functions stay bound and reach the new state.
+        const size_t restored = FakePatch::RestoreOrder().size();
+        Check(api && api->reload("wxl.services") == WXL_OK, "the mod reloads");
+        Check(FakePatch::RestoreOrder().size() == restored + 2 &&
+                  FakePatch::RestoreOrder()[restored] == 2 && FakePatch::RestoreOrder()[restored + 1] == 1,
+              "a reload restores the mod's patches, newest first");
+        Check(sink.Count("[wxl.services] patch true true 4096 4097 nil not_found") == 2,
+              "the reloaded mod patches again over the bytes it expects");
+        wxl_script_call again = ScriptCallOf({Number(4), Number(5)});
+        Check(FakeScript::Invoke("ProbeAdd", again) && again.results.size() == 2 && again.results[0].as.number == 9 &&
+                  !sink.Has("RegisterFunction 'ProbeAdd'"),
+              "a function registered again by its reloaded mod keeps its binding and runs the new code");
+
+        // A reload that fails leaves the name bound to nobody.
+        WriteFile(mods / "services" / "init.lua", "this is not lua\n");
+        Check(api && api->reload("wxl.services") == WXL_OK && FakePatch::Live().empty() &&
+                  FakePatch::Image() == std::vector<uint8_t>(16, 0x90),
+              "a reload that fails to load still gives the patches back, and the image is as it was");
+        wxl_script_call after = ScriptCallOf({});
+        Check(FakeScript::Invoke("ProbeAdd", after) && Contains(after.error, "the Lua mod that registered it is not running"),
+              "a function whose mod is not loaded fails the call, saying so");
+
+        host.Shutdown();
+        // What the context holds points into wxl.lua, which is unloaded now.
+        FakeScript::Functions().clear();
+        FakeStorage::Files().erase("Interface\\FrameXML\\FrameXML.toc");
+        FakeStorage::SearchPaths().clear();
+        if (g_failures) sink.Dump();
+    }
+
+    Section("the service modules without the services");
+    {
+        const fs::path mods = MakeTree(scratch, "services-absent", binary, fs::path());
+        WriteFile(mods / "absent" / "mod.json", LuaManifest("wxl.absent"));
+        WriteFile(mods / "absent" / "init.lua", kServicesAbsent);
+        CaptureSink sink;
+        ModHost     host(Config(mods, sink));
+        host.LoadAll();
+        Check(sink.Has("[wxl.absent] absent nil unsupported nil unsupported"),
+              "a module whose service is not published answers nil, unsupported, shims included");
+        host.Shutdown();
     }
 
     Section("what a reload watches");
