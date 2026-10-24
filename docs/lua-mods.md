@@ -495,18 +495,52 @@ The methods:
 
 - `Name()`, `Guid()`, `Type()` (the kind's name, `"Unit"`, `"GameObject"`...), `TypeId()` (the
   same as a number) and `Target()` (what a unit is targeting, an object) work on every kind.
-- `Valid()` answers `true` while the object is still there, `false` once it has left. It and
-  `Handle()` are the two methods that never answer `nil`.
-- `Handle()` answers the object's handle as a string, for logs and as a table key (below).
+- `Valid()` answers `true` while the object is still there, `false` once it has left.
+- `Handle()` answers the object's handle as a string, for logs.
 - The others come from the runtime's table of reads and are named after it: `Health()`,
   `MaxHealth()`, `Level()`, `Power(index)`, `Position()`, `Facing()`, `DisplayId()`,
   `StackCount()`, `Durability()`... The editor definitions list all of them, with the kinds each
   applies to. A method that does not apply to an object answers `nil` and a sentence such as
-  `"a GameObject has no Health"`.
+  `"a GameObject has no Health"`. A read whose name would be taken twice says its kind:
+  `GameObjectType()` is a game object's own type (a chest, a door), `PlayerFlags()` a player's
+  flags beside the `Flags()` every unit has.
 
-`==` between two objects compares what they stand for: `wxl.object.FromGuid(guid) == current`
-is true when both are the same unit. As a table key, though, an object is not the same key twice
--- each one you receive is a new Lua value -- so key tables by `obj:Guid()` or `obj:Handle()`:
+### One object, one value
+
+While an object stays in view, it is one Lua value: the object an event hands you, the one
+`FromGuid` finds and the one in an `InView` list are the same value (abi `0.1.7`: a mod that
+counts on it asks for `"0.1.7"`). You can compare objects with `==` and use them as table keys:
+
+```lua
+local hits = {}
+Observe("CombatScript", "OnCombatDamage", function(source, source_guid, target)
+    if target then hits[target] = (hits[target] or 0) + 1 end
+end)
+```
+
+An object also keeps fields of your own. Set one as on a table, read it back at any later event:
+
+```lua
+Observe("ObjectScript", "OnObjectCreate", function(object, guid, type)
+    object.noted = true
+end)
+```
+
+A field cannot take the name of a method (`object.Health = 1` is an error that says so), and
+stays with the object until it leaves. That is the difference with a table of your own keyed by
+objects, like `hits` above: the table keeps an object that left until you remove it, while a
+field goes with the object.
+
+### When an object leaves
+
+When the object leaves view, your `OnObjectDestroy` handlers run first, with its fields still
+there. Then the object you kept is **gone**: `Valid()` answers `false`, every read answers `nil,
+"gone"`, its fields are dropped and storing a new one is an error. `tostring` shows it as `gone
+Unit(0x...)`.
+
+If the same creature comes back into view, it is a new object: a new value, with no fields, and
+`OnObjectCreate` announces it again. What it shares with the old one is its guid, so key a table
+by guid for what must outlast leaving and coming back:
 
 ```lua
 local seen = {}
@@ -516,10 +550,11 @@ end)
 ```
 
 A guid is a string because a Lua number cannot hold every 64-bit value; as a string it compares
-and keys tables exactly. `FromGuid` takes the string, or a number for a small one.
+and keys tables exactly. `FromGuid` takes the string, `"0x"` and up to sixteen hex digits, or a
+whole number for a small one; anything else is an error.
 
 When no runtime offers the `wxl.object` service, every read answers `nil, "unsupported"`,
-`Valid()` answers `false` and `InView` an empty list. List the service under `requires` in your
+`Valid()` included, and `InView` an empty list. List the service under `requires` in your
 manifest if your mod is no use without it.
 
 ---
@@ -707,7 +742,7 @@ Writes its arguments to the log, through `tostring`, separated by tabs, at the `
 | `wxl.runtime.abi` | the contract this mod is served, as text, such as `"0.1.6"` |
 | `wxl.runtime.abi_major`, `.abi_minor`, `.abi_feature` | the same, as numbers |
 | `wxl.object.LocalPlayer()` | the player you control, or `nil` |
-| `wxl.object.FromGuid(guid)` | the object with that guid (a string, or a number), or `nil` when it is not in view |
+| `wxl.object.FromGuid(guid)` | the object with that guid (`"0x"` and up to sixteen hex digits, or a whole number), or `nil` when it is not in view |
 | `wxl.object.InView(type)` | a list of the objects of a type in view; every object without a type |
 | `wxl.events` | each family's events by name, `wxl.events.NetScript[1] == "OnMessageReceived"` |
 | `wxl.log(level, ...)` | a log line at `"trace"`, `"debug"`, `"info"`, `"warn"` or `"error"` |
@@ -716,16 +751,17 @@ Writes its arguments to the log, through `tostring`, separated by tabs, at the `
 
 | Method | Answers |
 |---|---|
-| `Valid()` | whether the object is still there; always a boolean |
+| `Valid()` | whether the object is still there; `nil, "unsupported"` without the object service |
 | `Guid()` | its guid, `"0x..."` |
 | `Type()`, `TypeId()` | its kind, as a name or a number |
 | `Name()` | its name |
 | `Target()` | for a unit, the object it targets, or `nil` |
-| `Handle()` | its handle as text, `"0x..."`, for keys and logs |
+| `Handle()` | its handle as text, `"0x..."`, for logs |
 | every other method | a read from the runtime's table: the value, or `nil` and why. The list, with the kinds each applies to, is in [`wxl.d.lua`](../lua/types/wxl.d.lua) |
 
-`tostring(object)` gives its kind and handle, `Unit(0x000000000000002B)`; `==` compares two
-objects by what they stand for.
+`tostring(object)` gives its kind and handle, `Unit(0x000000000000002B)`, `gone Unit(...)` once it
+has left. An object is one value while it is in view: `==` and table keys work on it, and any
+other name is a field of your own (`object.note = "rare"`), dropped when it leaves.
 
 ### Events
 
