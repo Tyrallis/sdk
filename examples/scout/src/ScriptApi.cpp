@@ -3,137 +3,139 @@
 
 #include "ScriptApi.h"
 
-#include <cstdio>
+#include <cmath>
+#include <optional>
+#include <string>
 
 #include "wxl/objects.hpp"
 
 namespace
 {
-    // What the registered functions below read. They are plain functions, because that is what
-    // the client's scripting calls in the end, and a plain function has no `this`: the state it
-    // works on has to be reachable from file scope. One mod, one instance, so a pointer each.
-    scout::Journal*  g_journal = nullptr;
-    scout::NetWatch* g_net     = nullptr;
-
-    /// ScoutCount() -> how many lines the journal is holding.
-    void ScoutCount(wxl::ScriptCall& call)
+    /// The argument at @p index as an opcode: a whole number from 0 to 0xFFFF.
+    std::optional<uint32_t> OpcodeAt(const wxl::ScriptCall& call, uint32_t index)
     {
-        call.PushNumber(g_journal ? static_cast<double>(g_journal->Size()) : 0.0);
-    }
-
-    /// ScoutLast() -> what, who, level, seconds. Returns nil when nothing has happened yet.
-    void ScoutLast(wxl::ScriptCall& call)
-    {
-        const scout::Entry* last = g_journal ? g_journal->Last() : nullptr;
-        if (!last)
-        {
-            call.PushNil();
-            return;
-        }
-        call.PushString(scout::Journal::Describe(last->what));
-        call.PushString(last->who);
-        call.PushNumber(last->level);
-        call.PushNumber(last->at);
-    }
-
-    /// ScoutNearby() -> how many units the client is tracking right now.
-    void ScoutNearby(wxl::ScriptCall& call)
-    {
-        // A snapshot of handles, taken now. Asking the client directly rather than keeping a
-        // count of our own means the answer cannot drift out of step with it.
-        const wxl::ObjectService objects;
-        call.PushNumber(static_cast<double>(objects.InView<wxl::Unit>().size()));
-    }
-
-    /// ScoutTraffic(opcode [, "sent"]) -> how many messages of that opcode crossed.
-    void ScoutTraffic(wxl::ScriptCall& call)
-    {
-        const std::optional<double> opcode = call.Number(0);
-        if (!opcode || *opcode < 0.0)
-        {
-            // The call still returns normally here; the script side fails once it unwinds,
-            // with this message, which is how a Lua error is raised from C++ safely.
-            call.Fail("ScoutTraffic(opcode [, \"sent\"]): opcode must be a number");
-            return;
-        }
-
-        const std::optional<std::string_view> side     = call.String(1);
-        const bool                            incoming = !side || *side != "sent";
-        const uint32_t                        counted =
-            g_net ? g_net->Count(static_cast<uint32_t>(*opcode), incoming) : 0u;
-        call.PushNumber(counted);
-    }
-
-    /// ScoutMute(opcode, on) -> whether it was already muted. Incoming messages only.
-    void ScoutMute(wxl::ScriptCall& call)
-    {
-        const std::optional<double> opcode = call.Number(0);
-        if (!opcode || *opcode < 0.0)
-        {
-            call.Fail("ScoutMute(opcode, on): opcode must be a number");
-            return;
-        }
-        if (!g_net)
-        {
-            call.PushBool(false);
-            return;
-        }
-        const bool on = call.Bool(1).value_or(true);
-        call.PushBool(g_net->Mute(static_cast<uint32_t>(*opcode), on));
+        const std::optional<double> number = call.Number(index);
+        if (!number || *number < 0.0 || *number > 0xFFFF || std::floor(*number) != *number)
+            return std::nullopt;
+        return static_cast<uint32_t>(*number);
     }
 } // namespace
 
 namespace scout
 {
-    ScriptApi::ScriptApi(Journal& journal, NetWatch& net)
-    {
-        g_journal = &journal;
-        g_net     = &net;
-    }
-
     void ScriptApi::OnScriptVmReady(uint32_t context, void*)
     {
         const wxl::ScriptService script;
-        if (!script)
+        if (!script) return; // wxl.script is optional: without it, Scout keeps its journal to itself
+
+        struct Registration
         {
-            // No scripting on this runtime. Everything else Scout does still works, which is
-            // why wxl.script is "optional" in mod.json and not "requires".
-            return;
+            const char* name;
+            Function*   function;
+        };
+        const Registration functions[] = {
+            {"ScoutCount", &scoutCount_},
+            {"ScoutEntry", &scoutEntry_},
+            {"ScoutNearby", &scoutNearby_},
+            {"ScoutTraffic", &scoutTraffic_},
+            {"ScoutDrop", &scoutDrop_},
+        };
+
+        for (const Registration& registration : functions)
+        {
+            const wxl_result result = script.RegisterFunction(registration.name, registration.function);
+            if (result != WXL_OK)
+                wxl::Log(WXL_LOG_WARN, kTag,
+                         std::string("could not register ") + registration.name + ": result " +
+                             std::to_string(result));
         }
+        if (script.RegisterEvent(kUpdatedEvent) != WXL_OK)
+            wxl::Log(WXL_LOG_WARN, kTag, std::string("could not declare ") + kUpdatedEvent);
 
-        // Both contexts are served. The login screen is a script context too, and a mod that
-        // only registers on the game one is simply absent from half the session.
-        const bool glue = context == WXL_SCRIPT_CONTEXT_GLUE;
-
-        script.RegisterEvent(kUpdatedEvent);
-        script.RegisterFunction<&ScoutCount>("ScoutCount");
-        script.RegisterFunction<&ScoutLast>("ScoutLast");
-        script.RegisterFunction<&ScoutNearby>("ScoutNearby");
-        script.RegisterFunction<&ScoutTraffic>("ScoutTraffic");
-        script.RegisterFunction<&ScoutMute>("ScoutMute");
-        registered_ = true;
-
+        open_ = true;
         wxl::Log(WXL_LOG_INFO, kTag,
-                 glue ? "script API is up on the login screen" : "script API is up in the game");
+                 context == WXL_SCRIPT_CONTEXT_GLUE ? "functions registered on the login screens"
+                                                    : "functions registered in the game");
     }
 
     void ScriptApi::OnScriptVmClosing(uint32_t, void*)
     {
-        // The context is about to be torn down and everything on it goes with it. There is
-        // nothing to undo -- only a note to self that the functions are gone until the next one.
-        registered_ = false;
+        open_ = false;
     }
 
-    void ScriptApi::Announce() const
+    void ScriptApi::Announce(const Entry& entry) const
     {
-        if (!registered_) return;
+        if (!open_) return;
+        wxl::ScriptService().FireEvent(kUpdatedEvent, {wxl::Value::String(Describe(entry.what)),
+                                                       wxl::Value::String(entry.who),
+                                                       wxl::Value::Number(entry.level)});
+    }
 
-        const Entry* last = g_journal ? g_journal->Last() : nullptr;
-        if (!last) return;
+    // ScoutCount() -> how many lines the journal holds.
+    void ScriptApi::Count(wxl::ScriptCall& call) const
+    {
+        call.PushNumber(static_cast<double>(journal_.Size()));
+    }
 
-        const wxl::ScriptService script;
-        script.FireEvent(kUpdatedEvent, {wxl::Value::String(Journal::Describe(last->what)),
-                                         wxl::Value::String(last->who),
-                                         wxl::Value::Number(last->level)});
+    // ScoutEntry([index]) -> what, who, level, whole seconds ago; index 1, the default, is the
+    // newest. Nothing past the oldest line.
+    void ScriptApi::EntryAt(wxl::ScriptCall& call) const
+    {
+        double index = 1.0;
+        if (call.ArgType(0) != WXL_VALUE_NIL)
+        {
+            const std::optional<double> given = call.Number(0);
+            if (!given || *given < 1.0 || std::floor(*given) != *given)
+            {
+                call.Fail("ScoutEntry([index]): index is a whole number from 1, the newest line");
+                return;
+            }
+            index = *given;
+        }
+
+        const Entry* entry = journal_.FromNewest(static_cast<std::size_t>(index) - 1);
+        if (!entry) return;
+
+        call.PushString(Describe(entry->what));
+        call.PushString(entry->who);
+        call.PushNumber(entry->level);
+        call.PushNumber(std::floor(clock_.Now() - entry->at));
+    }
+
+    // ScoutNearby() -> how many units the client holds right now, the player included.
+    void ScriptApi::Nearby(wxl::ScriptCall& call) const
+    {
+        call.PushNumber(static_cast<double>(wxl::ObjectService().InView<wxl::Unit>().size()));
+    }
+
+    // ScoutTraffic(opcode [, "sent"]) -> messages, bytes of that opcode received, or sent.
+    void ScriptApi::TrafficOf(wxl::ScriptCall& call) const
+    {
+        const std::optional<uint32_t> opcode = OpcodeAt(call, 0);
+        if (!opcode)
+        {
+            call.Fail("ScoutTraffic(opcode [, \"sent\"]): opcode is a whole number from 0 to 0xFFFF");
+            return;
+        }
+        const std::optional<std::string_view> way = call.String(1);
+        const Direction direction = way && *way == "sent" ? Direction::Sent : Direction::Received;
+
+        const Tally tally = traffic_.Count(*opcode, direction);
+        call.PushNumber(tally.messages);
+        call.PushNumber(static_cast<double>(tally.bytes));
+    }
+
+    // ScoutDrop(opcode, drop) -> whether that opcode was dropped before. Incoming messages only.
+    void ScriptApi::Drop(wxl::ScriptCall& call)
+    {
+        const std::optional<uint32_t> opcode = OpcodeAt(call, 0);
+        const std::optional<bool>     drop   = call.Bool(1);
+        if (!opcode || !drop)
+        {
+            call.Fail("ScoutDrop(opcode, drop): opcode is a whole number from 0 to 0xFFFF, drop "
+                      "is true or false");
+            return;
+        }
+        call.PushBool(traffic_.Drop(*opcode, *drop));
     }
 } // namespace scout

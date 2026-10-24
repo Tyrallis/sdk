@@ -4,7 +4,7 @@
   "name": "Scout",
   "version": "1.0.0",
   "abi": "0.1.5",
-  "description": "Keeps a journal of what happens around you and hands it to the interface.",
+  "description": "Keeps a journal of the units around you and hands it to the interface's Lua.",
   "binaries": {
     "win-x64": "bin/x64/scout.dll",
     "win-x86": "bin/x86/scout.dll"
