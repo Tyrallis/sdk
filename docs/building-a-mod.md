@@ -150,7 +150,8 @@ code it points into.
 ### Events
 
 Derive from a script family (`WorldScript`, `RenderScript`, `ObjectScript`, `AssetScript`,
-`NetScript`, `LuaScript`, `CombatScript`), override the events you want,
+`NetScript`, `LuaScript`, `CombatScript`, `PlayerScript`, `GlueScript`, `ChatScript`), override
+the events you want,
 `wxl::ScriptMgr::Add(&script)`. `Add` subscribes only the events the script overrides, decided at
 compile time, so an event you leave alone costs nothing at all. That needs the script's own type:
 pass `&script`, not a pointer to its family, which hides what it overrides and makes `Add`

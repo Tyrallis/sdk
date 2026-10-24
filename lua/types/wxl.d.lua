@@ -26,6 +26,9 @@
 ---@field OnWorldClick fun(self: WorldScript, point: wxl.Vec3, object: wxl.Object|nil, button: integer)
 ---@field OnInput fun(self: WorldScript, message: integer, wparam: integer, lparam: integer, handled: boolean|nil): boolean|nil answers through handled
 ---@field OnSoundPlay fun(self: WorldScript, sound_id: integer, path: string, suppressed: boolean|nil): boolean|nil answers through suppressed
+---@field OnZoneChanged fun(self: WorldScript, area_id: integer, subzone_id: integer, wmo_group_id: integer, zone_text: string, subzone_text: string, real_zone_text: string, indoors: boolean, new_area: boolean)
+---@field OnMouseoverChanged fun(self: WorldScript, previous: wxl.Object|nil, previous_guid: wxl.Guid, current: wxl.Object|nil, current_guid: wxl.Guid)
+---@field OnCVarChanged fun(self: WorldScript, name: string, previous: string, value: string)
 WorldScript = {}
 
 ---@class RenderScript
@@ -93,9 +96,33 @@ LuaScript = {}
 ---@field OnCombatDamage fun(self: CombatScript, source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, kind: integer, environment: integer, amount: integer, overkill: integer, school: integer, absorbed: integer, resisted: integer, blocked: integer, crit: boolean, hit_info: integer)
 ---@field OnCombatHeal fun(self: CombatScript, source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, amount: integer, overheal: integer, absorbed: integer, crit: boolean, periodic: boolean)
 ---@field OnCombatMiss fun(self: CombatScript, source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, melee: boolean, reason: integer, hit_info: integer)
+---@field OnCombatEnergize fun(self: CombatScript, source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, power_type: integer, amount: integer, periodic: boolean, drain: boolean, multiplier: number)
 CombatScript = {}
 
----@alias wxl.Family "WorldScript"|"RenderScript"|"ObjectScript"|"AssetScript"|"NetScript"|"LuaScript"|"CombatScript"
+---@class PlayerScript
+---@field OnPlayerMoveStart fun(self: PlayerScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, opcode: integer, flags: integer, position: wxl.Vec3, facing: number)
+---@field OnPlayerMoveStop fun(self: PlayerScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, opcode: integer, flags: integer, position: wxl.Vec3, facing: number)
+---@field OnPlayerLevelUp fun(self: PlayerScript, level: integer, health: integer, mana: integer, rage: integer, focus: integer, energy: integer, happiness: integer, runes: integer, runic_power: integer, strength: integer, agility: integer, stamina: integer, intellect: integer, spirit: integer)
+---@field OnPlayerXpGain fun(self: PlayerScript, source: wxl.Object|nil, source_guid: wxl.Guid, amount: integer, kind: integer, bonus: integer, group_multiplier: number, refer_a_friend: boolean)
+---@field OnPlayerMoneyChanged fun(self: PlayerScript, player: wxl.Object|nil, previous: integer, current: integer)
+PlayerScript = {}
+
+---@class GlueScript
+---@field OnGlueScreenChanged fun(self: GlueScript, screen: string, previous: string)
+---@field OnGlueCharacterList fun(self: GlueScript, count: integer, valid: boolean)
+---@field OnGlueCharacter fun(self: GlueScript, index: integer, count: integer, guid: wxl.Guid, name: string, race: integer, class_id: integer, sex: integer, level: integer, zone_id: integer, map_id: integer, position: wxl.Vec3, guild_id: integer, flags: integer, customize_flags: integer, first_login: boolean)
+---@field OnGlueRealmList fun(self: GlueScript, count: integer)
+---@field OnGlueRealm fun(self: GlueScript, index: integer, count: integer, name: string, address: string, type: integer, flags: integer, locked: boolean, population: number, characters: integer, category: integer, realm_id: integer, version_major: integer, version_minor: integer, version_revision: integer, version_build: integer, region_id: integer, battlegroup_id: integer, build: integer)
+---@field OnGlueAuthResult fun(self: GlueScript, result: integer, queue_position: integer, billing_time_remaining: integer, billing_flags: integer, billing_time_rested: integer, expansion: integer, free_character_migration: boolean)
+---@field OnGlueEnterWorld fun(self: GlueScript, character_guid: wxl.Guid)
+GlueScript = {}
+
+---@class ChatScript
+---@field OnChatMessage fun(self: ChatScript, type: integer, language: integer, sender: wxl.Object|nil, sender_guid: wxl.Guid, sender_name: string, target_guid: wxl.Guid, target_name: string, channel: string, text: string, tag: integer, achievement_id: integer, gm: boolean)
+---@field OnChatSend fun(self: ChatScript, text: string, type: string, language: string, target: string, prefix: string, addon: boolean, suppressed: boolean|nil): boolean|nil answers through suppressed
+ChatScript = {}
+
+---@alias wxl.Family "WorldScript"|"RenderScript"|"ObjectScript"|"AssetScript"|"NetScript"|"LuaScript"|"CombatScript"|"PlayerScript"|"GlueScript"|"ChatScript"
 
 ---Calls `handler` with the event's parameters whenever it is raised. Returns the
 ---handler's id.
@@ -154,6 +181,24 @@ CombatScript = {}
 ---@overload fun(family: "CombatScript", method: "OnCombatDamage", handler: fun(source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, kind: integer, environment: integer, amount: integer, overkill: integer, school: integer, absorbed: integer, resisted: integer, blocked: integer, crit: boolean, hit_info: integer)): integer
 ---@overload fun(family: "CombatScript", method: "OnCombatHeal", handler: fun(source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, amount: integer, overheal: integer, absorbed: integer, crit: boolean, periodic: boolean)): integer
 ---@overload fun(family: "CombatScript", method: "OnCombatMiss", handler: fun(source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, melee: boolean, reason: integer, hit_info: integer)): integer
+---@overload fun(family: "WorldScript", method: "OnZoneChanged", handler: fun(area_id: integer, subzone_id: integer, wmo_group_id: integer, zone_text: string, subzone_text: string, real_zone_text: string, indoors: boolean, new_area: boolean)): integer
+---@overload fun(family: "WorldScript", method: "OnMouseoverChanged", handler: fun(previous: wxl.Object|nil, previous_guid: wxl.Guid, current: wxl.Object|nil, current_guid: wxl.Guid)): integer
+---@overload fun(family: "WorldScript", method: "OnCVarChanged", handler: fun(name: string, previous: string, value: string)): integer
+---@overload fun(family: "PlayerScript", method: "OnPlayerMoveStart", handler: fun(unit: wxl.Object|nil, unit_guid: wxl.Guid, opcode: integer, flags: integer, position: wxl.Vec3, facing: number)): integer
+---@overload fun(family: "PlayerScript", method: "OnPlayerMoveStop", handler: fun(unit: wxl.Object|nil, unit_guid: wxl.Guid, opcode: integer, flags: integer, position: wxl.Vec3, facing: number)): integer
+---@overload fun(family: "PlayerScript", method: "OnPlayerLevelUp", handler: fun(level: integer, health: integer, mana: integer, rage: integer, focus: integer, energy: integer, happiness: integer, runes: integer, runic_power: integer, strength: integer, agility: integer, stamina: integer, intellect: integer, spirit: integer)): integer
+---@overload fun(family: "PlayerScript", method: "OnPlayerXpGain", handler: fun(source: wxl.Object|nil, source_guid: wxl.Guid, amount: integer, kind: integer, bonus: integer, group_multiplier: number, refer_a_friend: boolean)): integer
+---@overload fun(family: "PlayerScript", method: "OnPlayerMoneyChanged", handler: fun(player: wxl.Object|nil, previous: integer, current: integer)): integer
+---@overload fun(family: "GlueScript", method: "OnGlueScreenChanged", handler: fun(screen: string, previous: string)): integer
+---@overload fun(family: "GlueScript", method: "OnGlueCharacterList", handler: fun(count: integer, valid: boolean)): integer
+---@overload fun(family: "GlueScript", method: "OnGlueCharacter", handler: fun(index: integer, count: integer, guid: wxl.Guid, name: string, race: integer, class_id: integer, sex: integer, level: integer, zone_id: integer, map_id: integer, position: wxl.Vec3, guild_id: integer, flags: integer, customize_flags: integer, first_login: boolean)): integer
+---@overload fun(family: "GlueScript", method: "OnGlueRealmList", handler: fun(count: integer)): integer
+---@overload fun(family: "GlueScript", method: "OnGlueRealm", handler: fun(index: integer, count: integer, name: string, address: string, type: integer, flags: integer, locked: boolean, population: number, characters: integer, category: integer, realm_id: integer, version_major: integer, version_minor: integer, version_revision: integer, version_build: integer, region_id: integer, battlegroup_id: integer, build: integer)): integer
+---@overload fun(family: "GlueScript", method: "OnGlueAuthResult", handler: fun(result: integer, queue_position: integer, billing_time_remaining: integer, billing_flags: integer, billing_time_rested: integer, expansion: integer, free_character_migration: boolean)): integer
+---@overload fun(family: "GlueScript", method: "OnGlueEnterWorld", handler: fun(character_guid: wxl.Guid)): integer
+---@overload fun(family: "ChatScript", method: "OnChatMessage", handler: fun(type: integer, language: integer, sender: wxl.Object|nil, sender_guid: wxl.Guid, sender_name: string, target_guid: wxl.Guid, target_name: string, channel: string, text: string, tag: integer, achievement_id: integer, gm: boolean)): integer
+---@overload fun(family: "ChatScript", method: "OnChatSend", handler: fun(text: string, type: string, language: string, target: string, prefix: string, addon: boolean, suppressed: boolean|nil)): integer
+---@overload fun(family: "CombatScript", method: "OnCombatEnergize", handler: fun(source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, power_type: integer, amount: integer, periodic: boolean, drain: boolean, multiplier: number)): integer
 ---@param family wxl.Family
 ---@param method string
 ---@param handler function
@@ -170,6 +215,7 @@ function Observe(family, method, handler) end
 ---@overload fun(family: "NetScript", method: "OnMessageSent", handler: fun(opcode: integer, data: wxl.Bytes, suppressed: boolean|nil): boolean|nil): integer
 ---@overload fun(family: "ObjectScript", method: "OnSpellCastRequest", handler: fun(caster: wxl.Object|nil, spell_id: integer, item: wxl.Object|nil, target_guid: wxl.Guid, confirmed: boolean, refused: boolean|nil): boolean|nil): integer
 ---@overload fun(family: "ObjectScript", method: "OnItemUseRequest", handler: fun(item: wxl.Object|nil, item_guid: wxl.Guid, target_guid: wxl.Guid, confirmed: boolean, refused: boolean|nil): boolean|nil): integer
+---@overload fun(family: "ChatScript", method: "OnChatSend", handler: fun(text: string, type: string, language: string, target: string, prefix: string, addon: boolean, suppressed: boolean|nil): boolean|nil): integer
 ---@param family wxl.Family
 ---@param method string
 ---@param handler function

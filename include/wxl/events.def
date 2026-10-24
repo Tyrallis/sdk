@@ -27,7 +27,8 @@
 
 #if !defined(WXL_EVENT) && !defined(WXL_EVENT_World) && !defined(WXL_EVENT_Render) && \
     !defined(WXL_EVENT_Object) && !defined(WXL_EVENT_Asset) && !defined(WXL_EVENT_Net) && \
-    !defined(WXL_EVENT_Lua) && !defined(WXL_EVENT_Combat)
+    !defined(WXL_EVENT_Lua) && !defined(WXL_EVENT_Combat) && !defined(WXL_EVENT_Player) && \
+    !defined(WXL_EVENT_Glue) && !defined(WXL_EVENT_Chat)
     #error "define WXL_EVENT(family, name, id, args) or a WXL_EVENT_<family> before events.def"
 #endif
 
@@ -62,6 +63,18 @@
 #ifndef WXL_EVENT_Combat
     #define WXL_EVENT_Combat(name, id, args)
     #define WXL_EVENT_Combat_DEFAULTED
+#endif
+#ifndef WXL_EVENT_Player
+    #define WXL_EVENT_Player(name, id, args)
+    #define WXL_EVENT_Player_DEFAULTED
+#endif
+#ifndef WXL_EVENT_Glue
+    #define WXL_EVENT_Glue(name, id, args)
+    #define WXL_EVENT_Glue_DEFAULTED
+#endif
+#ifndef WXL_EVENT_Chat
+    #define WXL_EVENT_Chat(name, id, args)
+    #define WXL_EVENT_Chat_DEFAULTED
 #endif
 
 // --- World: the game's own facts -----------------------------------------------------------
@@ -223,6 +236,58 @@ WXL_EVENT(Combat, CombatHeal,        53, wxl_combat_heal_args)
 /** An attack did not land: a spell on one of its targets, or a melee round. */
 WXL_EVENT(Combat, CombatMiss,        54, wxl_combat_miss_args)
 
+// --- World, continued: where the player is, what the mouse is over, the console -----------
+
+/** The player's zone, subzone or indoor state changed, as the client announces it to its interface. */
+WXL_EVENT(World, ZoneChanged,      55, wxl_zone_args)
+/** The object under the mouse changed: a unit, a game object, or nothing. */
+WXL_EVENT(World, MouseoverChanged, 56, wxl_mouseover_args)
+/** A console variable's value changed, by whoever set it. */
+WXL_EVENT(World, CVarChanged,      57, wxl_cvar_args)
+
+// --- Player: what the local player does and is told ---------------------------------------
+
+/** The local player's own movement started: a move, strafe, turn, pitch, jump, ascent or descent, as it is sent to the server. */
+WXL_EVENT(Player, PlayerMoveStart,    58, wxl_player_move_args)
+/** It stopped: the matching stop, or the landing of a fall. */
+WXL_EVENT(Player, PlayerMoveStop,     59, wxl_player_move_args)
+/** The local player gained a level: SMSG_LEVELUP_INFO, with what the level added. */
+WXL_EVENT(Player, PlayerLevelUp,      60, wxl_level_up_args)
+/** The local player gained experience: SMSG_LOG_XPGAIN. */
+WXL_EVENT(Player, PlayerXpGain,       61, wxl_xp_gain_args)
+/** The local player's money changed, with the amounts before and after. */
+WXL_EVENT(Player, PlayerMoneyChanged, 62, wxl_money_args)
+
+// --- Glue: the login screens ---------------------------------------------------------------
+
+/** The glue moved to another screen: "login", "charselect", "charcreate", "realmwizard", ... */
+WXL_EVENT(Glue, GlueScreenChanged,  63, wxl_glue_screen_args)
+/** The character list arrived: SMSG_CHAR_ENUM, with its count. One GlueCharacter per entry follows. */
+WXL_EVENT(Glue, GlueCharacterList,  64, wxl_character_list_args)
+/** One character of the list, in order. */
+WXL_EVENT(Glue, GlueCharacter,      65, wxl_character_args)
+/** The realm list arrived from the logon server, with its count. One GlueRealm per entry follows.
+    May be raised on the logon connection's thread. */
+WXL_EVENT(Glue, GlueRealmList,      66, wxl_realm_list_args)
+/** One realm of the list, in order. May be raised on the logon connection's thread. */
+WXL_EVENT(Glue, GlueRealm,          67, wxl_realm_args)
+/** The world server answered the login: SMSG_AUTH_RESPONSE, with the result and the queue. */
+WXL_EVENT(Glue, GlueAuthResult,     68, wxl_auth_result_args)
+/** The client asks to enter the world with a character: CMSG_PLAYER_LOGIN, before it is sent. */
+WXL_EVENT(Glue, GlueEnterWorld,     69, wxl_enter_world_args)
+
+// --- Chat: what is said ---------------------------------------------------------------------
+
+/** A chat message arrived: SMSG_MESSAGECHAT or SMSG_GM_MESSAGECHAT, as the client shows it; nothing for one it drops. */
+WXL_EVENT(Chat, ChatMessage, 70, wxl_chat_args)
+/** The local player sends a chat or addon message from the interface. A handler may suppress it. */
+WXL_EVENT(Chat, ChatSend,    71, wxl_chat_send_args)
+
+// --- Combat, continued ----------------------------------------------------------------------
+
+/** Power was given or drained: SMSG_SPELLENERGIZELOG, or an energize or drain tick of SMSG_PERIODICAURALOG. */
+WXL_EVENT(Combat, CombatEnergize, 72, wxl_combat_energize_args)
+
 // Give back whatever was defaulted above, so the file can be included again right after with a
 // different selector. What the consumer defined itself is left alone: undefining it here would
 // break the consumer that includes the table twice on purpose.
@@ -258,4 +323,16 @@ WXL_EVENT(Combat, CombatMiss,        54, wxl_combat_miss_args)
 #ifdef WXL_EVENT_Combat_DEFAULTED
     #undef WXL_EVENT_Combat
     #undef WXL_EVENT_Combat_DEFAULTED
+#endif
+#ifdef WXL_EVENT_Player_DEFAULTED
+    #undef WXL_EVENT_Player
+    #undef WXL_EVENT_Player_DEFAULTED
+#endif
+#ifdef WXL_EVENT_Glue_DEFAULTED
+    #undef WXL_EVENT_Glue
+    #undef WXL_EVENT_Glue_DEFAULTED
+#endif
+#ifdef WXL_EVENT_Chat_DEFAULTED
+    #undef WXL_EVENT_Chat
+    #undef WXL_EVENT_Chat_DEFAULTED
 #endif
