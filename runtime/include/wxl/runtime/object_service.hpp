@@ -47,6 +47,14 @@ namespace wxl::runtime
         /// The object the local player controls, or nullptr while out of the world.
         virtual void* LocalPlayer() const = 0;
 
+        /// The object the client holds under a guid, asked of the client itself rather than of
+        /// what the runtime tracks; nullptr when it holds none, or when the runtime cannot ask.
+        virtual void* FindByGuid(wxl_guid guid) const
+        {
+            (void)guid;
+            return nullptr;
+        }
+
 #define WXL_OBJECT_READ(kinds, member, Method, type) \
     virtual bool Method(void* object, type& out) const = 0;
 #define WXL_OBJECT_READ_AT(kinds, member, Method, type) \
@@ -101,8 +109,15 @@ namespace wxl::runtime
         /// The handle an object already has, for a runtime filling in an event's args.
         wxl_handle HandleOf(void* object) const { return handles_.HandleOf(object); }
 
-        /// The handle of the tracked object carrying a guid, or WXL_HANDLE_NONE.
-        wxl_handle FromGuid(wxl_guid guid) const;
+        /**
+         * @brief The handle of the object carrying a guid, or WXL_HANDLE_NONE.
+         *
+         * The tracked objects first. A guid the client holds but no seam announced -- an object
+         * the client brought back by a path the runtime does not see -- is looked up through the
+         * binding and tracked from here on, so a guid in view always resolves. Tracking it this
+         * way raises nothing: the service has no host to raise through.
+         */
+        wxl_handle FromGuid(wxl_guid guid);
 
         const HandleTable& Handles() const { return handles_; }
 

@@ -88,10 +88,13 @@ namespace wxl::runtime
 
     void ObjectService::Clear() { handles_.Clear(); }
 
-    wxl_handle ObjectService::FromGuid(wxl_guid guid) const
+    wxl_handle ObjectService::FromGuid(wxl_guid guid)
     {
         if (guid == WXL_GUID_NONE) return WXL_HANDLE_NONE;
-        return handles_.FindByKey(guid);
+        if (const wxl_handle known = handles_.FindByKey(guid)) return known;
+
+        void* object = binding_.FindByGuid(guid);
+        return object ? Track(object) : WXL_HANDLE_NONE;
     }
 
     void* ObjectService::Object(wxl_handle handle, uint32_t* kind)
@@ -125,8 +128,9 @@ namespace wxl::runtime
     {
         if (!instance_) return WXL_HANDLE_NONE;
 
+        // Tracked on demand like FromGuid: the player is in view whenever the client has one.
         void* player = instance_->binding_.LocalPlayer();
-        return player ? instance_->handles_.HandleOf(player) : WXL_HANDLE_NONE;
+        return player ? instance_->Track(player) : WXL_HANDLE_NONE;
     }
 
     wxl_result WXL_CALL ObjectService::NameThunk(wxl_handle object, wxl_str* out)

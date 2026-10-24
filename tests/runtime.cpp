@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "wxl/runtime/object_service.hpp"
 
@@ -75,6 +76,8 @@ namespace
     public:
         FakeObject*  localPlayer = nullptr;
         mutable int  typeReads   = 0;
+        /// What the client holds, tracked or not: what FindByGuid looks through.
+        std::vector<FakeObject*> held;
 
         static FakeObject* As(void* object) { return static_cast<FakeObject*>(object); }
 
@@ -100,6 +103,12 @@ namespace
         }
         bool  UnitTarget(void* o, wxl_guid& out) const override { return Give(out, As(o)->target); }
         void* LocalPlayer() const override { return localPlayer; }
+        void* FindByGuid(wxl_guid guid) const override
+        {
+            for (FakeObject* object : held)
+                if (object->guid == guid) return object;
+            return nullptr;
+        }
 
         bool Entry(void* o, uint32_t& out) const override { return Give(out, As(o)->entry); }
         bool Position(void* o, wxl_vec3& out) const override { return Give(out, As(o)->position); }
@@ -357,9 +366,39 @@ int main()
         Check(api->from_guid(0x400) == WXL_HANDLE_NONE, "retiring a stale handle changes nothing");
 
         service.Clear();
-        Check(api->valid(wolfHandle) == WXL_FALSE, "clearing retires everything");
-        Check(api->local_player() == WXL_HANDLE_NONE, "including the local player");
-        Check(api->from_guid(0x100) == WXL_HANDLE_NONE, "and empties the guid index with it");
+        Check(api->valid(wolfHandle) == WXL_FALSE && api->valid(playerHandle) == WXL_FALSE,
+              "clearing retires everything, the local player included");
+        binding.localPlayer = nullptr;
+        Check(api->local_player() == WXL_HANDLE_NONE, "with no local player there is none");
+        Check(api->from_guid(0x100) == WXL_HANDLE_NONE, "and the guid index is empty with it");
+    }
+
+    Section("what the client holds and no seam announced");
+    {
+        // The client revived the boar by a path no seam sees: it holds it, nothing tracks it.
+        binding.held = {&boar, &player};
+        const wxl_handle found = api->from_guid(0x200);
+        Check(found != WXL_HANDLE_NONE && found != boarHandle,
+              "a guid the client holds resolves, with a handle of its own episode");
+        Check(api->valid(found) == WXL_TRUE && api->type(found) == WXL_OBJECT_UNIT,
+              "the object is tracked from there, its kind read once");
+        Check(api->from_guid(0x200) == found && service.HandleOf(&boar) == found,
+              "and looked up again it is the same handle, from the index");
+        Check(api->from_guid(0x999) == WXL_HANDLE_NONE, "a guid the client does not hold is nothing");
+
+        binding.localPlayer = &player;
+        const wxl_handle me = api->local_player();
+        Check(me != WXL_HANDLE_NONE && me != playerHandle && api->from_guid(0x100) == me,
+              "the local player is tracked on demand too, under its guid");
+
+        uint32_t   health = 0;
+        wxl_handle target = WXL_HANDLE_NONE;
+        Check(api->unit_target(me, &target) == WXL_OK && target == found && api->unit_health(target, &health) == WXL_OK &&
+                  health == 90,
+              "a target resolves through the same lookup");
+        service.Untrack(found);
+        binding.held.clear();
+        Check(api->from_guid(0x200) == WXL_HANDLE_NONE, "once the client lets it go, nothing resolves");
     }
 
     if (g_failures == 0)

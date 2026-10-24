@@ -27,6 +27,11 @@ extern "C" {
  * WXL_E_NOT_FOUND for a handle that no longer resolves, or WXL_E_INVALID for a handle of the
  * wrong kind -- asking a game object for its health is a mistake, not a missing value.
  *
+ * A handle names one visibility episode of an object: from the ObjectCreate that announces it to
+ * the ObjectDestroy that sees it leave. An object that leaves view and comes back -- even the same
+ * client object, revived before the client freed it -- is announced again with a new handle, and
+ * the old one stays stale. The guid is what lasts across episodes.
+ *
  * Main thread only: the objects behind the handles belong to the client's object manager, which
  * lives on the thread that runs the game. A read from another thread is a data race.
  */
@@ -45,7 +50,8 @@ typedef struct wxl_object_api
     /// A wxl_object_type value, or WXL_OBJECT_UNKNOWN.
     uint32_t(WXL_CALL* type)(wxl_handle object);
 
-    /// The handle for a guid, or WXL_HANDLE_NONE when that object is not in view.
+    /// The handle for a guid, or WXL_HANDLE_NONE when that object is not in view. Any object the
+    /// client holds resolves, announced or not.
     wxl_handle(WXL_CALL* from_guid)(wxl_guid guid);
 
     /// The handle of the object the local player controls.
