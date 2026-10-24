@@ -127,7 +127,7 @@ target, a link line or an install rule.
   "id": "wxl.scout",
   "name": "Scout",
   "version": "1.0.0",
-  "abi": "0.5",
+  "abi": "0.1.5",
   "description": "Keeps a journal of what happens around you and hands it to the interface.",
   "binaries": {
     "win-x64": "bin/x64/scout.dll",
@@ -145,7 +145,7 @@ target, a link line or an install rule.
 | Field | What it does |
 |---|---|
 | `id` | your identity, forever. It names your folder and appears in every log line |
-| `abi` | the contract version you built against. A mismatch is refused, deliberately |
+| `abi` | the contract version you need, `major.minor.feature`. A runtime of another major or minor, or of an earlier feature, refuses your mod, deliberately |
 | `requires` | a service you cannot work without. A runtime without it refuses your mod |
 | `optional` | a service you use if it is there, and carry on without if it is not |
 
@@ -777,7 +777,9 @@ print(ScoutNearby(), "units in view")
 |---|---|
 | nothing at all in the log | the folder shape is wrong. It must be `Mods/<id>/mod.json` and `Mods/<id>/bin/<arch>/<name>.dll` |
 | `refused ...: requires service ... which this runtime does not have` | your `requires` cannot be met here. Move it to `optional` if you can work without it |
-| `refused ...: abi 0.5, this runtime serves 0.4` | you built against a newer SDK than the runtime. Rebuild, or update the runtime |
+| `refused ...: needs abi 0.1.7, newer than this runtime's 0.1.5` | your manifest asks for a later SDK than the runtime has. Update the runtime, or ask for less if the mod can do without what came after |
+| `refused ...: needs abi 0.2.0; this runtime implements 0.1.5` | another stage of the platform, or another major. Rebuild against the SDK of that runtime |
+| `'abi' is "0.5", the two-part numbering the SDK used before 0.1.5` | the mod predates the three-part version. Rebuild it against the current SDK and write the version the message names |
 | the build fails on the `abi` field | `mod.json` and the SDK headers disagree. Set `abi` to what the error names |
 | the client does not start at all | the DLL beside the executable is the wrong architecture |
 | the mod loads but nothing happens | an event that runtime does not raise. Its README lists what it raises today |
@@ -806,7 +808,7 @@ inside your DLL. Never let an exception escape a hook.
 answers "invalid" rather than reading whatever took its place. Keep handles, not addresses.
 
 **Ids are forever.** Event ids and stage numbers are appended, never renumbered. A mod built
-today keeps working against a later runtime of the same major version.
+today keeps working against a later runtime of the same major and minor.
 
 **Ask, do not assume.** Require what you truly cannot work without, ask for the rest, and say
 something useful in the log when it is not there. "This mod does not run here, and here is

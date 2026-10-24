@@ -376,8 +376,12 @@ int main()
         const wxl_runtime_info* info = host.Table()->runtime();
         Check(info != nullptr, "the runtime describes itself");
         Check(info->abi_major == WXL_ABI_VERSION_MAJOR, "majors agree");
-        Check(info->abi_minor >= WXL_ABI_VERSION_MINOR,
+        Check(info->abi_minor == WXL_ABI_VERSION_MINOR, "and, under major 0, minors");
+        Check(info->abi_feature >= WXL_ABI_VERSION_FEATURE,
               "the runtime is not older than what this mod was built against");
+        Check(host.Table()->abi_major == info->abi_major && host.Table()->abi_minor == info->abi_minor &&
+                  host.Table()->abi_feature == info->abi_feature,
+              "the table and the runtime info say the same version");
         Check(info->struct_size == sizeof(wxl_runtime_info), "struct_size is filled in");
     }
 
@@ -655,7 +659,10 @@ int main()
         const size_t before = host.LiveSubscriptions();
         LifecycleMod::script = &world;
 
-        Check(wxl_mod_query()->abi_major == WXL_ABI_VERSION_MAJOR &&
+        Check(wxl_mod_query()->struct_size == sizeof(wxl_mod_info) &&
+                  wxl_mod_query()->abi_major == WXL_ABI_VERSION_MAJOR &&
+                  wxl_mod_query()->abi_minor == WXL_ABI_VERSION_MINOR &&
+                  wxl_mod_query()->abi_feature == WXL_ABI_VERSION_FEATURE &&
                   std::strcmp(wxl_mod_query()->id, "wxl.contract") == 0,
               "WXL_MOD reports the mod");
         Check(wxl_mod_load(host.Table()) == WXL_OK, "load runs OnLoad");

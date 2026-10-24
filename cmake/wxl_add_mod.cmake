@@ -141,9 +141,26 @@ function(_wxl_mod_check_manifest manifest archs output_name out_id)
         set(abi_major "${CMAKE_MATCH_1}")
         string(REGEX MATCH "WXL_ABI_VERSION_MINOR[ \t]+([0-9]+)" _ "${abi_src}")
         set(abi_minor "${CMAKE_MATCH_1}")
-        if(NOT abi STREQUAL "${abi_major}.${abi_minor}")
+        string(REGEX MATCH "WXL_ABI_VERSION_FEATURE[ \t]+([0-9]+)" _ "${abi_src}")
+        set(abi_feature "${CMAKE_MATCH_1}")
+        set(abi_headers "${abi_major}.${abi_minor}.${abi_feature}")
+        # The manifest names the lowest version the mod needs: the headers' major.minor, and a
+        # feature no higher than theirs.
+        if(abi MATCHES "^([0-9]+)\\.([0-9]+)$")
+            message(FATAL_ERROR "wxl_add_mod: ${manifest}: \"abi\" is \"${abi}\", the two-part "
+                "numbering the SDK used before 0.1.5. Set \"abi\": \"${abi_headers}\".")
+        endif()
+        set(abi_ok FALSE)
+        if(abi MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
+            if(CMAKE_MATCH_1 EQUAL abi_major AND CMAKE_MATCH_2 EQUAL abi_minor
+               AND NOT CMAKE_MATCH_3 GREATER abi_feature)
+                set(abi_ok TRUE)
+            endif()
+        endif()
+        if(NOT abi_ok)
             message(FATAL_ERROR "wxl_add_mod: ${manifest}: \"abi\" is \"${abi}\" but the SDK headers "
-                "are ${abi_major}.${abi_minor}. Set \"abi\": \"${abi_major}.${abi_minor}\".")
+                "are ${abi_headers}: the manifest can ask for ${abi_major}.${abi_minor}.0 to "
+                "${abi_headers}. Set \"abi\": \"${abi_headers}\".")
         endif()
     endif()
 

@@ -3,6 +3,7 @@
 
 #include "Runtime.hpp"
 
+#include "wxl/host/admission.hpp"
 #include "wxl/host/manifest.hpp"
 
 #include <algorithm>
@@ -40,11 +41,6 @@ namespace wxl::lua
                 if (component == "..") return false;
             return true;
         }
-
-        std::string AbiText(uint32_t major, uint32_t minor)
-        {
-            return std::to_string(major) + "." + std::to_string(minor);
-        }
     } // namespace
 
     Runtime::Runtime(const wxl_host* host)
@@ -67,6 +63,19 @@ namespace wxl::lua
     {
         Stop();
         if (instance_ == this) instance_ = nullptr;
+    }
+
+    host::AbiVersion Runtime::Abi() const
+    {
+        const size_t     needed  = offsetof(wxl_host, abi_feature) + sizeof(host_->abi_feature);
+        host::AbiVersion runtime = {host_->abi_major, host_->abi_minor,
+                                    host_->struct_size >= needed ? host_->abi_feature : 0};
+        const host::AbiVersion built = {WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
+                                        WXL_ABI_VERSION_FEATURE};
+        // The host admitted this binary, so the majors agree: the lower of the two is served.
+        if (runtime.major != built.major) return runtime;
+        if (runtime.minor != built.minor) return runtime.minor < built.minor ? runtime : built;
+        return runtime.feature < built.feature ? runtime : built;
     }
 
     void Runtime::Log(wxl_log_level level, std::string_view message) const
@@ -108,14 +117,8 @@ namespace wxl::lua
 
         if (!StaysInside(manifest.lua))
             return refuse("entry '" + manifest.lua + "' leaves the mod folder");
-        if (manifest.abi.major != host_->abi_major)
-            return refuse("written against abi " + AbiText(manifest.abi.major, manifest.abi.minor) +
-                          "; this runtime implements " + AbiText(host_->abi_major, host_->abi_minor) +
-                          " and a different major cannot be reconciled");
-        if (manifest.abi.minor > host_->abi_minor)
-            return refuse("written against abi " + AbiText(manifest.abi.major, manifest.abi.minor) +
-                          ", newer than this runtime's " +
-                          AbiText(host_->abi_major, host_->abi_minor));
+        if (const std::string reason = host::AbiRefusal(manifest.abi, Abi()); !reason.empty())
+            return refuse(reason);
         for (const host::ServiceRef& ref : manifest.required)
             if (!host_->has_service(ref.service.c_str(), ref.version))
                 return refuse("requires service " + ref.service + " version " +
@@ -203,7 +206,7 @@ namespace wxl::lua
             candidate.manifest.id          = id;
             candidate.manifest.name        = name;
             candidate.manifest.version.text = "0.0.0";
-            candidate.manifest.abi         = host::AbiVersion{host_->abi_major, host_->abi_minor};
+            candidate.manifest.abi         = Abi();
             candidate.manifest.lua         = "init.lua";
             Log(WXL_LOG_INFO, "found " + id + " in folder '" + name + "' (no manifest)");
             candidates.push_back(std::move(candidate));

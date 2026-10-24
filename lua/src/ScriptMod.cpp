@@ -312,7 +312,7 @@ namespace wxl::lua
         lua_setfield(L, -2, "directory");
         lua_setfield(L, -2, "mod");
 
-        lua_createtable(L, 0, 5); // wxl.runtime
+        lua_createtable(L, 0, 7); // wxl.runtime
         if (const wxl_runtime_info* info = runtime_.Host()->runtime())
         {
             lua_pushlstring(L, info->id.data ? info->id.data : "", info->id.data ? info->id.size : 0);
@@ -321,11 +321,18 @@ namespace wxl::lua
             lua_setfield(L, -2, "name");
             lua_pushnumber(L, info->version);
             lua_setfield(L, -2, "version");
-            lua_pushnumber(L, info->abi_major);
-            lua_setfield(L, -2, "abi_major");
-            lua_pushnumber(L, info->abi_minor);
-            lua_setfield(L, -2, "abi_minor");
         }
+        // The contract this mod is served, which wxl.lua may cap below the runtime's own.
+        const host::AbiVersion abi = runtime_.Abi();
+        lua_pushnumber(L, abi.major);
+        lua_setfield(L, -2, "abi_major");
+        lua_pushnumber(L, abi.minor);
+        lua_setfield(L, -2, "abi_minor");
+        lua_pushnumber(L, abi.feature);
+        lua_setfield(L, -2, "abi_feature");
+        const std::string abiText = host::AbiText(abi);
+        lua_pushlstring(L, abiText.data(), abiText.size());
+        lua_setfield(L, -2, "abi");
         lua_setfield(L, -2, "runtime");
 
         lua_newtable(L); // wxl.events: family -> { "OnX", ... }

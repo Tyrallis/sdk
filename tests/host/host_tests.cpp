@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -82,7 +83,8 @@ namespace
 #define WXL_TEST_STR(x)  WXL_TEST_STR_(x)
 
     /// The ABI the host under test speaks, as a manifest spells it.
-    constexpr const char* kAbi = WXL_TEST_STR(WXL_ABI_VERSION_MAJOR) "." WXL_TEST_STR(WXL_ABI_VERSION_MINOR);
+    constexpr const char* kAbi = WXL_TEST_STR(WXL_ABI_VERSION_MAJOR) "." WXL_TEST_STR(WXL_ABI_VERSION_MINOR) "."
+        WXL_TEST_STR(WXL_ABI_VERSION_FEATURE);
 
     /// A manifest with the required fields filled and @p extra spliced in before the brace.
     std::string ManifestText(const char* id, const std::string& extra = std::string(),
@@ -232,15 +234,15 @@ namespace
     std::vector<std::string> g_trace;
 
     wxl_mod_info g_goodInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
-                            "wxl.good", "Good", 1};
+                            "wxl.good", "Good", 1, WXL_ABI_VERSION_FEATURE};
     wxl_mod_info g_secondInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
-                              "wxl.second", "Second", 2};
+                              "wxl.second", "Second", 2, WXL_ABI_VERSION_FEATURE};
     wxl_mod_info g_nostageInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
-                               "wxl.nostage", "No stage", 3};
+                               "wxl.nostage", "No stage", 3, WXL_ABI_VERSION_FEATURE};
     wxl_mod_info g_badloadInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
-                               "wxl.badload", "Bad load", 4};
+                               "wxl.badload", "Bad load", 4, WXL_ABI_VERSION_FEATURE};
     wxl_mod_info g_liarInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
-                            "wxl.someone-else", "Liar", 5};
+                            "wxl.someone-else", "Liar", 5, WXL_ABI_VERSION_FEATURE};
 
     const wxl_mod_info* WXL_CALL GoodQuery(void) { return &g_goodInfo; }
     wxl_result WXL_CALL GoodLoad(const wxl_host* host)
@@ -299,13 +301,13 @@ namespace
     // --- mods that fault, for the crash guard ----------------------------------------------
 
     wxl_mod_info g_steadyInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
-                              "wxl.steady", "Steady", 10};
+                              "wxl.steady", "Steady", 10, WXL_ABI_VERSION_FEATURE};
     wxl_mod_info g_faultyInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
-                              "wxl.faulty", "Faulty", 11};
+                              "wxl.faulty", "Faulty", 11, WXL_ABI_VERSION_FEATURE};
     wxl_mod_info g_stagecrashInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
-                                  "wxl.stagecrash", "Stage crash", 12};
+                                  "wxl.stagecrash", "Stage crash", 12, WXL_ABI_VERSION_FEATURE};
     wxl_mod_info g_loadcrashInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
-                                 "wxl.loadcrash", "Load crash", 13};
+                                 "wxl.loadcrash", "Load crash", 13, WXL_ABI_VERSION_FEATURE};
 
     /// Writes through a null pointer. The pointer is volatile so the store is emitted as written.
     void Crash()
@@ -520,7 +522,8 @@ int main(int argc, char** argv)
         Check(manifest.version.major == 1 && manifest.version.minor == 0 &&
                   manifest.version.patch == 0 && manifest.version.text == "1.0.0",
               "the version is parsed and kept as written");
-        Check(manifest.abi.major == WXL_ABI_VERSION_MAJOR && manifest.abi.minor == WXL_ABI_VERSION_MINOR,
+        Check(manifest.abi.major == WXL_ABI_VERSION_MAJOR && manifest.abi.minor == WXL_ABI_VERSION_MINOR &&
+                  manifest.abi.feature == WXL_ABI_VERSION_FEATURE,
               "the abi is parsed");
         Check(manifest.binaries.size() == 1 && manifest.BinaryFor(CurrentTarget()) &&
                   *manifest.BinaryFor(CurrentTarget()) == "bin/mod.dll",
@@ -539,11 +542,11 @@ int main(int argc, char** argv)
 
         Manifest script;
         Check(ParseManifest("{ \"id\": \"wxl.s\", \"name\": \"S\", \"version\": \"1.0.0\", \"abi\": "
-                            "\"0.1\", \"lua\": \"init.lua\" }",
+                            "\"0.1.0\", \"lua\": \"init.lua\" }",
                             script, error) &&
                   script.binaries.empty() && script.lua == "init.lua",
               "a manifest with lua and no binaries is a script mod and parses");
-        Check(Rejects("{ \"id\": \"wxl.s\", \"name\": \"S\", \"version\": \"1.0.0\", \"abi\": \"0.1\" }",
+        Check(Rejects("{ \"id\": \"wxl.s\", \"name\": \"S\", \"version\": \"1.0.0\", \"abi\": \"0.1.0\" }",
                       "'binaries' is missing"),
               "without either, binaries is still required");
         Check(Rejects(ManifestText("wxl.x", "\"lua\": \"\""), "at least 1"), "an empty lua entry is refused");
@@ -566,9 +569,12 @@ int main(int argc, char** argv)
             Check(!ParseSemver("1.0.0-a b", semver), "a space in the label is not");
             Check(!ParseSemver("v1.0.0", semver), "a prefix is not");
             AbiVersion abi;
-            Check(ParseAbi("12.34", abi) && abi.major == 12 && abi.minor == 34, "an abi parses");
-            Check(!ParseAbi("1", abi) && !ParseAbi("1.2.3", abi) && !ParseAbi("1.x", abi),
-                  "anything but major.minor is refused");
+            Check(ParseAbi("12.34.56", abi) && abi.major == 12 && abi.minor == 34 && abi.feature == 56,
+                  "an abi parses");
+            Check(AbiText(abi) == "12.34.56", "and prints as written");
+            Check(!ParseAbi("1", abi) && !ParseAbi("1.2", abi) && !ParseAbi("1.2.3.4", abi) &&
+                      !ParseAbi("1.2.x", abi) && !ParseAbi("1..3", abi),
+                  "anything but major.minor.feature is refused");
         }
 
         Check(IsValidModId("wxl.example") && IsValidModId("a-b.c-1") && IsValidModId("abc"),
@@ -579,7 +585,7 @@ int main(int argc, char** argv)
               "ill-formed ids fail");
 
         std::string message;
-        Check(Rejects("{ \"name\": \"x\", \"version\": \"1.0.0\", \"abi\": \"0.1\", "
+        Check(Rejects("{ \"name\": \"x\", \"version\": \"1.0.0\", \"abi\": \"0.1.0\", "
                       "\"binaries\": { \"win-x64\": \"a\" } }",
                       "'id' is missing"),
               "a missing required field is named");
@@ -589,19 +595,22 @@ int main(int argc, char** argv)
         std::string badVersion = ManifestText("wxl.x");
         badVersion.replace(badVersion.find("1.0.0"), 5, "1.0");
         Check(Rejects(badVersion, "semver"), "a bad version is refused");
-        Check(Rejects(ManifestText("wxl.x", "", "0"), "major.minor"), "a bad abi is refused");
-        Check(Rejects(ManifestText("wxl.x", "", "0.1", ""), "at least 1"),
+        Check(Rejects(ManifestText("wxl.x", "", "0"), "major.minor.feature"), "a bad abi is refused");
+        Check(Rejects(ManifestText("wxl.x", "", "0.5"), "two-part numbering", &message) &&
+                  Contains(message, ("\"" + std::string(kAbi) + "\"").c_str()),
+              "a two-part abi is refused as the old numbering, naming the one to write");
+        Check(Rejects(ManifestText("wxl.x", "", "0.1.0", ""), "at least 1"),
               "an empty binary path is refused");
         Check(Rejects("{ \"id\": \"wxl.x\", \"name\": \"x\", \"version\": \"1.0.0\", \"abi\": "
-                      "\"0.1\", \"binaries\": {} }",
+                      "\"0.1.0\", \"binaries\": {} }",
                       "at least one target"),
               "empty binaries are refused");
         Check(Rejects("{ \"id\": \"wxl.x\", \"name\": \"x\", \"version\": \"1.0.0\", \"abi\": "
-                      "\"0.1\", \"binaries\": { \"mac-arm64\": \"a\" } }",
+                      "\"0.1.0\", \"binaries\": { \"mac-arm64\": \"a\" } }",
                       "unknown target"),
               "an unknown target is refused");
         Check(Rejects("{ \"id\": \"wxl.x\", \"name\": \"x\", \"version\": \"1.0.0\", \"abi\": "
-                      "\"0.1\", \"binaries\": { \"win-x64\": 1 } }",
+                      "\"0.1.0\", \"binaries\": { \"win-x64\": 1 } }",
                       "must be a string"),
               "a non-string binary is refused");
         Check(Rejects(ManifestText("wxl.x", "\"name\": \"\""), "duplicate"),
@@ -762,8 +771,20 @@ int main(int argc, char** argv)
         Manifest minor  = manifest;
         minor.abi.minor = WXL_ABI_VERSION_MINOR + 1;
         decision        = AdmitManifest(minor, CurrentTarget(), services);
-        Check(decision.verdict == Verdict::Refuse && Contains(decision.reason, "newer"),
+        Check(decision.verdict == Verdict::Refuse && Contains(decision.reason, "minor"),
               "a higher abi minor is refused");
+
+        Manifest feature    = manifest;
+        feature.abi.feature = WXL_ABI_VERSION_FEATURE + 1;
+        decision            = AdmitManifest(feature, CurrentTarget(), services);
+        Check(decision.verdict == Verdict::Refuse && Contains(decision.reason, "newer") &&
+                  Contains(decision.reason, AbiText(feature.abi).c_str()) && Contains(decision.reason, kAbi),
+              "a higher abi feature is refused, naming both versions");
+
+        Manifest older    = manifest;
+        older.abi.feature = 0;
+        Check(AdmitManifest(older, CurrentTarget(), services).verdict == Verdict::Load,
+              "a lower abi feature is admitted");
 
         Manifest needs = manifest;
         needs.required.push_back(ServiceRef{"wxl.object", 1});
@@ -788,11 +809,24 @@ int main(int argc, char** argv)
                   Contains(AdmitInfo(manifest, nullptr).reason, "NULL"),
               "a NULL from wxl_mod_query is refused");
         wxl_mod_info info{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
-                          "wxl.x", "X", 1};
+                          "wxl.x", "X", 1, WXL_ABI_VERSION_FEATURE};
         Check(AdmitInfo(manifest, &info).verdict == Verdict::Load, "a matching info is accepted");
-        info.struct_size = sizeof(wxl_mod_info) - 4;
-        Check(Contains(AdmitInfo(manifest, &info).reason, "struct_size"), "a wrong struct_size is refused");
+        info.struct_size = static_cast<uint32_t>(offsetof(wxl_mod_info, abi_feature));
+        Check(Contains(AdmitInfo(manifest, &info).reason, "two-part"),
+              "an info without abi_feature is refused as the old numbering");
+        info.struct_size = 8;
+        Check(Contains(AdmitInfo(manifest, &info).reason, "struct_size is 8"), "a short struct_size is refused");
+        info.struct_size = sizeof(wxl_mod_info) + 8;
+        Check(AdmitInfo(manifest, &info).verdict == Verdict::Load,
+              "a longer info, from later headers, is accepted");
         info.struct_size = sizeof(wxl_mod_info);
+        info.abi_feature = WXL_ABI_VERSION_FEATURE + 1;
+        Check(AdmitInfo(manifest, &info).verdict == Verdict::Load,
+              "a binary built against a later feature than its manifest needs is accepted");
+        info.abi_feature = 0;
+        Check(Contains(AdmitInfo(manifest, &info).reason, ("asks for " + std::string(kAbi)).c_str()),
+              "a binary built against less than its manifest asks for is refused");
+        info.abi_feature = WXL_ABI_VERSION_FEATURE;
         info.id          = "wxl.y";
         Check(Contains(AdmitInfo(manifest, &info).reason, "'wxl.y'"), "an id mismatch is refused");
         info.id = nullptr;
@@ -800,6 +834,25 @@ int main(int argc, char** argv)
         info.id        = "wxl.x";
         info.abi_minor = WXL_ABI_VERSION_MINOR + 1;
         Check(Contains(AdmitInfo(manifest, &info).reason, "abi"), "an abi mismatch is refused");
+    }
+
+    Section("the abi rule");
+    {
+        const auto refusal = [](AbiVersion needed, AbiVersion served) { return AbiRefusal(needed, served); };
+        Check(refusal({0, 1, 5}, {0, 1, 5}).empty() && refusal({0, 1, 3}, {0, 1, 5}).empty(),
+              "the same or a lower feature is served");
+        Check(refusal({0, 1, 7}, {0, 1, 5}) ==
+                  "needs abi 0.1.7, newer than this runtime's 0.1.5: it uses what was appended after 0.1.5",
+              "a higher feature is refused, saying both versions");
+        Check(Contains(refusal({1, 0, 0}, {0, 1, 5}), "different major cannot be reconciled") &&
+                  Contains(refusal({0, 1, 5}, {1, 0, 0}), "different major"),
+              "another major is refused either way");
+        Check(Contains(refusal({0, 2, 0}, {0, 1, 5}), "while the major is 0 a different minor") &&
+                  Contains(refusal({0, 1, 0}, {0, 2, 0}), "while the major is 0 a different minor"),
+              "under major 0, another minor is refused either way");
+        Check(refusal({1, 1, 9}, {1, 2, 0}).empty(), "after major 0, an earlier stage is served");
+        Check(refusal({1, 3, 0}, {1, 2, 4}) == "needs abi 1.3.0, a later stage than this runtime's 1.2.4",
+              "and a later one is refused");
     }
 
     Section("service registry");
@@ -995,9 +1048,9 @@ int main(int argc, char** argv)
         WriteFile(mods / "needy" / "mod.json",
                   ManifestText("wxl.needy", "\"requires\": [ { \"service\": \"wxl.nothing\", \"version\": 1 } ]",
                                kAbi, "good.dll"));
-        WriteFile(mods / "oldabi" / "mod.json", ManifestText("wxl.oldabi", "", "9.0", "good.dll"));
+        WriteFile(mods / "oldabi" / "mod.json", ManifestText("wxl.oldabi", "", "9.0.0", "good.dll"));
         WriteFile(mods / "elsewhere" / "mod.json",
-                  "{ \"id\": \"wxl.elsewhere\", \"name\": \"E\", \"version\": \"1.0.0\", \"abi\": \"0.1\", "
+                  "{ \"id\": \"wxl.elsewhere\", \"name\": \"E\", \"version\": \"1.0.0\", \"abi\": \"0.1.0\", "
                   "\"binaries\": { \"linux-x64\": \"e.so\" } }");
         WriteFile(mods / "unreadable" / "mod.json", "{ \"id\": \"wxl.unreadable\" ");
         WriteFile(mods / "noquery" / "mod.json", ManifestText("wxl.noquery", "", kAbi, "noquery.dll"));
@@ -1026,7 +1079,9 @@ int main(int argc, char** argv)
         g_trace.clear();
         ModHost host(config);
         Check(host.Table()->struct_size == sizeof(wxl_host) &&
-                  host.Table()->abi_major == WXL_ABI_VERSION_MAJOR,
+                  host.Table()->abi_major == WXL_ABI_VERSION_MAJOR &&
+                  host.Table()->abi_feature == WXL_ABI_VERSION_FEATURE &&
+                  host.Table()->runtime()->abi_feature == WXL_ABI_VERSION_FEATURE,
               "the table is filled before anything loads");
         Check(host.Services().Has("wxl.runtime", 1), "runtime services are published at construction");
 
@@ -1064,7 +1119,7 @@ int main(int argc, char** argv)
         Check(refused && Contains(refused->reason, "wxl.nothing"),
               "a missing required service is refused");
         refused = FindRefused(host, "wxl.oldabi");
-        Check(refused && Contains(refused->reason, "9.0"), "a foreign abi is refused");
+        Check(refused && Contains(refused->reason, "9.0.0"), "a foreign abi is refused");
         refused = FindRefused(host, "wxl.elsewhere");
         Check(refused && refused->verdict == Verdict::Skip, "a mod for another target is skipped");
         refused = FindRefused(host, "wxl.noquery");

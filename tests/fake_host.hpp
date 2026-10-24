@@ -46,6 +46,7 @@ namespace wxltest
             info_.version     = 1;
             info_.abi_major   = WXL_ABI_VERSION_MAJOR;
             info_.abi_minor   = WXL_ABI_VERSION_MINOR;
+            info_.abi_feature = WXL_ABI_VERSION_FEATURE;
 
             table_.struct_size     = sizeof(table_);
             table_.abi_major       = WXL_ABI_VERSION_MAJOR;
@@ -58,6 +59,7 @@ namespace wxltest
             table_.subscribe       = &FakeHost::Subscribe;
             table_.unsubscribe     = &FakeHost::Unsubscribe;
             table_.emit            = &FakeHost::Emit;
+            table_.abi_feature     = WXL_ABI_VERSION_FEATURE;
         }
 
         const wxl_host* Table() const { return &table_; }

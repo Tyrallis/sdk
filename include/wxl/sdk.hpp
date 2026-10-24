@@ -1178,7 +1178,8 @@ namespace wxl
     extern "C" WXL_EXPORT const wxl_mod_info* WXL_CALL wxl_mod_query(void)                    \
     {                                                                                         \
         static const wxl_mod_info info = {sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR,        \
-                                          WXL_ABI_VERSION_MINOR, ModId, ModName, ModVersion}; \
+                                          WXL_ABI_VERSION_MINOR, ModId, ModName, ModVersion,  \
+                                          WXL_ABI_VERSION_FEATURE};                           \
         return &info;                                                                         \
     }                                                                                         \
     extern "C" WXL_EXPORT wxl_result WXL_CALL wxl_mod_load(const wxl_host* host)              \

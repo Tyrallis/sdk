@@ -449,8 +449,10 @@ function Object:Guild() end
 ---@field id string
 ---@field name string
 ---@field version integer
+---@field abi string the contract this mod is served, "major.minor.feature"
 ---@field abi_major integer
 ---@field abi_minor integer
+---@field abi_feature integer
 
 ---@class wxl.object
 local object = {}

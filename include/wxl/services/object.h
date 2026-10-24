@@ -84,7 +84,7 @@ typedef struct wxl_object_api
     /// Positions for many handles at once. Writes WXL_HANDLE_NONE entries as the origin.
     wxl_result(WXL_CALL* positions)(const wxl_handle* objects, uint32_t count, wxl_vec3* out);
 
-    // --- appended in 0.2: the client's own object taxonomy ------------------------------------
+    // --- appended in 0.1.2: the client's own object taxonomy----------------------------------
     //
     // The client knows eight kinds of object (wxl_object_type), and each kind carries its own
     // descriptor block. One getter per field a mod can use, gated like the unit getters above:

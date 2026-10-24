@@ -52,6 +52,16 @@ typedef struct wxl_mod_info
     const char* id;        ///< stable identity, e.g. "wxl.foliage"; matches the manifest
     const char* name;      ///< display name, used in logs
     uint32_t    version;   ///< the mod's own version, opaque to the runtime
+
+    // --- appended at 0.1.5 -------------------------------------------------------------------
+
+    /**
+     * @brief WXL_ABI_VERSION_FEATURE seen at compile time.
+     *
+     * On x64 it lands in what was the struct's tail padding, so @ref struct_size alone does not
+     * tell a binary built before the three-part numbering apart: the abi_minor it reports does.
+     */
+    uint32_t abi_feature;
 } wxl_mod_info;
 
 // --- Entry points --------------------------------------------------------------------------

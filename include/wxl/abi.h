@@ -28,17 +28,26 @@
 
 // --- Versioning ----------------------------------------------------------------------------
 //
+// The contract version has three parts, major.minor.feature, written "0.1.5".
+//
 // Major changes when an existing field, signature or event id changes meaning. A runtime refuses
 // a mod whose major differs: nothing can be salvaged from that.
 //
-// Minor changes when something is appended. A runtime accepts a mod built against a minor lower
-// than or equal to its own, and refuses a higher one -- the mod would expect services the runtime
-// does not have. Mods may use `wxl_host.abi_minor` to adapt rather than require.
+// Minor is a stage of the platform: 0.1 is the first scope. A runtime refuses a mod of a later
+// stage than its own. While the major is 0 the stages are not supersets of each other, so a
+// different minor is refused either way.
 //
-// Major 0 means the contract is still moving: any release may break any other.
+// Feature changes when something is appended: a field at the end of a struct, an event, a
+// service. Within one major.minor, a runtime accepts a mod that needs a feature lower than or
+// equal to its own and refuses a higher one -- the mod would expect what the runtime does not
+// have. A manifest's "abi" names the lowest version the mod needs; a mod built against newer
+// headers may name an older one and read `wxl_host.abi_feature` to adapt rather than require.
+//
+// Major 0 means the contract is still moving: any minor may break any other.
 
-#define WXL_ABI_VERSION_MAJOR 0
-#define WXL_ABI_VERSION_MINOR 5
+#define WXL_ABI_VERSION_MAJOR   0
+#define WXL_ABI_VERSION_MINOR   1
+#define WXL_ABI_VERSION_FEATURE 5
 
 // --- Platform ------------------------------------------------------------------------------
 //

@@ -54,7 +54,7 @@ typedef struct wxl_runtime_info
     uint32_t abi_major; ///< the contract it implements
     uint32_t abi_minor;
 
-    // --- appended after 0.3 ------------------------------------------------------------------
+    // --- appended after 0.1.3 ----------------------------------------------------------------
 
     /**
      * @brief The directory the runtime scans for mods, UTF-8; empty when it scans none.
@@ -63,6 +63,11 @@ typedef struct wxl_runtime_info
      * skipped -- so that both read the same tree. Check @ref struct_size before reading it.
      */
     wxl_str mods_directory;
+
+    // --- appended at 0.1.5 -------------------------------------------------------------------
+
+    /// The feature of the contract it implements, after @ref abi_major and @ref abi_minor.
+    uint32_t abi_feature;
 } wxl_runtime_info;
 
 /**
@@ -132,6 +137,17 @@ typedef struct wxl_host
      * @param args  that event's args struct; the runtime forwards it without interpreting it.
      */
     void(WXL_CALL* emit)(wxl_event event, const void* args);
+
+    // --- appended at 0.1.5 -------------------------------------------------------------------
+
+    /**
+     * @brief The feature of the contract the runtime implements, after @ref abi_major and
+     *        @ref abi_minor.
+     *
+     * A mod whose manifest asks for less than its headers carry compares it with
+     * WXL_ABI_VERSION_FEATURE before using what was appended in between.
+     */
+    uint32_t abi_feature;
 } wxl_host;
 
 #ifdef __cplusplus

@@ -30,9 +30,9 @@
       "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?$"
     },
     "abi": {
-      "description": "The contract version the binaries were built against, major.minor. A runtime refuses a different major, and a minor higher than its own.",
+      "description": "The lowest contract version the mod needs, major.minor.feature, e.g. \"0.1.5\". A runtime refuses a different major; while the major is 0, a different minor; and within the same major.minor, a feature higher than its own. A binary must be built against headers of this major.minor and at least this feature.",
       "type": "string",
-      "pattern": "^\\d+\\.\\d+$"
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
     },
     "binaries": {
       "description": "One binary per target, by platform and architecture. A runtime loads the entry matching its own; a mod with no entry for it is skipped, not failed. A script mod leaves it out and names \"lua\" instead.",

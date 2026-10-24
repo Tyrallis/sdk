@@ -3,6 +3,7 @@
 
 #include "wxl/host/admission.hpp"
 
+#include <cstddef>
 #include <cstring>
 #include <filesystem>
 
@@ -33,15 +34,31 @@ namespace wxl::host
         return "an unknown wxl_result";
     }
 
-    AbiVersion RuntimeAbi() { return AbiVersion{WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR}; }
+    AbiVersion RuntimeAbi()
+    {
+        return AbiVersion{WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR, WXL_ABI_VERSION_FEATURE};
+    }
+
+    std::string AbiRefusal(const AbiVersion& needed, const AbiVersion& served)
+    {
+        const std::string wanted = "needs abi " + AbiText(needed);
+        const std::string has    = AbiText(served);
+        if (needed.major != served.major)
+            return wanted + "; this runtime implements " + has +
+                   " and a different major cannot be reconciled";
+        if (needed.minor != served.minor && served.major == 0)
+            return wanted + "; this runtime implements " + has +
+                   ", and while the major is 0 a different minor is a different contract";
+        if (needed.minor > served.minor)
+            return wanted + ", a later stage than this runtime's " + has;
+        if (needed.minor == served.minor && needed.feature > served.feature)
+            return wanted + ", newer than this runtime's " + has + ": it uses what was appended after " +
+                   has;
+        return std::string();
+    }
 
     namespace
     {
-        std::string AbiText(uint32_t major, uint32_t minor)
-        {
-            return std::to_string(major) + "." + std::to_string(minor);
-        }
-
         Decision Refuse(std::string reason)
         {
             Decision decision;
@@ -79,14 +96,8 @@ namespace wxl::host
         if (!StaysInside(*binary))
             return Refuse("binary path '" + *binary + "' leaves the mod folder");
 
-        const AbiVersion runtime = RuntimeAbi();
-        if (manifest.abi.major != runtime.major)
-            return Refuse("built against abi " + AbiText(manifest.abi.major, manifest.abi.minor) +
-                          "; this runtime implements " + AbiText(runtime.major, runtime.minor) +
-                          " and a different major cannot be reconciled");
-        if (manifest.abi.minor > runtime.minor)
-            return Refuse("built against abi " + AbiText(manifest.abi.major, manifest.abi.minor) +
-                          ", newer than this runtime's " + AbiText(runtime.major, runtime.minor));
+        if (std::string reason = AbiRefusal(manifest.abi, RuntimeAbi()); !reason.empty())
+            return Refuse(std::move(reason));
 
         for (const ServiceRef& ref : manifest.required)
         {
@@ -106,11 +117,18 @@ namespace wxl::host
     {
         if (!info) return Refuse("wxl_mod_query returned NULL: the mod declined to load");
 
-        // One layout exists so far. When a field is appended, the sizes of every earlier minor
-        // belong here too, so a mod built against one is still read correctly.
-        if (info->struct_size != sizeof(wxl_mod_info))
+        // Every field read below is in the 0.1.5 layout; a binary built against later headers
+        // may carry more, which is not read. Short of abi_feature is the two-part numbering's
+        // layout (on x86: on x64 abi_feature took the tail padding and abi_minor tells instead).
+        if (info->struct_size < sizeof(wxl_mod_info))
+        {
+            if (info->struct_size >= offsetof(wxl_mod_info, abi_feature))
+                return Refuse("wxl_mod_info.struct_size is " + std::to_string(info->struct_size) +
+                              ", without abi_feature: the binary was built with the two-part abi "
+                              "numbering, before 0.1.5; rebuild it against the current SDK");
             return Refuse("wxl_mod_info.struct_size is " + std::to_string(info->struct_size) +
-                          ", expected " + std::to_string(sizeof(wxl_mod_info)));
+                          ", expected at least " + std::to_string(sizeof(wxl_mod_info)));
+        }
 
         if (!info->id) return Refuse("wxl_mod_info.id is NULL");
         if (std::strcmp(info->id, manifest.id.c_str()) != 0)
@@ -118,9 +136,14 @@ namespace wxl::host
                           "' but the manifest says '" + manifest.id + "'");
 
         if (info->abi_major != manifest.abi.major || info->abi_minor != manifest.abi.minor)
-            return Refuse("the binary reports abi " + AbiText(info->abi_major, info->abi_minor) +
-                          " but the manifest says " +
-                          AbiText(manifest.abi.major, manifest.abi.minor));
+            return Refuse("the binary reports abi " + std::to_string(info->abi_major) + "." +
+                          std::to_string(info->abi_minor) + " but the manifest says " +
+                          AbiText(manifest.abi) + ": they are different contracts");
+        if (info->abi_feature < manifest.abi.feature)
+            return Refuse("the binary was built against abi " +
+                          AbiText(AbiVersion{info->abi_major, info->abi_minor, info->abi_feature}) +
+                          " but the manifest asks for " + AbiText(manifest.abi) +
+                          ": a binary cannot need what its headers did not carry");
 
         Decision decision;
         decision.verdict = Verdict::Load;

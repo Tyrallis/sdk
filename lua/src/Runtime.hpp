@@ -63,6 +63,10 @@ namespace wxl::lua
 
         const wxl_host* Host() const { return host_; }
 
+        /// The contract a Lua mod is served: the runtime's, no further than what this binary
+        /// was built against, since its event table ends there.
+        host::AbiVersion Abi() const;
+
         // --- what a mod's Observe and Override do -------------------------------------------
 
         /// Keeps a handler for an event and returns its id. @p self is the table a family

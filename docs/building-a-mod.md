@@ -273,8 +273,12 @@ entry, at the path the message gives.
 path in the manifest is not where the DLL lands. `OUTPUT_NAME` sets the file name; the folder is
 always `bin/<arch>/`.
 
-**`"abi" is "x.y" but the SDK headers are a.b`** -- the manifest claims a contract version the
-headers it was built against do not carry. Set it to what the message says.
+**`"abi" is "x.y.z" but the SDK headers are a.b.c`** -- the manifest asks for a contract version
+the headers it was built against do not carry: another major or minor, or a later feature. Set it
+to what the message says.
+
+**`"abi" is "x.y", the two-part numbering the SDK used before 0.1.5`** -- the manifest predates
+the three-part version. Set it to what the message says.
 
 **`building win-x64;win-x86 from one tree needs a Visual Studio generator`** -- with Ninja or
 Makefiles, CMake cannot pick the architecture per child project. Use `-G "Visual Studio 17 2022"`

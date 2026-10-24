@@ -85,7 +85,8 @@ namespace
 #define WXL_TEST_STR_(x) #x
 #define WXL_TEST_STR(x)  WXL_TEST_STR_(x)
 
-    constexpr const char* kAbi = WXL_TEST_STR(WXL_ABI_VERSION_MAJOR) "." WXL_TEST_STR(WXL_ABI_VERSION_MINOR);
+    constexpr const char* kAbi = WXL_TEST_STR(WXL_ABI_VERSION_MAJOR) "." WXL_TEST_STR(WXL_ABI_VERSION_MINOR) "."
+        WXL_TEST_STR(WXL_ABI_VERSION_FEATURE);
 
     /// A script mod's manifest: no binaries, a lua entry.
     std::string LuaManifest(const char* id, const std::string& extra = std::string())
@@ -306,6 +307,17 @@ int main(int argc, char** argv)
         WriteFile(mods / "needy" / "mod.json",
                   LuaManifest("wxl.needy", "\"requires\": [ { \"service\": \"wxl.nothing\", \"version\": 1 } ]"));
         WriteFile(mods / "needy" / "init.lua", "print('never')\n");
+        std::string future = LuaManifest("wxl.future");
+        const std::string futureAbi = std::to_string(WXL_ABI_VERSION_MAJOR) + "." +
+                                      std::to_string(WXL_ABI_VERSION_MINOR) + "." +
+                                      std::to_string(WXL_ABI_VERSION_FEATURE + 1);
+        future.replace(future.find(kAbi), std::strlen(kAbi), futureAbi);
+        WriteFile(mods / "future" / "mod.json", future);
+        WriteFile(mods / "future" / "init.lua", "print('never')\n");
+        WriteFile(mods / "abi" / "mod.json", LuaManifest("wxl.abi"));
+        WriteFile(mods / "abi" / "init.lua",
+                  "print('abi ' .. wxl.runtime.abi .. ' ' .. wxl.runtime.abi_major .. ' ' .. "
+                  "wxl.runtime.abi_minor .. ' ' .. wxl.runtime.abi_feature)\n");
         WriteFile(mods / "badname" / "mod.json", LuaManifest("wxl.badname"));
         WriteFile(mods / "badname" / "init.lua", "function WorldScript:OnTick() end\n");
         WriteFile(mods / "Bare Folder_One" / "init.lua",
@@ -325,7 +337,7 @@ int main(int argc, char** argv)
         Check(sink.Has("[wxl.lua] loaded wxl.lua-hello 1.0.0 (Lua hello) from init.lua") &&
                   sink.Has("[wxl.lua] loaded wxl.probe"),
               "wxl.lua loads the script mods");
-        Check(sink.Has("mod wxl.syntax failed to load init.lua") && sink.Has("[wxl.lua] 4 script mod(s) loaded, 2 not"),
+        Check(sink.Has("mod wxl.syntax failed to load init.lua") && sink.Has("[wxl.lua] 5 script mod(s) loaded, 2 not"),
               "a mod whose entry does not compile is reported and the others load");
         Check(sink.Has("[ERROR] [wxl.lua] mod wxl.badname failed to load init.lua: WorldScript.OnTick is not an event of WorldScript; its events are OnUpdate, "),
               "a family-table member that is no event is a load error naming the events");
@@ -337,6 +349,14 @@ int main(int argc, char** argv)
         Check(sink.Count("[host] refused") == 0, "the host reports no problem with a manifest-less folder");
         Check(sink.Has("[wxl.lua] refused wxl.needy: requires service wxl.nothing"),
               "a script mod requiring a missing service is refused");
+        Check(sink.Has(("[wxl.lua] refused wxl.future: needs abi " + futureAbi + ", newer than this runtime's " +
+                        kAbi + ": it uses what was appended after " + kAbi)
+                           .c_str()),
+              "a script mod needing a later abi feature is refused, naming both versions");
+        Check(sink.Has(("[wxl.abi] abi " + std::string(kAbi) + " " + std::to_string(WXL_ABI_VERSION_MAJOR) + " " +
+                        std::to_string(WXL_ABI_VERSION_MINOR) + " " + std::to_string(WXL_ABI_VERSION_FEATURE))
+                           .c_str()),
+              "wxl.runtime carries the abi, as text and in parts");
         Check(sink.Has("[wxl.probe] sandbox ok"), "the sandbox holds");
         Check(sink.Has("[wxl.probe] family check ok") && sink.Has("[wxl.probe] method check ok") &&
                   sink.Has("[wxl.probe] override check ok") && sink.Has("[wxl.probe] callback check ok"),
@@ -344,7 +364,7 @@ int main(int argc, char** argv)
         Check(sink.Has("[wxl.probe] events table ok"), "wxl.events lists the contract");
 
         const wxl_lua_api* api = static_cast<const wxl_lua_api*>(host.Table()->get_service(WXL_LUA_SERVICE, WXL_LUA_SERVICE_VERSION));
-        Check(api && api->struct_size == sizeof(wxl_lua_api) && api->count() == 6,
+        Check(api && api->struct_size == sizeof(wxl_lua_api) && api->count() == 7,
               "the wxl.lua service is published and counts the script mods");
 
         host.Stage(WXL_STAGE_EARLY);

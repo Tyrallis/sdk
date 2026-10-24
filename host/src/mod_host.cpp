@@ -105,6 +105,7 @@ namespace wxl::host
         info_.version     = config_.runtime_version;
         info_.abi_major   = WXL_ABI_VERSION_MAJOR;
         info_.abi_minor   = WXL_ABI_VERSION_MINOR;
+        info_.abi_feature = WXL_ABI_VERSION_FEATURE;
         // Copied byte for byte: u8string() is std::string in C++17 and std::u8string in C++20,
         // and the host is built at both levels.
         const auto modsDirectory = config_.mods_directory.u8string();
@@ -123,6 +124,7 @@ namespace wxl::host
         table_.subscribe       = &ModHost::ThunkSubscribe;
         table_.unsubscribe     = &ModHost::ThunkUnsubscribe;
         table_.emit            = &ModHost::ThunkEmit;
+        table_.abi_feature     = WXL_ABI_VERSION_FEATURE;
 
         for (const PublishedService& service : config_.services)
         {

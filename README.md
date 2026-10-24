@@ -5,7 +5,7 @@
 **The contract a WarcraftXL mod is written against**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![ABI](https://img.shields.io/badge/ABI-0.5-blue.svg)](include/wxl/abi.h)
+[![ABI](https://img.shields.io/badge/ABI-0.1.5-blue.svg)](include/wxl/abi.h)
 [![C++](https://img.shields.io/badge/C%2B%2B-17%20and%20up-blue.svg)](#-getting-started)
 [![Header only](https://img.shields.io/badge/header--only-yes-lightgrey.svg)](include/wxl)
 
@@ -14,7 +14,7 @@
 ---
 
 > [!IMPORTANT]
-> ABI major 0 means the contract is still moving: any release may break any other. Ids and stage
+> ABI major 0 means the contract is still moving: any minor may break any other. Ids and stage
 > numbers are already append-only, but signatures are not frozen until 1.0.
 
 ## 🚀 Overview
@@ -198,12 +198,18 @@ supplies only the bindings that reach its own client.
 
 ## 🔢 Versioning
 
-`major.minor`, in [`abi.h`](include/wxl/abi.h).
+`major.minor.feature`, in [`abi.h`](include/wxl/abi.h): today `0.1.5`.
 
 - **Major** changes when an existing field, signature or id changes meaning. A runtime refuses a
   mod built against a different major.
-- **Minor** changes when something is appended. A runtime accepts a minor at or below its own and
-  refuses a higher one.
+- **Minor** is a stage of the platform: `0.1` is the first scope. While the major is 0, a runtime
+  refuses a mod of a different minor.
+- **Feature** changes when something is appended: an event, a service, a field at the end of a
+  struct. A runtime accepts a mod that needs a feature at or below its own and refuses a higher
+  one.
+
+A manifest's `"abi"` is the lowest version the mod needs. A mod built against newer headers may
+ask for less and check `wxl_host.abi_feature` before it uses what came in between.
 
 Event ids and stage numbers are appended, never renumbered, never removed.
 
