@@ -4,6 +4,8 @@ One source, one command, two binaries. A mod is written once against the SDK hea
 for both runtimes in a single step: a 64-bit DLL for the recompiled client and a 32-bit DLL for
 the stock `Wow.exe`. Architecture lives in the folder, never in the file name.
 
+A mod written in Lua has nothing to build: [Lua mods](lua-mods.md) covers it.
+
 ## What you need
 
 - **CMake 3.21 or newer.**
