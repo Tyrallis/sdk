@@ -173,7 +173,8 @@ void OnMessageReceived(uint32_t opcode, wxl::Bytes data, wxl::Answer suppressed)
 |---|---|
 | `u32`, `i32`, `u64`, `i64`, `f32` | `uint32_t`, `int32_t`, `uint64_t`, `int64_t`, `float` |
 | `bool` | `bool` |
-| `handle`, `guid`, `vec3` | `wxl_handle`, `wxl_guid`, `wxl_vec3`; `wxl::Unit(handle)` reads the object |
+| `handle` | `wxl::Object`, the object as a value (below); `object.As<wxl::Unit>()` reads it as its kind |
+| `guid`, `vec3` | `wxl_guid`, `wxl_vec3` |
 | `str` | `std::string_view`, valid for the call |
 | `bytes` | `wxl::Bytes`: `data()`, `size()`, a range of `uint8_t`, `View()` as characters; valid for the call |
 | `answer` | `wxl::Answer`: `Value()` is what earlier handlers decided, `Set()` answers |
@@ -226,6 +227,17 @@ auto alive = std::count_if(view.begin(), view.end(),
 
 `ObjectView<T>` holds handles and builds a `T` on access, so a unit that left between the
 snapshot and the visit reads as gone. `objects.Positions(view)` reads every position in one call.
+
+A handle names one visibility episode: from the `ObjectCreate` that announces the object to the
+`ObjectDestroy` that sees it leave. An object that leaves view and comes back is announced again,
+as another `wxl::Object` with the same `Guid()`. Key by `Guid()` what must outlast that; key by
+the object what belongs to one episode, with `wxl::ObjectMap<T>` (`wxl/objects/map.hpp`), which
+erases an entry when its object leaves -- after the mod's own `OnObjectDestroy` has run:
+
+```cpp
+wxl::ObjectMap<uint32_t> hits;                                // a member of the script
+void OnUnitDeath(wxl::Object unit) override { ++hits[unit]; } // gone with the unit
+```
 
 ### Services
 

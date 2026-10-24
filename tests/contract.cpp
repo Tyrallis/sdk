@@ -148,7 +148,7 @@ namespace
         int clicks = 0;
 
     private:
-        void OnWorldClick(wxl_vec3, wxl_handle, uint32_t) override { ++clicks; }
+        void OnWorldClick(wxl_vec3, wxl::Object, uint32_t) override { ++clicks; }
     };
 
     struct ProtectedWorldScript final : wxl::WorldScript
@@ -343,8 +343,8 @@ int main()
               "a str is a string_view, a buffer a view whose capacity is not a parameter");
         Check(std::is_same_v<wxl::HandlerOf<WXL_EV_WorldEnter>, void(uint32_t, wxl_vec3)> &&
                   std::is_same_v<wxl::HandlerOf<WXL_EV_UnitAuraChanged>,
-                                 void(wxl_handle, uint32_t, bool)>,
-              "values, vectors, handles and booleans keep their order");
+                                 void(wxl::Object, uint32_t, bool)>,
+              "values, vectors, objects and booleans keep their order");
         Check(std::is_same_v<wxl::HandlerOf<WXL_EV_ModelLoad>,
                              void(std::string_view, wxl::Bytes, const void**, uint32_t*)>,
               "a ptr member keeps its C type");
@@ -854,6 +854,62 @@ int main()
         const wxl::Expected<std::vector<wxl_vec3>> positions = objects.Positions(units);
         Check(positions && positions->size() == 2 && (*positions)[0].x == static_cast<float>(units[0].Handle()),
               "positions read in bulk for a whole view");
+    }
+
+    Section("objects in handlers, and data kept per object");
+    {
+        using wxltest::FakeObjects;
+
+        struct Watcher final : wxl::ObjectScript
+        {
+            wxl::Object created;
+            bool        sawUnit = false;
+            void        OnObjectCreate(wxl::Object object, wxl_guid, uint32_t) override
+            {
+                created = object;
+                sawUnit = object.As<wxl::Unit>().has_value();
+            }
+        } watcher;
+        wxl::ScriptMgr::Add(&watcher);
+        const wxl_object_args boarCreated{FakeObjects::kBoar, 0x200, WXL_OBJECT_UNIT};
+        host.Raise(WXL_EV_ObjectCreate, &boarCreated);
+        Check(watcher.created == wxl::Object(FakeObjects::kBoar) && watcher.sawUnit,
+              "a handle member reaches a handler as a wxl::Object, viewable as its class");
+        Check(std::is_same_v<wxl::HandlerOf<WXL_EV_ObjectCreate>, void(wxl::Object, wxl_guid, uint32_t)>,
+              "an object event's handler takes the object, its guid and its type");
+        wxl::ScriptMgr::Remove(&watcher);
+
+        wxl::ObjectMap<int> seen;
+        Check(!seen.Watching() && seen.Empty(), "a map subscribes nothing until it holds something");
+        seen[wxl::Unit(FakeObjects::kBoar)] = 3;
+        seen.Set(wxl::Object(FakeObjects::kPlayer), 7);
+        Check(seen.Watching() && seen.Size() == 2, "the first entry subscribes it to ObjectDestroy");
+        Check(seen.Find(wxl::Object(FakeObjects::kBoar)) && *seen.Find(wxl::Object(FakeObjects::kBoar)) == 3,
+              "a unit and the same object as an Object are one key");
+
+        // A handler of default priority, subscribed after the map, still sees the entry.
+        struct Reader
+        {
+            wxl::ObjectMap<int>* map;
+            int                  read = -1;
+            void operator()(wxl::Object object, wxl_guid, uint32_t)
+            {
+                const int* value = map->Find(object);
+                read             = value ? *value : 0;
+            }
+        } reader{&seen};
+        wxl::Subscription reading = wxl::Subscribe<WXL_EV_ObjectDestroy>(&reader);
+
+        const wxl_object_args boarGone{FakeObjects::kBoar, 0x200, WXL_OBJECT_UNIT};
+        host.Raise(WXL_EV_ObjectDestroy, &boarGone);
+        Check(reader.read == 3, "a mod's ObjectDestroy handler runs before the map lets the entry go");
+        Check(!seen.Contains(wxl::Object(FakeObjects::kBoar)) && seen.Size() == 1,
+              "and the entry is gone once the event has passed");
+        Check(seen.Contains(wxl::Object(FakeObjects::kPlayer)), "the other objects keep theirs");
+
+        seen[wxl::Object(FakeObjects::kStale)] = 1;
+        Check(seen.Prune() == 1 && seen.Size() == 1, "Prune drops what no longer resolves");
+        reading.Reset();
     }
 
     Section("wxl.script");

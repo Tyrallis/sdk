@@ -8,12 +8,14 @@
 
 // Declares the facade only. Its members are defined in objects/service.hpp once every class they
 // return exists; wxl/objects.hpp includes everything in the right order. A per-type header
-// includes this one for ObjectService::Raw(), which is all the classes need.
+// includes this one for ObjectService::Raw(), which is all the classes need. Nothing here reaches
+// sdk.hpp, which includes wxl/objects/object.hpp: wxl::Object is what a handler is handed.
 
 #include <cstdint>
 #include <vector>
 
-#include "wxl/sdk.hpp"
+#include "wxl/base.hpp"
+#include "wxl/expected.hpp"
 #include "wxl/services/object.h"
 
 namespace wxl

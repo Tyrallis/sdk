@@ -89,6 +89,7 @@ namespace
         else if constexpr (std::is_same_v<T, wxl::Buffer>) return 'F';
         else if constexpr (std::is_same_v<T, std::string_view>) return 's';
         else if constexpr (std::is_same_v<T, bool>) return 'b';
+        else if constexpr (std::is_same_v<T, wxl::Object>) return 'o';
         else return 'v';
     }
 
@@ -116,6 +117,7 @@ namespace
             case Kind::buffer: return 'F';
             case Kind::str: return 's';
             case Kind::boolean: return 'b';
+            case Kind::handle: return 'o';
             default: return 'v';
         }
     }

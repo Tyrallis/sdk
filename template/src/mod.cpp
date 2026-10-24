@@ -66,9 +66,9 @@ namespace
     /// takes the event's parameters, as an override would: wxl::HandlerOf<WXL_EV_TargetChanged>.
     struct TargetWatcher
     {
-        void operator()(wxl_handle, wxl_handle current) const
+        void operator()(wxl::Object, wxl::Object current) const
         {
-            const wxl::Unit                  target(current);
+            const wxl::Unit                  target(current.Handle());
             const wxl::Expected<std::string> name = target.Name();
             wxl::Log(WXL_LOG_INFO, kTag, name ? "target: " + *name : "target cleared");
         }

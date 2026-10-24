@@ -10,6 +10,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <type_traits>
 
 #include "wxl/objects/facade.hpp"
 
@@ -27,7 +28,12 @@ namespace wxl
      *
      * The client's own kinds are the derived classes, one per wxl_object_type: Item, Container,
      * Unit, Player, GameObject, DynamicObject and Corpse. As<T>() views an Object as one of them
-     * when its server type allows it.
+     * when its server type allows it, and each of them is built from a handle the same way:
+     * `wxl::Unit(object.Handle())` when the kind is already known.
+     *
+     * A handle names one visibility episode (wxl/services/object.h): an object that leaves view
+     * and comes back is another Object with the same Guid(). Event handlers are handed their
+     * objects as this class.
      */
     class Object
     {
@@ -157,6 +163,10 @@ namespace wxl
             return out;
         }
     };
+
+    // What a handler is handed must cost what the handle costs: one register, copied freely.
+    static_assert(sizeof(Object) == sizeof(wxl_handle) && std::is_trivially_copyable_v<Object>,
+                  "wxl::Object is a handle and nothing more");
 } // namespace wxl
 
 namespace std
