@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 WarcraftXL
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
 //
 // The reads behind wxl.object: one row per getter of wxl_object_api that reads one value of an
 // object. The getters that resolve handles or walk the table (valid, guid, type, from_guid,

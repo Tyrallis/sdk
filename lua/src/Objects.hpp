@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 WarcraftXL
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
 //
 // World objects in Lua: a userdata over a wxl_handle whose methods are the getters of
 // wxl.object, generated from object_reads.def.

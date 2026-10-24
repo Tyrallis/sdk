@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 WarcraftXL
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
 //
 // An event's args as Lua sees them: one value per parameter of the handler, read from the C
 // struct through the field table of reflect.hpp, and the members an Override answers through.

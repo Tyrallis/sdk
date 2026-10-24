@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 WarcraftXL
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
 //
 // The Lua mods together: found and ordered by the host's rules, each in its own state, fed from
 // one native subscription per event, reloaded when their files change.

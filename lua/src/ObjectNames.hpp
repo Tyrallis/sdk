@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 WarcraftXL
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
 //
 // How a row of object_reads.def is named in Lua. Shared by the object methods and by the
 // generator of the editor definitions, so that both say the same.

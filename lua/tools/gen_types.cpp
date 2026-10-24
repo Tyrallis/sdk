@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 WarcraftXL
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
 //
 // Writes the editor definitions of the Lua API -- a lua-language-server meta file -- from the
 // event table of reflect.hpp and the getter table of object_reads.def, so that what an editor
