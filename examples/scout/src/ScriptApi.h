@@ -4,8 +4,6 @@
 #ifndef SCOUT_SCRIPT_API_H
 #define SCOUT_SCRIPT_API_H
 
-#include <functional>
-
 #include "wxl/sdk.hpp"
 #include "wxl/services/script.hpp"
 
@@ -33,12 +31,13 @@ namespace scout
         {
         }
 
-        // The functions below capture `this`: a copy would call into the original.
+        // The script side calls Scout's functions on this object: a copy would not be the one
+        // registered.
         ScriptApi(const ScriptApi&)            = delete;
         ScriptApi& operator=(const ScriptApi&) = delete;
 
-        void OnScriptVmReady(uint32_t context, void* native_state) override;
-        void OnScriptVmClosing(uint32_t context, void* native_state) override;
+        void OnScriptVmReady(wxl_script_context context, void* native_state) override;
+        void OnScriptVmClosing(wxl_script_context context, void* native_state) override;
 
         /// Fires kUpdatedEvent with @p entry, when a context is open to hear it.
         void Announce(const Entry& entry) const;
@@ -51,14 +50,15 @@ namespace scout
         void TrafficOf(wxl::ScriptCall& call) const;
         void Drop(wxl::ScriptCall& call);
 
-        /// A function as the script service calls it: (*function)(call).
-        using Function = std::function<void(wxl::ScriptCall&)>;
-
-        Function scoutCount_   = [this](wxl::ScriptCall& call) { Count(call); };
-        Function scoutEntry_   = [this](wxl::ScriptCall& call) { EntryAt(call); };
-        Function scoutNearby_  = [this](wxl::ScriptCall& call) { Nearby(call); };
-        Function scoutTraffic_ = [this](wxl::ScriptCall& call) { TrafficOf(call); };
-        Function scoutDrop_    = [this](wxl::ScriptCall& call) { Drop(call); };
+        /// Makes the member function @p Method a global Lua function named @p name, called on
+        /// this object, and logs it when the script service refuses.
+        template <auto Method>
+        void Register(const wxl::ScriptService& script, const char* name)
+        {
+            const wxl_result result = script.RegisterFunction<Method>(name, this);
+            if (result != WXL_OK)
+                wxl::Log(WXL_LOG_WARN, kTag, "could not register {}: {}", name, wxl::ResultName(result));
+        }
 
         const Clock&   clock_;
         const Journal& journal_;

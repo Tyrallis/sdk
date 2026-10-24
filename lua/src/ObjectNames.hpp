@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "wxl/events.h"
+#include "wxl/reflect.hpp"
 
 namespace wxl::lua::names
 {
@@ -28,20 +29,12 @@ namespace wxl::lua::names
     constexpr uint32_t kDynamics    = KindBit(WXL_OBJECT_DYNAMIC);
     constexpr uint32_t kCorpses     = KindBit(WXL_OBJECT_CORPSE);
 
-    /// The type names Lua sees, by wxl_object_type.
+    /// The type names Lua sees, by wxl_object_type: enums.def's, as an event's type arrives.
     inline const char* TypeName(uint32_t type)
     {
-        switch (type)
-        {
-        case WXL_OBJECT_ITEM: return "Item";
-        case WXL_OBJECT_CONTAINER: return "Container";
-        case WXL_OBJECT_UNIT: return "Unit";
-        case WXL_OBJECT_PLAYER: return "Player";
-        case WXL_OBJECT_GAMEOBJECT: return "GameObject";
-        case WXL_OBJECT_DYNAMIC: return "DynamicObject";
-        case WXL_OBJECT_CORPSE: return "Corpse";
-        default: return "Unknown";
-        }
+        static const reflect::Enum* const types = reflect::FindEnum("wxl_object_type");
+        const char* name = types ? reflect::NameOf(*types, type) : nullptr;
+        return name ? name : "Unknown";
     }
 
     /// The prefix a kind's members carry, dropped from the Lua method name.

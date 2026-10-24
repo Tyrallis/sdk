@@ -75,6 +75,13 @@ typedef struct wxl_runtime_info
  *
  * The table lives for the process lifetime, so the pointer can be kept. Check @ref struct_size
  * before reading a field a smaller version would not carry.
+ *
+ * Threads: every function of the table may be called from any thread, from inside a handler or
+ * outside one, including a handler of an event raised off the main thread (events.def marks
+ * those). Lines logged from two threads at once come out whole, one after the other. A service
+ * published on one thread is found by the next lookup on any other. A subscription made, or
+ * dropped, while the event is being raised on another thread takes effect from the next raise.
+ * What a service's own functions allow is that service's header's to say.
  */
 typedef struct wxl_host
 {
@@ -148,6 +155,22 @@ typedef struct wxl_host
      * WXL_ABI_VERSION_FEATURE before using what was appended in between.
      */
     uint32_t abi_feature;
+
+    // --- appended at 0.1.8 -------------------------------------------------------------------
+
+    /**
+     * @brief Disables the calling mod, as a fault in its code would.
+     *
+     * For a failure the mod cannot recover from and the crash guard cannot see: a C++ exception
+     * that reached one of its entry points, a broken invariant. The runtime logs @p reason under
+     * the mod's id, drops its subscriptions, skips its remaining stages and its unload, and
+     * withdraws what the mod registered with the runtime's services. The call returns; the mod
+     * then returns from what it was doing and none of its code is called again. Called from code
+     * that is no mod's, it does nothing.
+     *
+     * @param reason  what went wrong, for the log: "OnReady threw an exception: ...".
+     */
+    void(WXL_CALL* disable)(wxl_str reason);
 } wxl_host;
 
 #ifdef __cplusplus

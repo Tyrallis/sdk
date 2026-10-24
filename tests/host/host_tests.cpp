@@ -395,6 +395,50 @@ namespace
         return nullptr;
     }
 
+    // --- mods that disable themselves, as WXL_MOD does after a C++ exception ----------------
+
+    const wxl_host* g_quitHost = nullptr;
+    int             g_quitTag  = 200;
+
+    wxl_mod_info g_quitterInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
+                               "wxl.quitter", "Quitter", 0, WXL_ABI_VERSION_FEATURE};
+    wxl_mod_info g_loadquitInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
+                                "wxl.loadquit", "Load quit", 0, WXL_ABI_VERSION_FEATURE};
+    wxl_mod_info g_unloadquitInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
+                                  "wxl.unloadquit", "Unload quit", 0, WXL_ABI_VERSION_FEATURE};
+
+    wxl_str Text(const char* text) { return wxl_str{text, static_cast<uint32_t>(std::strlen(text))}; }
+
+    const wxl_mod_info* WXL_CALL QuitterQuery(void) { return &g_quitterInfo; }
+    wxl_result WXL_CALL QuitterLoad(const wxl_host* host)
+    {
+        g_quitHost = host;
+        host->subscribe(WXL_EV_Update, &Record, &g_quitTag, 0);
+        return WXL_OK;
+    }
+    void WXL_CALL QuitterStage(wxl_stage stage)
+    {
+        g_trace.push_back("quitter:stage" + std::to_string(static_cast<int>(stage)));
+        if (stage == WXL_STAGE_READY) g_quitHost->disable(Text("OnReady threw an exception: boom"));
+    }
+    void WXL_CALL QuitterUnload(void) { g_trace.push_back("quitter:unload"); }
+
+    const wxl_mod_info* WXL_CALL LoadQuitQuery(void) { return &g_loadquitInfo; }
+    wxl_result WXL_CALL LoadQuitLoad(const wxl_host* host)
+    {
+        host->subscribe(WXL_EV_Update, &Record, &g_quitTag, 0);
+        host->disable(Text("gave up"));
+        return WXL_OK;
+    }
+
+    const wxl_mod_info* WXL_CALL UnloadQuitQuery(void) { return &g_unloadquitInfo; }
+    wxl_result WXL_CALL UnloadQuitLoad(const wxl_host*) { return WXL_OK; }
+    void WXL_CALL UnloadQuitUnload(void)
+    {
+        g_trace.push_back("unloadquit:unload");
+        g_quitHost->disable(Text("OnUnload threw an exception: late"));
+    }
+
     void GuardedCrash(void*) { Crash(); }
     void GuardedFine(void* context) { *static_cast<int*>(context) = 1; }
 
@@ -1121,10 +1165,10 @@ int main(int argc, char** argv)
                                                   "nostage:load"},
               "wxl_mod_load ran in load order; a refused query or binary never reached it");
         Check(host.Loaded().size() == 3 && host.Loaded()[0].name == "Good" &&
-                  host.Loaded()[0].version == 1 && host.Loaded()[0].has_stage &&
+                  host.Loaded()[0].has_stage &&
                   host.Loaded()[0].has_unload && !host.Loaded()[2].has_stage &&
                   !host.Loaded()[2].has_unload,
-              "a loaded mod reports its name, version and optional entry points");
+              "a loaded mod reports its name and optional entry points");
         Check(host.Loaded().size() == 3 && host.Loaded()[0].directory_name == "b-good" &&
                   host.Loaded()[0].binary == mods / "b-good" / "good.dll",
               "and where it came from");
@@ -1370,6 +1414,79 @@ int main(int argc, char** argv)
     std::printf("  (skipped: off MSVC the guard is a plain call)\n");
 #endif
 
+    Section("a mod that disables itself");
+    if (scratch.empty())
+    {
+        std::printf("  (skipped: no scratch directory given)\n");
+    }
+    else
+    {
+        const fs::path mods = scratch / "quit";
+        fs::remove_all(mods);
+        WriteFile(mods / "a-quitter" / "mod.json", ManifestText("wxl.quitter", "", kAbi, "quitter.dll"));
+        WriteFile(mods / "b-loadquit" / "mod.json", ManifestText("wxl.loadquit", "", kAbi, "loadquit.dll"));
+        WriteFile(mods / "c-unloadquit" / "mod.json",
+                  ManifestText("wxl.unloadquit", "", kAbi, "unloadquit.dll"));
+
+        FakeLoader loader;
+        loader.images.push_back({"quitter.dll", Fn(&QuitterQuery), Fn(&QuitterLoad), Fn(&QuitterStage), Fn(&QuitterUnload)});
+        loader.images.push_back({"loadquit.dll", Fn(&LoadQuitQuery), Fn(&LoadQuitLoad), nullptr, nullptr});
+        loader.images.push_back({"unloadquit.dll", Fn(&UnloadQuitQuery), Fn(&UnloadQuitLoad), nullptr, Fn(&UnloadQuitUnload)});
+
+        CaptureSink sink;
+        HostConfig  config;
+        config.mods_directory = mods;
+        config.runtime_id     = "test";
+        config.runtime_name   = "Test runtime";
+        config.log_sink       = &sink;
+        config.events         = {WXL_EV_Update};
+        config.loader         = &loader;
+
+        struct Told
+        {
+            std::vector<std::string> ids;
+            static void Disabled(void* user, ModHost::ModToken, const char* id)
+            {
+                static_cast<Told*>(user)->ids.push_back(id);
+            }
+        } told;
+
+        g_trace.clear();
+        ModHost host(config);
+        host.SetDisableHandler(&Told::Disabled, &told);
+        host.LoadAll();
+        Check(host.Table()->struct_size == sizeof(wxl_host) && host.Table()->disable != nullptr,
+              "the table carries disable");
+        const RefusedMod* refused = FindRefused(host, "wxl.loadquit");
+        Check(host.Loaded().size() == 2 && refused &&
+                  refused->reason == "it disabled itself in wxl_mod_load: gave up; the binary "
+                                     "stays mapped and nothing of it is called again",
+              "a mod that disables itself while loading is refused with its reason");
+        Check(host.Events().LiveCount(WXL_EV_Update) == 1, "and what it subscribed is dropped");
+
+        host.Stage(WXL_STAGE_EARLY);
+        host.Stage(WXL_STAGE_READY);
+        Check(host.Loaded()[0].disabled && host.Loaded()[0].fault == "OnReady threw an exception: boom" &&
+                  told.ids == std::vector<std::string>{"wxl.quitter"},
+              "one that disables itself in a stage is disabled there, and the runtime is told");
+        Check(sink.Has("mod wxl.quitter disabled itself: OnReady threw an exception: boom; it is "
+                       "disabled: its handlers are dropped"),
+              "the log gives its reason");
+        Check(host.Events().LiveCount(WXL_EV_Update) == 0, "its handlers are gone");
+
+        host.Table()->disable(Text("nobody's"));
+        Check(sink.Has("disable was called from code that is no mod's; nothing is disabled"),
+              "called from no mod's code, it disables nothing and says so");
+
+        g_trace.clear();
+        host.Shutdown();
+        Check(g_trace == std::vector<std::string>{"unloadquit:unload"},
+              "the disabled mod's later stages and unload are skipped");
+        Check(sink.Has("mod wxl.unloadquit disabled itself: OnUnload threw an exception: late") &&
+                  loader.closed == 0,
+              "one that disables itself in its unload stays mapped");
+    }
+
     Section("mod host with the fixture binary");
     if (fixture.empty() || scratch.empty())
     {
@@ -1398,7 +1515,7 @@ int main(int argc, char** argv)
         for (const RefusedMod& mod : host.Refused())
             std::printf("        %s: %s\n", mod.directory_name.c_str(), mod.reason.c_str());
         Check(host.Loaded().size() == 1 && host.Loaded()[0].id == "wxl.fixture" &&
-                  host.Loaded()[0].name == "Fixture" && host.Loaded()[0].version == 7,
+                  host.Loaded()[0].name == "Fixture",
               "the fixture loads through the OS loader and reports its info");
         Check(host.Loaded().size() == 1 && host.Loaded()[0].has_stage && host.Loaded()[0].has_unload,
               "the SDK macro exports all four entry points");

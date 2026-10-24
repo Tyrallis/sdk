@@ -62,4 +62,4 @@ namespace
     };
 } // namespace
 
-WXL_MOD(FixtureMod, "wxl.fixture", "Fixture", 7)
+WXL_MOD(FixtureMod, "wxl.fixture", "Fixture")

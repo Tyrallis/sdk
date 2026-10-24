@@ -53,6 +53,16 @@ namespace wxl::lua
     void PushField(lua_State* L, const reflect::Field& field, const void* args)
     {
         using reflect::Kind;
+        // An enumeration's value by its name; a number the headers do not name, as the number.
+        if (field.enumeration)
+        {
+            const uint32_t value = ReadAt<uint32_t>(args, field.offset);
+            if (const char* name = reflect::NameOf(*field.enumeration, value))
+                lua_pushstring(L, name);
+            else
+                lua_pushnumber(L, value);
+            return;
+        }
         switch (field.kind)
         {
         case Kind::u32: lua_pushnumber(L, ReadAt<uint32_t>(args, field.offset)); return;

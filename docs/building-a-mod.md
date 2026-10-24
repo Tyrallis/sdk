@@ -40,9 +40,11 @@ wxl_add_mod(my-mod
 | `TARGETS` | `win-x64`, `win-x86`, or both | both |
 | `OUTPUT_NAME` | the DLL's base name | the target name |
 | `OUTPUT_DIR` | where the mod folder is assembled | `build/dist` |
+| `CXX_STANDARD` | the C++ standard the mod is compiled as: `17`, `20` or `23` | `20` |
 
-`LANGUAGES NONE` is deliberate: the top level drives the per-architecture builds and never needs a
-compiler; each child enables C++ itself.
+`LANGUAGES NONE` is deliberate: with Visual Studio the top level drives the per-architecture builds
+and never needs a compiler; each child enables C++ itself. With another generator the tree builds
+one architecture, and `wxl_add_mod` enables C++ there.
 
 ## The one command
 
@@ -76,9 +78,11 @@ The manifest's `binaries` table is checked at configure time against what the bu
 }
 ```
 
-Every architecture built must be listed at that path, and every architecture listed must be
-built. A manifest that promises a binary the folder does not hold is a packaging bug; the build
-says so instead of letting a runtime discover it.
+Every architecture built must be listed at that path, and every architecture listed must be one
+of the mod's `TARGETS`. A manifest that promises a binary the mod is never built for is a
+packaging bug; the build says so instead of letting a runtime discover it. An architecture the
+mod is built for, but not by this tree (below), is only noted at configure time: the folder lacks
+that DLL until a build of that architecture writes it.
 
 ## Installing into a client
 
@@ -91,22 +95,43 @@ from.
 
 ## Building one architecture
 
-Narrow the targets from the command line, and make the manifest agree:
+**With Visual Studio**, narrow the targets from the command line:
 
 ```sh
 cmake -S . -B build -DWXL_MOD_TARGETS=win-x64
 ```
 
-The configure output names what it skipped:
+The configure output names what it skipped, and the manifest can go on listing both:
 
 ```
+-- wxl_add_mod: win-x86 is not built by this tree: the mod folder lacks bin/x86/my-mod.dll until a build for win-x86 writes it there
 -- my-mod: win-x64  -> .../build/dist/my.mod/bin/x64/my-mod.dll
 -- my-mod: win-x86  skipped (not in the targets: win-x64)
 ```
 
-The manifest still has to match the folder, so `binaries` must list only `win-x64` for this to
-configure. That is strictness about the package, not about iteration: for a quick loop on one
-architecture, configure a child tree by hand and skip the packaging entirely:
+**With Ninja or Makefiles**, a tree builds one architecture: the one its compiler targets. On
+Windows that is the architecture of the developer prompt (*x64 Native Tools Command Prompt*, or
+*x86*); from Linux, that of the toolchain file. The DLL lands in the same mod folder layout:
+
+```sh
+cmake -S . -B build-x64 -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-x64                          # build-x64/dist/<id>/bin/x64/<name>.dll
+```
+
+For the folder to hold both, configure a second tree with the other compiler and install it into
+the first one's folder:
+
+```sh
+cmake -S . -B build-x86 -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-x86
+cmake --install build-x86 --prefix build-x64/dist/<id>
+```
+
+A mod whose `TARGETS` leave out the compiler's architecture builds nothing in that tree, and the
+configure says so.
+
+**For a quick loop** on one architecture, configure a child tree by hand and skip the packaging
+entirely:
 
 ```sh
 cmake -S . -B build-x86 -A Win32 -DWXL_MOD_ARCH=win-x86
@@ -133,7 +158,8 @@ endif()
 `WXL_MOD_ARCH` holds `win-x64` or `win-x86` in a child, and is empty at the top level, for
 anything that differs per architecture.
 
-The mod is compiled as C++17 with `/W4 /permissive-` (MSVC) or `-Wall -Wextra`.
+The mod is compiled as C++20 (`CXX_STANDARD` above) with `/W4 /permissive-` (MSVC) or `-Wall
+-Wextra`. The SDK headers compile clean at that level, as C++17 and as C++20.
 
 ## The C++ layer
 
@@ -142,12 +168,35 @@ Everything under `include/wxl/*.hpp` compiles into the mod and resolves to the C
 
 ### The mod
 
-Derive from `wxl::Mod`, declare it once with `WXL_MOD`. Each boot stage has a named virtual:
+Derive from `wxl::Mod`, declare it once with `WXL_MOD(Class, "id", "Name")`: the id is the
+manifest's, and the version is the manifest's alone. Each boot stage has a named virtual:
 `OnEarly`, `OnStorageReady`, `OnGraphicsReady`, `OnScriptReady`, `OnReady`, `OnShutdown`.
 `OnStage(wxl_stage)` still runs after each of them, for every stage, including one appended to
 the contract after this SDK was built. `OnLoad` runs before any stage and may refuse to load;
 `OnUnload` runs last, and `wxl::ScriptMgr` is cleared right after it so no handler outlives the
 code it points into.
+
+`wxl::Log(level, tag, text)` writes a line; with arguments after the text it formats them with
+`std::format`, checked at compile time: `wxl::Log(WXL_LOG_INFO, "my-mod", "map {} at {:.1f}", id,
+x)`. `wxl::ResultName(result)` names a `wxl_result` for such a line, and `wxl::ModId()` is the id
+`WXL_MOD` declared.
+
+### What a throw costs
+
+No C++ exception crosses into the runtime. The SDK catches one where it called the mod's code,
+logs it as an error under the mod's id with its `what()`, and stops what it interrupted:
+
+| Thrown from | Costs |
+|---|---|
+| the mod's constructor, `OnLoad` | the load: the mod is not loaded |
+| a stage's virtual, `OnStage`, `OnUnload` | the mod: the runtime disables it as it disables a mod that faults (`wxl_host.disable`), and none of its code runs again |
+| a script's handler, a `wxl::Subscribe` handler | that call: the next script, the next handler and the next event still run |
+| a function registered with `wxl.script` | that call: it fails on the script side with `what()` as its error |
+| a panel registered with `wxl.ui` | that frame's drawing of it |
+
+A runtime older than abi `0.1.8` has no `disable`: there the mod stops itself, dropping its
+scripts and running none of its remaining stages or its unload, and says so in the log. A
+destructor that throws still ends the process: C++ makes destructors `noexcept`.
 
 ### Events
 
@@ -180,6 +229,7 @@ void OnMessageReceived(uint32_t opcode, wxl::Bytes data, wxl::Answer suppressed)
 | `answer` | `wxl::Answer`: `Value()` is what earlier handlers decided, `Set()` answers |
 | `buffer` | `wxl::Buffer`: `Value()` is what it holds, `Write(text)` answers when the text and its terminator fit in `Capacity()` |
 | `ptr` | the member's C type |
+| `enum` (a `WXL_ARGS_ENUM` row) | the C enum it names: `wxl_object_type`, `wxl_script_context`, ... ([`enums.def`](../include/wxl/enums.def)) |
 
 A member that only gives the length of a bytes member or the capacity of a buffer is not a
 parameter: the view carries it. `wxl::HandlerOf<WXL_EV_...>` is the whole list as a function type.
@@ -252,6 +302,7 @@ empty object.
 ```cpp
 wxl::ScriptService script;
 script.RegisterFunction<&Greet>("Greet");       // void Greet(wxl::ScriptCall&)
+script.RegisterFunction<&Api::Count>("Count", this); // this->Count(wxl::ScriptCall&)
 script.RegisterFunction("Add", &adder);          // (*adder)(wxl::ScriptCall&)
 script.FireEvent("MY_EVENT", {wxl::Value::Number(1), wxl::Value::String("x")});
 
@@ -278,8 +329,9 @@ false when a write is refused, so a mod can stop and let what went before undo i
 Studio Installer > Modify > Individual components > *MSVC v14x - C++ x64/x86 build tools*. Or
 build `win-x64` alone, as above.
 
-**`mod.json promises "win-x86" ... but win-x86 is not being built`** -- the targets were narrowed
-and the manifest was not. Remove the entry, or build both.
+**`mod.json promises "win-x86" ... but the mod is not built for win-x86`** -- the `TARGETS` of
+`wxl_add_mod` leave out an architecture the manifest lists. Add it to `TARGETS`, or remove the
+entry.
 
 **`mod.json promises no binary for win-x86, which this build produces`** -- the opposite: add the
 entry, at the path the message gives.
@@ -295,10 +347,14 @@ to what the message says.
 **`"abi" is "x.y", the two-part numbering the SDK used before 0.1.5`** -- the manifest predates
 the three-part version. Set it to what the message says.
 
-**`building win-x64;win-x86 from one tree needs a Visual Studio generator`** -- with Ninja or
-Makefiles, CMake cannot pick the architecture per child project. Use `-G "Visual Studio 17 2022"`
-(any installed version), or build one architecture from a developer prompt of that architecture
-with `-DWXL_MOD_TARGETS=`.
+**`this tree's compiler targets win-x86, and 'Ninja' builds that one architecture only, but
+WXL_MOD_TARGETS asks for win-x64`** -- with Ninja or Makefiles the compiler decides the
+architecture. Configure the tree from a prompt, or with a toolchain file, of the architecture you
+want, and drop `WXL_MOD_TARGETS`; or use `-G "Visual Studio 17 2022"` to build both from one tree.
+
+**`wxl::Log with arguments formats them with std::format, which this standard library does not
+have`** -- the mod is compiled as C++17, or with a standard library older than `std::format`. Use
+`CXX_STANDARD 20` (the default), or log a text you build yourself.
 
 **`this tree is WXL_MOD_ARCH=win-x64 (64-bit) but the compiler targets 32-bit`** -- a hand-made
 child tree with the wrong `-A`. Match them.

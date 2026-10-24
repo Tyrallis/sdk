@@ -420,6 +420,7 @@ Each member arrives as a Lua value according to its kind. The kind is what the S
 | `answer` | a boolean: what was decided so far; `nil` when the runtime gave nothing to answer through |
 | `buffer` | a string: what was written so far; `nil` when the runtime gave nothing to write to |
 | `ptr` | an opaque value (a light userdata) or `nil`; nothing in the Lua API uses it |
+| an enumeration (`WXL_ARGS_ENUM`) | a string naming the value: a script context is `"glue"` or `"game"`, a mouse button `"left"`, `"right"` or `"middle"`, an object's type `"Unit"`, `"GameObject"`... as `Type()` names it. The names are in [`include/wxl/enums.def`](../include/wxl/enums.def); a value this wxl.lua does not know yet arrives as its number |
 
 A member that only gives the length of another is not a parameter: the string carries its own
 length. `OnMessageReceived` has no `size` parameter, `OnFileOpen` no `redirect_capacity`.
@@ -812,7 +813,7 @@ A few to start from:
 |---|---|---|---|
 | `WorldScript` | `OnUpdate` | `delta` | every game tick |
 | | `OnWorldEnter` | `map_id`, `position` | the world finished loading and you are in it |
-| | `OnWorldClick` | `point`, `object`, `button` | a click landed in the world (`button`: 0 left, 1 right, 2 middle) |
+| | `OnWorldClick` | `point`, `object`, `button` | a click landed in the world (`button`: `"left"`, `"right"` or `"middle"`) |
 | `ObjectScript` | `OnObjectCreate` | `object`, `guid`, `type` | an object came into view |
 | | `OnTargetChanged` | `previous`, `current` | your target changed |
 | | `OnUnitDeath` | `unit` | a unit died |

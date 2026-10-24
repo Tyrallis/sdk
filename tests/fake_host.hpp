@@ -8,6 +8,7 @@
 #ifndef WXL_TEST_FAKE_HOST_HPP
 #define WXL_TEST_FAKE_HOST_HPP
 
+#include <cstddef>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -60,6 +61,7 @@ namespace wxltest
             table_.unsubscribe     = &FakeHost::Unsubscribe;
             table_.emit            = &FakeHost::Emit;
             table_.abi_feature     = WXL_ABI_VERSION_FEATURE;
+            table_.disable         = &FakeHost::Disable;
         }
 
         const wxl_host* Table() const { return &table_; }
@@ -80,6 +82,13 @@ namespace wxltest
 
             for (Subscription* sub : ordered) sub->handler(sub->user, args);
         }
+
+        /// Takes `disable` out of the table, as a runtime older than abi 0.1.8 has none.
+        void WithoutDisable() { table_.struct_size = offsetof(wxl_host, disable); }
+        void WithDisable() { table_.struct_size = sizeof(table_); }
+
+        /// The reasons the mod gave, one per disable call.
+        const std::vector<std::string>& Disables() const { return disables_; }
 
         const std::vector<Subscription>& Subscriptions() const { return subscriptions_; }
         const std::vector<std::string>&  LogLines() const { return log_; }
@@ -153,11 +162,17 @@ namespace wxltest
             current_->Raise(event, args);
         }
 
+        static void WXL_CALL Disable(wxl_str reason)
+        {
+            current_->disables_.push_back(std::string(reason.data ? reason.data : "", reason.size));
+        }
+
         wxl_host                  table_{};
         wxl_runtime_info          info_{};
         std::vector<Subscription> subscriptions_;
         std::vector<Published>    services_;
         std::vector<std::string>  log_;
+        std::vector<std::string>  disables_;
         std::vector<wxl_event>    withheld_;
         wxl_subscription          next_id_ = 0;
         size_t                    unsubscribeCalls_ = 0;

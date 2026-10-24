@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstring>
+#include <functional>
 #include <iterator>
 #include <map>
 #include <set>
@@ -195,9 +196,55 @@ namespace wxltest
     };
 
     // --- wxl.script -------------------------------------------------------------------------
+    //
+    // A context is live from the start, the game's, so a test that only registers needs nothing
+    // more. Open and Close drive the lifecycle a runtime has: Open raises ScriptVmReady for a new,
+    // empty context; Close raises ScriptVmClosing while the context still holds what was
+    // registered, then forgets it all. With no context live, every call that needs one answers
+    // WXL_E_FAILED, as script.h says.
 
     struct FakeScript
     {
+        /// How a test hands an event to the mods: its host's Raise.
+        using Raise = std::function<void(wxl_event event, const void* args)>;
+
+        static constexpr int kNone = -1;
+
+        /// The live context, a wxl_script_context value, or kNone between two of them.
+        static int& Live()
+        {
+            static int live = WXL_SCRIPT_CONTEXT_GAME;
+            return live;
+        }
+
+        /// The event names declared on the live context.
+        static std::set<std::string>& Declared()
+        {
+            static std::set<std::string> declared;
+            return declared;
+        }
+
+        /// Opens a new context: empty, live, then announced with ScriptVmReady.
+        static void Open(wxl_script_context context, const Raise& raise)
+        {
+            Functions().clear();
+            Declared().clear();
+            Live() = context;
+            const wxl_script_vm_args args{static_cast<uint32_t>(context), nullptr};
+            if (raise) raise(WXL_EV_ScriptVmReady, &args);
+        }
+
+        /// Closes the live context: ScriptVmClosing first, then everything registered goes.
+        static void Close(const Raise& raise)
+        {
+            if (Live() == kNone) return;
+            const wxl_script_vm_args args{static_cast<uint32_t>(Live()), nullptr};
+            if (raise) raise(WXL_EV_ScriptVmClosing, &args);
+            Functions().clear();
+            Declared().clear();
+            Live() = kNone;
+        }
+
         struct Registered
         {
             wxl_script_fn fn;
@@ -222,10 +269,15 @@ namespace wxltest
             return chunks;
         }
 
-        static uint32_t WXL_CALL Context() { return WXL_SCRIPT_CONTEXT_GAME; }
+        /// The live context; the glue's between two, which a mod cannot tell from a live one.
+        static uint32_t WXL_CALL Context()
+        {
+            return Live() == kNone ? WXL_SCRIPT_CONTEXT_GLUE : static_cast<uint32_t>(Live());
+        }
 
         static wxl_result WXL_CALL RegisterFunction(const char* name, wxl_script_fn fn, void* user)
         {
+            if (Live() == kNone) return WXL_E_FAILED;
             if (!name || !fn) return WXL_E_INVALID;
             if (Functions().count(name)) return WXL_E_INVALID;
             Functions()[name] = Registered{fn, user};
@@ -234,12 +286,16 @@ namespace wxltest
 
         static wxl_result WXL_CALL RegisterEvent(const char* name)
         {
+            if (Live() == kNone) return WXL_E_FAILED;
+            Declared().insert(name);
             Events().push_back(name);
             return WXL_OK;
         }
 
         static wxl_result WXL_CALL FireEvent(const char* name, const wxl_value* args, uint32_t count)
         {
+            if (Live() == kNone) return WXL_E_FAILED;
+            if (!Declared().count(name)) return WXL_E_NOT_FOUND;
             std::string line = name;
             for (uint32_t i = 0; i < count; ++i)
             {
@@ -253,6 +309,7 @@ namespace wxltest
 
         static wxl_result WXL_CALL Run(wxl_str chunk, const char* name)
         {
+            if (Live() == kNone) return WXL_E_FAILED;
             Chunks().push_back(std::string(name) + ": " + std::string(chunk.data, chunk.size));
             return WXL_OK;
         }

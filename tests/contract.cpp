@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -148,7 +149,7 @@ namespace
         int clicks = 0;
 
     private:
-        void OnWorldClick(wxl_vec3, wxl::Object, uint32_t) override { ++clicks; }
+        void OnWorldClick(wxl_vec3, wxl::Object, wxl_mouse_button) override { ++clicks; }
     };
 
     struct ProtectedWorldScript final : wxl::WorldScript
@@ -192,13 +193,13 @@ namespace
         int      closing     = 0;
         uint32_t lastContext = 0;
 
-        void OnScriptVmReady(uint32_t context, void*) override
+        void OnScriptVmReady(wxl_script_context context, void*) override
         {
             ++ready;
             lastContext = context;
         }
 
-        void OnScriptVmClosing(uint32_t, void*) override { ++closing; }
+        void OnScriptVmClosing(wxl_script_context, void*) override { ++closing; }
     };
 
     /// A typed handler for the free-standing Subscribe.
@@ -253,21 +254,64 @@ namespace
     {
         static inline std::vector<std::string> trace;
         static inline CountingWorldScript*     script = nullptr;
+        static inline std::string              throwIn; ///< the method that throws; OnStage throws an int
+
+        static void Trace(const char* step, const char* method)
+        {
+            trace.push_back(step);
+            if (throwIn != method) return;
+            if (throwIn == "OnStage") throw 42;
+            throw std::runtime_error(std::string("boom in ") + method);
+        }
 
         wxl_result OnLoad() override
         {
-            trace.push_back("load");
             if (script) wxl::ScriptMgr::Add(script);
+            Trace("load", "OnLoad");
             return WXL_OK;
         }
-        void OnEarly() override { trace.push_back("early"); }
-        void OnStorageReady() override { trace.push_back("storage"); }
-        void OnGraphicsReady() override { trace.push_back("graphics"); }
-        void OnScriptReady() override { trace.push_back("script"); }
-        void OnReady() override { trace.push_back("ready"); }
-        void OnShutdown() override { trace.push_back("shutdown"); }
-        void OnStage(wxl_stage stage) override { trace.push_back("stage" + std::to_string(stage)); }
-        void OnUnload() override { trace.push_back("unload"); }
+        void OnEarly() override { Trace("early", "OnEarly"); }
+        void OnStorageReady() override { Trace("storage", "OnStorageReady"); }
+        void OnGraphicsReady() override { Trace("graphics", "OnGraphicsReady"); }
+        void OnScriptReady() override { Trace("script", "OnScriptReady"); }
+        void OnReady() override { Trace("ready", "OnReady"); }
+        void OnShutdown() override { Trace("shutdown", "OnShutdown"); }
+        void OnStage(wxl_stage stage) override
+        {
+            Trace(("stage" + std::to_string(stage)).c_str(), "OnStage");
+        }
+        void OnUnload() override { Trace("unload", "OnUnload"); }
+    };
+
+    /// A script that throws from its handler, every time.
+    struct ThrowingWorldScript final : wxl::WorldScript
+    {
+        int  calls = 0;
+        void OnUpdate(float) override
+        {
+            ++calls;
+            throw std::runtime_error("tick");
+        }
+    };
+
+    /// A handler for wxl::Subscribe that throws what is not a std::exception.
+    struct ThrowingHandler
+    {
+        int  calls = 0;
+        void operator()(float)
+        {
+            ++calls;
+            throw 7;
+        }
+    };
+
+    /// Script functions as members of an object, one of them throwing.
+    struct Counter
+    {
+        int  count = 0;
+        void Next(wxl::ScriptCall& call) { call.PushNumber(++count); }
+        void Peek(wxl::ScriptCall& call) const { call.PushNumber(count); }
+        void Throws(wxl::ScriptCall&) { throw std::runtime_error("no counting today"); }
     };
 
     // --- script-side functions --------------------------------------------------------------
@@ -309,7 +353,7 @@ namespace
 } // namespace
 
 // The entry points the WXL_MOD macro writes, exercised in-process.
-WXL_MOD(LifecycleMod, "wxl.contract", "Contract", 1)
+WXL_MOD(LifecycleMod, "wxl.contract", "Contract")
 
 int main()
 {
@@ -345,6 +389,10 @@ int main()
                   std::is_same_v<wxl::HandlerOf<WXL_EV_UnitAuraChanged>,
                                  void(wxl::Object, uint32_t, bool)>,
               "values, vectors, objects and booleans keep their order");
+        Check(std::is_same_v<wxl::HandlerOf<WXL_EV_ScriptVmReady>, void(wxl_script_context, void*)> &&
+                  std::is_same_v<wxl::HandlerOf<WXL_EV_WorldClick>,
+                                 void(wxl_vec3, wxl::Object, wxl_mouse_button)>,
+              "a member holding an enumeration's values arrives as that enum");
         Check(std::is_same_v<wxl::HandlerOf<WXL_EV_ModelLoad>,
                              void(std::string_view, wxl::Bytes, const void**, uint32_t*)>,
               "a ptr member keeps its C type");
@@ -864,7 +912,7 @@ int main()
         {
             wxl::Object created;
             bool        sawUnit = false;
-            void        OnObjectCreate(wxl::Object object, wxl_guid, uint32_t) override
+            void        OnObjectCreate(wxl::Object object, wxl_guid, wxl_object_type) override
             {
                 created = object;
                 sawUnit = object.As<wxl::Unit>().has_value();
@@ -875,8 +923,9 @@ int main()
         host.Raise(WXL_EV_ObjectCreate, &boarCreated);
         Check(watcher.created == wxl::Object(FakeObjects::kBoar) && watcher.sawUnit,
               "a handle member reaches a handler as a wxl::Object, viewable as its class");
-        Check(std::is_same_v<wxl::HandlerOf<WXL_EV_ObjectCreate>, void(wxl::Object, wxl_guid, uint32_t)>,
-              "an object event's handler takes the object, its guid and its type");
+        Check(std::is_same_v<wxl::HandlerOf<WXL_EV_ObjectCreate>,
+                             void(wxl::Object, wxl_guid, wxl_object_type)>,
+              "an object event's handler takes the object, its guid and its type, as the enum");
         Check(wxl::Unit::Accepts(boarCreated.type) && !wxl::GameObject::Accepts(boarCreated.type) &&
                   wxl::Unit(watcher.created).Handle() == FakeObjects::kBoar,
               "the event's type picks the class, and an Object views as it unchecked");
@@ -946,12 +995,40 @@ int main()
         wxltest::FakeScript::Invoke("Add", add);
         Check(adder.total == 4.0, "a callable object keeps its state between calls");
 
+        Counter counter;
+        Check(script.RegisterFunction<&Counter::Next>("Next", &counter) == WXL_OK &&
+                  script.RegisterFunction<&Counter::Peek>("Peek", &counter) == WXL_OK,
+              "a member function registers with its object, const or not");
+        wxl_script_call next, peek;
+        wxltest::FakeScript::Invoke("Next", next);
+        wxltest::FakeScript::Invoke("Next", next);
+        wxltest::FakeScript::Invoke("Peek", peek);
+        Check(counter.count == 2 && peek.results.size() == 1 && peek.results[0].as.number == 2.0,
+              "and is called on that object");
+        Check(script.RegisterFunction<&Counter::Next>("Null", static_cast<Counter*>(nullptr)) ==
+                  WXL_E_INVALID,
+              "a null object is refused");
+
         Check(script.RegisterEvent("MY_EVENT") == WXL_OK, "an event registers");
         Check(script.FireEvent("MY_EVENT", {wxl::Value::Number(1), wxl::Value::String("x"), wxl::Value::Nil()}) == WXL_OK,
               "and fires with a list of values");
         Check(wxltest::FakeScript::Events().back() == "MY_EVENT n s -", "which arrive typed");
         Check(script.Run("print(1)", "chunk") == WXL_OK && wxltest::FakeScript::Chunks().back() == "chunk: print(1)",
               "a chunk runs with its name");
+
+        const wxltest::FakeScript::Raise raise = [&](wxl_event event, const void* args) {
+            host.Raise(event, args);
+        };
+        wxltest::FakeScript::Close(raise);
+        Check(wxltest::FakeScript::Functions().empty() &&
+                  script.RegisterFunction<&Greet>("Greet") == WXL_E_FAILED &&
+                  script.FireEvent("MY_EVENT", {}) == WXL_E_FAILED,
+              "a closed context takes its functions with it, and nothing registers until the next");
+        wxltest::FakeScript::Open(WXL_SCRIPT_CONTEXT_GLUE, raise);
+        Check(script.Context().ValueOr(WXL_SCRIPT_CONTEXT_GAME) == WXL_SCRIPT_CONTEXT_GLUE &&
+                  script.RegisterFunction<&Greet>("Greet") == WXL_OK &&
+                  script.FireEvent("MY_EVENT", {}) == WXL_E_NOT_FOUND,
+              "the next starts empty: a name registers again, an event is declared again");
     }
 
     Section("wxl.storage");
@@ -1198,6 +1275,113 @@ int main()
               "a log line crosses with its tag and its length");
         wxl::Log(WXL_LOG_INFO, "contract", std::string_view("sliced", 5));
         Check(host.LogLines().back() == "[contract] slice", "a view crosses with its own length");
+        wxl::Log(WXL_LOG_INFO, "contract", "{} of 0x{:04X}, {:.1f}", 3, 0x85u, 2.3);
+        Check(host.LogLines().back() == "[contract] 3 of 0x0085, 2.3",
+              "a line with arguments is formatted with std::format");
+        wxl::Log(WXL_LOG_INFO, "contract", "50% {kept}");
+        Check(host.LogLines().back() == "[contract] 50% {kept}", "one without is written as it is");
+        Check(std::string_view(wxl::ResultName(WXL_E_NOT_FOUND)) == "WXL_E_NOT_FOUND" &&
+                  std::string_view(wxl::ResultName(static_cast<wxl_result>(77))) ==
+                      "an unknown wxl_result",
+              "ResultName names a result, and says when it does not know one");
+    }
+
+    Section("what a throw costs");
+    {
+        size_t     from   = host.LogLines().size();
+        const auto logged = [&](const std::string& line) {
+            for (size_t i = from; i < host.LogLines().size(); ++i)
+                if (host.LogLines()[i] == line) return true;
+            return false;
+        };
+
+        ThrowingWorldScript thrower;
+        CountingWorldScript counter;
+        wxl::ScriptMgr::Add(&thrower);
+        wxl::ScriptMgr::Add(&counter);
+        const wxl_update_args tick{0.5f};
+        host.Raise(WXL_EV_Update, &tick);
+        Check(thrower.calls == 1 && counter.updates == 1,
+              "a script that throws loses that call, and the next script still gets it");
+        Check(logged("[wxl.contract] WorldScript::OnUpdate threw an exception: tick; that call "
+                     "ended there, and the mod goes on receiving events"),
+              "logged under the mod's id, with the handler and what()");
+        host.Raise(WXL_EV_Update, &tick);
+        Check(thrower.calls == 2 && host.Disables().empty(), "it gets the next event: nothing is disabled");
+        wxl::ScriptMgr::Clear();
+
+        ThrowingHandler   handler;
+        wxl::Subscription subscription = wxl::Subscribe<WXL_EV_Update>(&handler);
+        host.Raise(WXL_EV_Update, &tick);
+        Check(handler.calls == 1 &&
+                  logged("[wxl.contract] a wxl::Subscribe handler for Update threw something that "
+                         "is not a std::exception; that call ended there, and the mod goes on "
+                         "receiving events"),
+              "a handler given to Subscribe is caught too, and a throw of another type is named so");
+        subscription.Reset();
+
+        Counter         object;
+        wxl_script_call call;
+        Check(wxl::ScriptService().RegisterFunction<&Counter::Throws>("Throws", &object) == WXL_OK &&
+                  wxltest::FakeScript::Invoke("Throws", call) && call.error == "no counting today" &&
+                  call.results.empty(),
+              "a script function that throws fails the call, with what() as the script's error");
+        Check(logged("[wxl.contract] a function registered with wxl.script threw an exception: no "
+                     "counting today; the call fails on the script side with that message"),
+              "and is logged");
+
+        LifecycleMod::throwIn = "OnLoad";
+        LifecycleMod::trace.clear();
+        const size_t before   = host.LiveSubscriptions();
+        LifecycleMod::script  = &counter;
+        Check(wxl_mod_load(host.Table()) == WXL_E_FAILED &&
+                  logged("[wxl.contract] OnLoad threw an exception: boom in OnLoad; the mod is not "
+                         "loaded"),
+              "OnLoad throwing fails the load, and says why");
+        Check(host.LiveSubscriptions() == before, "what it subscribed before throwing is dropped");
+        LifecycleMod::script = nullptr;
+        wxl_mod_stage(WXL_STAGE_EARLY);
+        Check(LifecycleMod::trace.size() == 1, "and none of its code runs after");
+
+        LifecycleMod::throwIn = "OnReady";
+        LifecycleMod::trace.clear();
+        Check(wxl_mod_load(host.Table()) == WXL_OK, "a mod that throws later loads");
+        for (int stage = WXL_STAGE_EARLY; stage <= WXL_STAGE_SHUTDOWN; ++stage)
+            wxl_mod_stage(static_cast<wxl_stage>(stage));
+        wxl_mod_unload();
+        const std::vector<std::string> stopped = {"load",   "early",    "stage0", "storage", "stage1",
+                                                  "graphics", "stage2", "script", "stage3", "ready"};
+        Check(LifecycleMod::trace == stopped,
+              "a stage that throws stops the mod there: no OnStage after it, no later stage, no "
+              "unload");
+        Check(host.Disables().size() == 1 &&
+                  host.Disables().back() == "OnReady threw an exception: boom in OnReady",
+              "and asks the runtime to disable it, with the stage's virtual and what()");
+
+        LifecycleMod::throwIn = "OnStage";
+        LifecycleMod::trace.clear();
+        wxl_mod_load(host.Table());
+        wxl_mod_stage(WXL_STAGE_EARLY);
+        wxl_mod_stage(WXL_STAGE_STORAGE);
+        Check(LifecycleMod::trace == std::vector<std::string>{"load", "early", "stage0"} &&
+                  host.Disables().back() ==
+                      "OnStage(early) threw something that is not a std::exception",
+              "OnStage is named with its stage");
+
+        host.WithoutDisable();
+        from                  = host.LogLines().size();
+        LifecycleMod::throwIn = "OnUnload";
+        LifecycleMod::trace.clear();
+        wxl_mod_load(host.Table());
+        wxl_mod_unload();
+        Check(host.Disables().size() == 2 &&
+                  logged("[wxl.contract] OnUnload threw an exception: boom in OnUnload; this "
+                         "runtime cannot disable a mod (it predates abi 0.1.8), so the mod stops "
+                         "itself: its scripts are dropped, and its remaining stages and its "
+                         "unload do nothing"),
+              "on a runtime without disable, the mod says so and stops itself");
+        host.WithDisable();
+        LifecycleMod::throwIn.clear();
     }
 
     if (g_failures == 0)

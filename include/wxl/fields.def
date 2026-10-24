@@ -14,6 +14,8 @@
 //   WXL_ARGS_BUFFER(args, member, capacity)   `char*` a handler writes a NUL-terminated string
 //                                             into, at most `capacity` bytes with the terminator
 //   WXL_ARGS_PTR(args, member, type)          an address of C type `type`, for native code only
+//   WXL_ARGS_ENUM(args, member, type)         a `uint32_t` holding a value of the enumeration
+//                                             `type` of enums.def
 //   WXL_ARGS_END(args)                        closes it
 //
 // Columns:
@@ -36,7 +38,8 @@
 //
 // Include with WXL_ARGS_FIELD defined. WXL_ARGS and WXL_ARGS_END default to nothing; the other
 // shapes default to WXL_ARGS_FIELD with their own kind -- bytes, answer, buffer, ptr -- for a
-// consumer that only wants the members.
+// consumer that only wants the members, and an enum to WXL_ARGS_FIELD with kind u32, which is
+// what the struct holds.
 
 #ifndef WXL_ARGS_FIELD
 #error "define WXL_ARGS_FIELD(args, member, kind) before including fields.def"
@@ -57,6 +60,10 @@
 #ifndef WXL_ARGS_PTR
     #define WXL_ARGS_PTR(args, member, type) WXL_ARGS_FIELD(args, member, ptr)
     #define WXL_ARGS_PTR_DEFAULTED
+#endif
+#ifndef WXL_ARGS_ENUM
+    #define WXL_ARGS_ENUM(args, member, type) WXL_ARGS_FIELD(args, member, u32)
+    #define WXL_ARGS_ENUM_DEFAULTED
 #endif
 #ifndef WXL_ARGS
     #define WXL_ARGS(args)
@@ -88,7 +95,7 @@ WXL_ARGS_END(wxl_world_args)
 WXL_ARGS(wxl_world_click_args)
 WXL_ARGS_FIELD(wxl_world_click_args, point, vec3)    ///< where the ray met the world
 WXL_ARGS_FIELD(wxl_world_click_args, object, handle) ///< what was hit, or WXL_HANDLE_NONE for bare ground
-WXL_ARGS_FIELD(wxl_world_click_args, button, u32)    ///< 0 left, 1 right, 2 middle
+WXL_ARGS_ENUM(wxl_world_click_args, button, wxl_mouse_button)
 WXL_ARGS_END(wxl_world_click_args)
 
 /// A platform input message, before the client sees it.
@@ -116,7 +123,7 @@ WXL_ARGS_END(wxl_swapchain_args)
 WXL_ARGS(wxl_object_args)
 WXL_ARGS_FIELD(wxl_object_args, object, handle)
 WXL_ARGS_FIELD(wxl_object_args, guid, guid)
-WXL_ARGS_FIELD(wxl_object_args, type, u32)      ///< a wxl_object_type value
+WXL_ARGS_ENUM(wxl_object_args, type, wxl_object_type)
 WXL_ARGS_END(wxl_object_args)
 
 /// The player's target moving from one object to another.
@@ -234,7 +241,7 @@ WXL_ARGS_END(wxl_connection_args)
  * portable way to register a function.
  */
 WXL_ARGS(wxl_script_vm_args)
-WXL_ARGS_FIELD(wxl_script_vm_args, context, u32)      ///< a wxl_script_context value
+WXL_ARGS_ENUM(wxl_script_vm_args, context, wxl_script_context)
 WXL_ARGS_PTR(wxl_script_vm_args, native_state, void*) ///< the VM's state, or NULL when the runtime does not expose one
 WXL_ARGS_END(wxl_script_vm_args)
 
@@ -346,7 +353,7 @@ WXL_ARGS_END(wxl_ui_event_args)
 
 /// An error the interface's Lua raised, as the VM reports it, before the client's handler sees it.
 WXL_ARGS(wxl_script_error_args)
-WXL_ARGS_FIELD(wxl_script_error_args, context, u32) ///< a wxl_script_context value: which interface raised it
+WXL_ARGS_ENUM(wxl_script_error_args, context, wxl_script_context) ///< which interface raised it
 WXL_ARGS_FIELD(wxl_script_error_args, message, str) ///< the error value as text; "UNKNOWN ERROR" when it is not text
 WXL_ARGS_END(wxl_script_error_args)
 
@@ -402,7 +409,7 @@ WXL_ARGS(wxl_spell_cooldown_change_args)
 WXL_ARGS_FIELD(wxl_spell_cooldown_change_args, unit, handle)    ///< the player or the pet; WXL_HANDLE_NONE when not in view
 WXL_ARGS_FIELD(wxl_spell_cooldown_change_args, unit_guid, guid)
 WXL_ARGS_FIELD(wxl_spell_cooldown_change_args, spell_id, u32)
-WXL_ARGS_FIELD(wxl_spell_cooldown_change_args, change, u32)     ///< 0 the held cooldown starts now, 1 cleared, 2 shifted by @ref delay
+WXL_ARGS_ENUM(wxl_spell_cooldown_change_args, change, wxl_cooldown_change) ///< WXL_COOLDOWN_SHIFTED moves it by @ref delay
 WXL_ARGS_FIELD(wxl_spell_cooldown_change_args, delay, i32)      ///< milliseconds, for a shift; 0 otherwise
 WXL_ARGS_END(wxl_spell_cooldown_change_args)
 
@@ -446,8 +453,8 @@ WXL_ARGS_FIELD(wxl_combat_damage_args, source_guid, guid)   ///< 0 for the envir
 WXL_ARGS_FIELD(wxl_combat_damage_args, target, handle)      ///< WXL_HANDLE_NONE when not in view
 WXL_ARGS_FIELD(wxl_combat_damage_args, target_guid, guid)
 WXL_ARGS_FIELD(wxl_combat_damage_args, spell_id, u32)       ///< 0 for a plain melee swing and for the environment
-WXL_ARGS_FIELD(wxl_combat_damage_args, kind, u32)           ///< 0 melee, 1 spell, 2 periodic, 3 environment
-WXL_ARGS_FIELD(wxl_combat_damage_args, environment, u32)    ///< kind 3 only: 0 exhaustion, 1 drowning, 2 fall, 3 lava, 4 slime, 5 fire
+WXL_ARGS_ENUM(wxl_combat_damage_args, kind, wxl_damage_kind)
+WXL_ARGS_ENUM(wxl_combat_damage_args, environment, wxl_environment) ///< meaningful for WXL_DAMAGE_ENVIRONMENT only
 WXL_ARGS_FIELD(wxl_combat_damage_args, amount, u32)         ///< damage dealt
 WXL_ARGS_FIELD(wxl_combat_damage_args, overkill, u32)       ///< damage past the target's health; 0 when it survived
 WXL_ARGS_FIELD(wxl_combat_damage_args, school, u32)         ///< the school mask: 1 physical, 2 holy, 4 fire, 8 nature, 16 frost, 32 shadow, 64 arcane
@@ -583,7 +590,7 @@ WXL_ARGS(wxl_xp_gain_args)
 WXL_ARGS_FIELD(wxl_xp_gain_args, source, handle)          ///< WXL_HANDLE_NONE when not in view
 WXL_ARGS_FIELD(wxl_xp_gain_args, source_guid, guid)
 WXL_ARGS_FIELD(wxl_xp_gain_args, amount, u32)             ///< experience gained, the bonus included
-WXL_ARGS_FIELD(wxl_xp_gain_args, kind, u32)               ///< 0 a kill, 1 anything else
+WXL_ARGS_ENUM(wxl_xp_gain_args, kind, wxl_xp_source)
 WXL_ARGS_FIELD(wxl_xp_gain_args, bonus, u32)              ///< the rested part of a kill's experience; 0 otherwise
 WXL_ARGS_FIELD(wxl_xp_gain_args, group_multiplier, f32)   ///< the group's rate on a kill; 1 otherwise
 WXL_ARGS_FIELD(wxl_xp_gain_args, refer_a_friend, bool)    ///< WXL_TRUE when the refer-a-friend bonus applied
@@ -790,6 +797,10 @@ WXL_ARGS_FIELD(wxl_combat_energize_args, drain, bool)         ///< WXL_TRUE when
 WXL_ARGS_FIELD(wxl_combat_energize_args, multiplier, f32)     ///< for a drain; 0 otherwise
 WXL_ARGS_END(wxl_combat_energize_args)
 
+#ifdef WXL_ARGS_ENUM_DEFAULTED
+    #undef WXL_ARGS_ENUM
+    #undef WXL_ARGS_ENUM_DEFAULTED
+#endif
 #ifdef WXL_ARGS_BYTES_DEFAULTED
     #undef WXL_ARGS_BYTES
     #undef WXL_ARGS_BYTES_DEFAULTED

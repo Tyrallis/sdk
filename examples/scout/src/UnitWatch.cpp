@@ -4,7 +4,6 @@
 #include "UnitWatch.h"
 
 #include <cmath>
-#include <string>
 
 namespace
 {
@@ -38,7 +37,7 @@ namespace
 
 namespace scout
 {
-    void UnitWatch::OnObjectCreate(wxl::Object object, wxl_guid, uint32_t type)
+    void UnitWatch::OnObjectCreate(wxl::Object object, wxl_guid, wxl_object_type type)
     {
         if (!wxl::Unit::Accepts(type)) return;
 
@@ -47,7 +46,7 @@ namespace scout
         if (IsNear(unit)) Note(What::Appeared, unit);
     }
 
-    void UnitWatch::OnObjectDestroy(wxl::Object object, wxl_guid, uint32_t type)
+    void UnitWatch::OnObjectDestroy(wxl::Object object, wxl_guid, wxl_object_type type)
     {
         if (!wxl::Unit::Accepts(type)) return;
 

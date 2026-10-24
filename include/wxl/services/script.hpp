@@ -148,6 +148,27 @@ namespace wxl
         }
 
         /**
+         * @brief Registers a member function, called on @p object.
+         *
+         *     void Count(wxl::ScriptCall& call);          // a member of Api, const or not
+         *     script.RegisterFunction<&Api::Count>("Count", this);
+         *
+         * The object must outlive the context it is registered on.
+         */
+        template <auto Method, class C>
+        wxl_result RegisterFunction(const char* name, C* object) const
+        {
+            static_assert(std::is_member_function_pointer_v<decltype(Method)>,
+                          "RegisterFunction<&Class::Method>(name, object) takes a member "
+                          "function; pass a plain function as RegisterFunction<&Fn>(name)");
+            static_assert(std::is_invocable_v<decltype(Method), C*, ScriptCall&>,
+                          "the member function is called as (object->*Method)(call): it takes a "
+                          "wxl::ScriptCall& and is a member of the object's class");
+            if (!object) return WXL_E_INVALID;
+            return RegisterFunction(name, &MethodThunk<Method, C>, object);
+        }
+
+        /**
          * @brief Registers a callable object, called as `(*handler)(ScriptCall&)`.
          *
          * The object must outlive the context it is registered on.
@@ -190,18 +211,38 @@ namespace wxl
         }
 
     private:
+        /// Runs a registered function. What it throws fails the call, with what() as the
+        /// script's error, and is logged: the script side never sees a C++ exception.
+        template <class F>
+        static void Run(wxl_script_call* call, F&& f)
+        {
+            ScriptCall      typed(Raw(), call);
+            detail::Thrown thrown;
+            if (detail::Contain([&] { f(typed); }, thrown)) return;
+            detail::LogThrown("a function registered with wxl.script", thrown,
+                              "; the call fails on the script side with that message");
+            char described[320];
+            typed.Fail(thrown.standard ? std::string_view(thrown.what)
+                                       : std::string_view(thrown.Describe(described,
+                                                                          sizeof described)));
+        }
+
         template <void (*Fn)(ScriptCall&)>
         static void WXL_CALL FunctionThunk(wxl_script_call* call, void*)
         {
-            ScriptCall typed(Raw(), call);
-            Fn(typed);
+            Run(call, [](ScriptCall& typed) { Fn(typed); });
+        }
+
+        template <auto Method, class C>
+        static void WXL_CALL MethodThunk(wxl_script_call* call, void* user)
+        {
+            Run(call, [user](ScriptCall& typed) { (static_cast<C*>(user)->*Method)(typed); });
         }
 
         template <class Handler>
         static void WXL_CALL HandlerThunk(wxl_script_call* call, void* user)
         {
-            ScriptCall typed(Raw(), call);
-            (*static_cast<Handler*>(user))(typed);
+            Run(call, [user](ScriptCall& typed) { (*static_cast<Handler*>(user))(typed); });
         }
     };
 } // namespace wxl

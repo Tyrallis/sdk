@@ -59,8 +59,9 @@ twice: one source, built once per architecture. The build does both for you.
 Between your DLL and the runtime, only plain C crosses: functions and structs. The SDK is a set of
 headers that turns that C into C++ inside your DLL: you derive from classes, override virtual
 functions, and receive ordinary C++ values. Nothing of your C++ reaches the runtime, so your mod
-may be built with a different compiler than the runtime, and a C++ exception must never travel
-out of your code (more on that in [step 8](#what-the-runtime-does-when-your-code-fails)).
+may be built with a different compiler than the runtime, and a C++ exception your code throws is
+stopped by the SDK before it leaves your DLL (more on that in
+[step 8](#what-the-runtime-does-when-your-code-fails)).
 
 ---
 
@@ -104,21 +105,24 @@ That folder is the whole mod. `build/` also holds one build tree per architectur
 
 Two cases need something else:
 
-- **CMake picked Ninja** (some editors set it for you): Ninja builds one architecture per tree, and
-  the configure step says so. Pass `-G "Visual Studio 17 2022"` to the first command, or see
+- **CMake picked Ninja** (some editors set it for you): Ninja builds one architecture per tree, the
+  one its compiler targets, and the configure step says which. The tree still lays out
+  `build/dist/wxl.scout/`, with that architecture's DLL in it. For both from one tree, pass
+  `-G "Visual Studio 17 2022"` to the first command; for the other ways, see
   [Building one architecture](building-a-mod.md#building-one-architecture).
 - **You build from Linux**: set up clang-cl and the Windows SDK, and export the toolchain file, as
-  the README says in [Run the tests from Linux](../README.md#run-the-tests-from-linux). Then
-  configure one tree per architecture and install each into the mod folder:
+  the README says in [Run the tests from Linux](../README.md#run-the-tests-from-linux). Each tree
+  builds the architecture of the toolchain file it was configured with:
 
   ```sh
-  cmake -S . -B build-x64 -G Ninja -DCMAKE_BUILD_TYPE=Release -DWXL_MOD_ARCH=win-x64
+  cmake -S . -B build-x64 -G Ninja -DCMAKE_BUILD_TYPE=Release
   cmake --build build-x64
-  cmake --install build-x64 --prefix dist/wxl.scout
   ```
 
-  Then the same with the x86 toolchain file and `win-x86`, and copy `mod.json` into
-  `dist/wxl.scout/`.
+  `build-x64/dist/wxl.scout/` then holds `mod.json` and `bin/x64/scout.dll`. Export the x86
+  toolchain file, do the same with `build-x86`, and
+  `cmake --install build-x86 --prefix build-x64/dist/wxl.scout` adds `bin/x86/scout.dll` to the
+  first folder.
 
 ---
 
@@ -238,7 +242,7 @@ namespace
     };
 } // namespace
 
-WXL_MOD(Scout, "wxl.scout", "Scout", 1)
+WXL_MOD(Scout, "wxl.scout", "Scout")
 ```
 
 - `wxl/sdk.hpp` is the SDK's C++ layer. It is header-only: there is no library to link.
@@ -250,9 +254,9 @@ WXL_MOD(Scout, "wxl.scout", "Scout", 1)
   `_ERROR`), a tag that tells your lines apart from everyone else's, and the text.
 - **`WXL_MOD`** declares the mod. A runtime looks for four functions in your DLL by name, to ask
   who you are, to load you, to tell you how far the client has started, and to unload you; this
-  macro writes all four around your class. It takes the class, the id, a display name and the
-  binary's own version number, a plain integer. Put it once, in one source file. **The id must be
-  the manifest's, letter for letter**: when they differ the runtime refuses the mod and logs both.
+  macro writes all four around your class. It takes the class, the id and a display name; the
+  version is the manifest's alone. Put it once, in one source file. **The id must be the
+  manifest's, letter for letter**: when they differ the runtime refuses the mod and logs both.
 - The anonymous namespace keeps `Scout` private to this file; nothing else needs to see it.
 
 ### Build it
@@ -519,17 +523,14 @@ void WorldWatch::OnUpdate(float delta)
 void WorldWatch::OnWorldEnter(uint32_t map_id, wxl_vec3 position)
 {
     journal_.Clear();
-    wxl::Log(WXL_LOG_INFO, kTag,
-             "entered map " + std::to_string(map_id) + " at " +
-                 std::to_string(static_cast<int>(position.x)) + ", " +
-                 std::to_string(static_cast<int>(position.y)));
+    wxl::Log(WXL_LOG_INFO, kTag, "entered map {} at {:.0f}, {:.0f}", map_id, position.x,
+             position.y);
 }
 
 void WorldWatch::OnWorldLeave(uint32_t map_id, wxl_vec3)
 {
-    wxl::Log(WXL_LOG_INFO, kTag,
-             "leaving map " + std::to_string(map_id) + " with " +
-                 std::to_string(journal_.Size()) + " line(s) in the journal");
+    wxl::Log(WXL_LOG_INFO, kTag, "leaving map {} with {} line(s) in the journal", map_id,
+             journal_.Size());
 }
 ```
 
@@ -541,6 +542,10 @@ void WorldWatch::OnWorldLeave(uint32_t map_id, wxl_vec3)
   are.
 - `OnWorldLeave` does not use `position`, so the parameter has no name in the definition: C++
   allows that, and it says "not used" without a compiler warning.
+- **`wxl::Log` with more arguments formats them.** Each `{}` in the text takes the next argument;
+  `{:.0f}` writes a number with no decimals. This is C++20's `std::format`, which is why the
+  build compiles the mod as C++20, and it checks the text against the arguments when the mod
+  compiles: a `{}` with no argument for it is a build error, not a garbled line.
 
 ### Register the script
 
@@ -571,7 +576,7 @@ namespace
     };
 } // namespace
 
-WXL_MOD(Scout, "wxl.scout", "Scout", 1)
+WXL_MOD(Scout, "wxl.scout", "Scout")
 ```
 
 The mod now owns a clock, a journal and a watcher, and registers the watcher in `OnLoad`.
@@ -655,8 +660,8 @@ public:
 
     UnitWatch(const Clock& clock, Journal& journal) : clock_(clock), journal_(journal) {}
 
-    void OnObjectCreate(wxl::Object object, wxl_guid guid, uint32_t type) override;
-    void OnObjectDestroy(wxl::Object object, wxl_guid guid, uint32_t type) override;
+    void OnObjectCreate(wxl::Object object, wxl_guid guid, wxl_object_type type) override;
+    void OnObjectDestroy(wxl::Object object, wxl_guid guid, wxl_object_type type) override;
     void OnUnitDeath(wxl::Object unit) override;
     void OnTargetChanged(wxl::Object previous, wxl::Object current) override;
 
@@ -670,8 +675,10 @@ private:
 ```
 
 Its header includes `wxl/objects.hpp` beside `wxl/sdk.hpp`. Besides the object, an object event
-carries its `wxl_guid`, the server's own id for it, and its type, one of the `WXL_OBJECT_...`
-values.
+carries its `wxl_guid`, the server's own id for it, and its type, a `wxl_object_type`:
+`WXL_OBJECT_UNIT`, `WXL_OBJECT_PLAYER`, `WXL_OBJECT_GAMEOBJECT` and the others listed in
+[`include/wxl/enums.def`](../include/wxl/enums.def). A parameter whose value is one of a fixed
+list arrives as that list's enum type, so the compiler knows which values it can hold.
 
 `src/UnitWatch.cpp` starts with the question every handler below asks, how far a unit is from the
 player:
@@ -710,7 +717,7 @@ The handlers:
 **`examples/scout/src/UnitWatch.cpp`**
 
 ```cpp
-void UnitWatch::OnObjectCreate(wxl::Object object, wxl_guid, uint32_t type)
+void UnitWatch::OnObjectCreate(wxl::Object object, wxl_guid, wxl_object_type type)
 {
     if (!wxl::Unit::Accepts(type)) return;
 
@@ -719,7 +726,7 @@ void UnitWatch::OnObjectCreate(wxl::Object object, wxl_guid, uint32_t type)
     if (IsNear(unit)) Note(What::Appeared, unit);
 }
 
-void UnitWatch::OnObjectDestroy(wxl::Object object, wxl_guid, uint32_t type)
+void UnitWatch::OnObjectDestroy(wxl::Object object, wxl_guid, wxl_object_type type)
 {
     if (!wxl::Unit::Accepts(type)) return;
 
@@ -937,59 +944,63 @@ both contexts.
 ### The script API
 
 Create `src/ScriptApi.h`. A function registered on the client's Lua is called through the script
-service with one argument, a `wxl::ScriptCall&`. Here each is a `std::function` member whose
-lambda forwards to a member function, so it reaches Scout's state:
+service with one argument, a `wxl::ScriptCall&`. Scout's are member functions of its script
+class, `ScriptApi`, so each reaches Scout's state, and a small helper registers them:
 
 **`examples/scout/src/ScriptApi.h`**
 
 ```cpp
-/// A function as the script service calls it: (*function)(call).
-using Function = std::function<void(wxl::ScriptCall&)>;
+private:
+    // What each function answers, from the arguments it was called with.
+    void Count(wxl::ScriptCall& call) const;
+    void EntryAt(wxl::ScriptCall& call) const;
+    void Nearby(wxl::ScriptCall& call) const;
+    void TrafficOf(wxl::ScriptCall& call) const;
+    void Drop(wxl::ScriptCall& call);
 
-Function scoutCount_   = [this](wxl::ScriptCall& call) { Count(call); };
-Function scoutEntry_   = [this](wxl::ScriptCall& call) { EntryAt(call); };
-Function scoutNearby_  = [this](wxl::ScriptCall& call) { Nearby(call); };
-Function scoutTraffic_ = [this](wxl::ScriptCall& call) { TrafficOf(call); };
-Function scoutDrop_    = [this](wxl::ScriptCall& call) { Drop(call); };
+    /// Makes the member function @p Method a global Lua function named @p name, called on
+    /// this object, and logs it when the script service refuses.
+    template <auto Method>
+    void Register(const wxl::ScriptService& script, const char* name)
+    {
+        const wxl_result result = script.RegisterFunction<Method>(name, this);
+        if (result != WXL_OK)
+            wxl::Log(WXL_LOG_WARN, kTag, "could not register {}: {}", name, wxl::ResultName(result));
+    }
 ```
 
-The lambdas capture `this`, so the class deletes its copy constructor: a copy would call into the
-original. The rest of the header is the class around these members, `ScriptApi`, a
-`wxl::LuaScript` that holds the clock, the journal and the traffic counter by reference.
+- **`script.RegisterFunction<&ScriptApi::Count>("ScoutCount", this)`** registers a member
+  function: the one named between the angle brackets, called on the object given, here `this`.
+  `Register` is written once so each of the five takes one line; `template <auto Method>` lets it
+  take that member function the same way.
+- **`wxl::ResultName(result)`** turns a `wxl_result` into its name, `WXL_E_INVALID` for instance,
+  so the log says why rather than a bare number.
+
+The script side calls these functions on this very object, so the class deletes its copy
+constructor: a copy would not be the object registered. The rest of the header is the class
+around these members, `ScriptApi`, a `wxl::LuaScript` that holds the clock, the journal and the
+traffic counter by reference.
 
 `src/ScriptApi.cpp` registers them each time a context is ready:
 
 **`examples/scout/src/ScriptApi.cpp`**
 
 ```cpp
-void ScriptApi::OnScriptVmReady(uint32_t context, void*)
+void ScriptApi::OnScriptVmReady(wxl_script_context context, void*)
 {
     const wxl::ScriptService script;
     if (!script) return; // wxl.script is optional: without it, Scout keeps its journal to itself
 
-    struct Registration
-    {
-        const char* name;
-        Function*   function;
-    };
-    const Registration functions[] = {
-        {"ScoutCount", &scoutCount_},
-        {"ScoutEntry", &scoutEntry_},
-        {"ScoutNearby", &scoutNearby_},
-        {"ScoutTraffic", &scoutTraffic_},
-        {"ScoutDrop", &scoutDrop_},
-    };
+    Register<&ScriptApi::Count>(script, "ScoutCount");
+    Register<&ScriptApi::EntryAt>(script, "ScoutEntry");
+    Register<&ScriptApi::Nearby>(script, "ScoutNearby");
+    Register<&ScriptApi::TrafficOf>(script, "ScoutTraffic");
+    Register<&ScriptApi::Drop>(script, "ScoutDrop");
 
-    for (const Registration& registration : functions)
-    {
-        const wxl_result result = script.RegisterFunction(registration.name, registration.function);
-        if (result != WXL_OK)
-            wxl::Log(WXL_LOG_WARN, kTag,
-                     std::string("could not register ") + registration.name + ": result " +
-                         std::to_string(result));
-    }
-    if (script.RegisterEvent(kUpdatedEvent) != WXL_OK)
-        wxl::Log(WXL_LOG_WARN, kTag, std::string("could not declare ") + kUpdatedEvent);
+    const wxl_result declared = script.RegisterEvent(kUpdatedEvent);
+    if (declared != WXL_OK)
+        wxl::Log(WXL_LOG_WARN, kTag, "could not declare {}: {}", kUpdatedEvent,
+                 wxl::ResultName(declared));
 
     open_ = true;
     wxl::Log(WXL_LOG_INFO, kTag,
@@ -997,15 +1008,17 @@ void ScriptApi::OnScriptVmReady(uint32_t context, void*)
                                                 : "functions registered in the game");
 }
 
-void ScriptApi::OnScriptVmClosing(uint32_t, void*)
+void ScriptApi::OnScriptVmClosing(wxl_script_context, void*)
 {
     open_ = false;
 }
 ```
 
-- `RegisterFunction(name, &function)` makes a global Lua function of that name. The object you
-  pass must live as long as the context; a member of a script lives as long as the mod. A name the
-  client already uses is refused rather than replaced, and the result code says so: Scout logs it.
+- Each `Register` line makes a global Lua function of that name. The object it is called on must
+  live as long as the context; a member of the mod, as `script_` will be, lives as long as the
+  mod. A name the client already uses is refused rather than replaced, and the result says so:
+  Scout logs it.
+- `context` is a `wxl_script_context`: `WXL_SCRIPT_CONTEXT_GLUE` or `WXL_SCRIPT_CONTEXT_GAME`.
 - `RegisterEvent` declares an event name, so an addon's frame can listen for it before anything
   fires it. `kUpdatedEvent` is `"SCOUT_UPDATED"`, declared in the header.
 - The second parameter, the Lua state's own pointer, is for a mod that talks to the Lua engine
@@ -1108,7 +1121,7 @@ public:
         wxl::ScriptMgr::Add(&script_);
 
         const std::string_view runtime = wxl::View(wxl::Host()->runtime()->name);
-        wxl::Log(WXL_LOG_INFO, scout::kTag, "watching, on " + std::string(runtime));
+        wxl::Log(WXL_LOG_INFO, scout::kTag, "watching, on {}", runtime);
         return WXL_OK;
     }
 
@@ -1121,8 +1134,7 @@ public:
 
     void OnShutdown() override
     {
-        wxl::Log(WXL_LOG_INFO, scout::kTag,
-                 std::to_string(journal_.Written()) + " line(s) written this session");
+        wxl::Log(WXL_LOG_INFO, scout::kTag, "{} line(s) written this session", journal_.Written());
     }
 
 private:
@@ -1181,10 +1193,19 @@ The guard does not undo anything: what your code changed before the fault stays 
 destructors of the frames it interrupted do not run. It keeps the game alive; it does not make the
 fault harmless.
 
-C++ exceptions are another matter. One that leaves an event handler or a Lua function is caught by
-the runtime and logged as an error, and the rest of that handler does not run; the mod stays
-enabled. One that leaves `OnLoad`, a stage or `OnUnload` is not caught and ends the game. Catch
-what you throw, inside your own code.
+A C++ exception never reaches the runtime: the SDK catches it where it called your code, logs it
+as an error under your mod's id with the exception's message, and stops only what it interrupted:
+
+| Where it was thrown | What it costs |
+|---|---|
+| your mod's constructor or `OnLoad` | the load: the mod is not loaded |
+| a stage (`OnReady`, `OnStage`, ...) or `OnUnload` | the mod: the runtime disables it, as it does after a fault |
+| an event handler | that call: the next handler and the next event still run, and the mod stays enabled |
+| a Lua function | that call: it fails in Lua with the exception's message, as `call.Fail` would |
+
+A handler that throws on one strange message therefore loses that message, not the whole mod;
+a stage that throws leaves the mod half set up, so nothing more of it runs. A destructor is the
+exception to the rule: C++ ends the program when one throws, so let nothing escape a destructor.
 
 ---
 
@@ -1260,6 +1281,7 @@ puts it back.
 | `subscribed to ..., which this runtime does not raise` | a handler for an event this runtime does not raise yet. The runtime's README lists what it raises |
 | Scout's Lua functions are `nil` in the game | they were registered in one context only: register in every `OnScriptVmReady` |
 | `mod wxl.scout faulted ...; it is disabled` | your code crashed; the line says in which handler. See [step 8](#what-the-runtime-does-when-your-code-fails) |
+| `[wxl.scout] ... threw an exception: ...` | an exception left your code; the line names the function, the exception's message and what it cost. See [step 8](#what-the-runtime-does-when-your-code-fails) |
 
 [Building a mod](building-a-mod.md#when-it-fails) lists the build's own messages in full.
 

@@ -20,8 +20,8 @@ namespace scout
 
         UnitWatch(const Clock& clock, Journal& journal) : clock_(clock), journal_(journal) {}
 
-        void OnObjectCreate(wxl::Object object, wxl_guid guid, uint32_t type) override;
-        void OnObjectDestroy(wxl::Object object, wxl_guid guid, uint32_t type) override;
+        void OnObjectCreate(wxl::Object object, wxl_guid guid, wxl_object_type type) override;
+        void OnObjectDestroy(wxl::Object object, wxl_guid guid, wxl_object_type type) override;
         void OnUnitDeath(wxl::Object unit) override;
         void OnTargetChanged(wxl::Object previous, wxl::Object current) override;
 

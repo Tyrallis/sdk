@@ -3,8 +3,6 @@
 
 #include "Traffic.h"
 
-#include <cstdio>
-
 #include "Journal.h"
 
 namespace scout
@@ -48,10 +46,8 @@ namespace scout
         else
             dropped_.erase(opcode);
 
-        char line[96];
-        std::snprintf(line, sizeof line, "opcode 0x%04X is %s", opcode,
-                      drop ? "now dropped before the client sees it" : "delivered again");
-        wxl::Log(drop ? WXL_LOG_WARN : WXL_LOG_INFO, kTag, line);
+        wxl::Log(drop ? WXL_LOG_WARN : WXL_LOG_INFO, kTag, "opcode 0x{:04X} is {}", opcode,
+                 drop ? "now dropped before the client sees it" : "delivered again");
         return before;
     }
 } // namespace scout

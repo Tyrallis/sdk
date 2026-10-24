@@ -2,8 +2,8 @@
 // Copyright (c) 2026 WarcraftXL
 //
 // The event contract as data: every event with its family, name and args, the version of the
-// contract that brought it, and every member of its args with what it carries. Generated from
-// events.def and fields.def. A handler's parameters are the members IsExtent leaves, in this
+// contract that brought it, every member of its args with what it carries, and the names of the
+// enumerations those members hold. Generated from events.def, fields.def and enums.def. A handler's parameters are the members IsExtent leaves, in this
 // order.
 
 #pragma once
@@ -36,16 +36,35 @@ namespace wxl::reflect
         buffer,  ///< `char*` a handler writes a string into, the extent member's capacity
     };
 
+    /// One value of an enumeration of enums.def.
+    struct EnumValue
+    {
+        const char* type;     ///< the enumeration's C type, "wxl_script_context"
+        uint32_t    value;    ///< its number
+        const char* constant; ///< its C constant, "WXL_SCRIPT_CONTEXT_GAME"
+        const char* name;     ///< what a script sees, "game"
+    };
+
+    /// An enumeration of enums.def.
+    struct Enum
+    {
+        const char*      type;   ///< the C type, "wxl_script_context"
+        const EnumValue* values; ///< in table order
+        uint32_t         count;
+    };
+
     /// One member of an args struct.
     struct Field
     {
         const char* args;   ///< the struct's name
         const char* name;   ///< the member's name
         uint32_t    offset; ///< offsetof the member
-        Kind        kind;
+        Kind        kind;   ///< u32 for a member that holds an enumeration's values
         /// The member holding a bytes field's length or a buffer field's capacity; null otherwise.
         const char* extent;
         uint32_t    extent_offset; ///< offsetof that member, 0 when there is none
+        /// The enumeration a u32 member holds the values of (a WXL_ARGS_ENUM row); null otherwise.
+        const Enum* enumeration = nullptr;
     };
 
     /// A version of the contract, major.minor.feature, as abi.h numbers it.
@@ -93,6 +112,56 @@ namespace wxl::reflect
         constexpr Kind kind_answer  = Kind::answer;
         constexpr Kind kind_buffer  = Kind::buffer;
 
+        constexpr bool Same(const char* a, const char* b)
+        {
+            while (*a && *a == *b) ++a, ++b;
+            return *a == *b;
+        }
+
+        inline constexpr EnumValue kEnumValues[] = {
+#define WXL_ENUM_VALUE(type, constant, value, name) { #type, uint32_t(value), #constant, #name },
+#include "wxl/enums.def"
+#undef WXL_ENUM_VALUE
+        };
+
+        /// The first value row of an enumeration; the rows of one enumeration are contiguous.
+        constexpr uint32_t FirstValueOf(const char* type)
+        {
+            uint32_t i = 0;
+            while (i < sizeof kEnumValues / sizeof kEnumValues[0] && !Same(kEnumValues[i].type, type))
+                ++i;
+            return i;
+        }
+
+        constexpr uint32_t ValueCountOf(const char* type)
+        {
+            uint32_t i = FirstValueOf(type), n = 0;
+            while (i + n < sizeof kEnumValues / sizeof kEnumValues[0] &&
+                   Same(kEnumValues[i + n].type, type))
+                ++n;
+            return n;
+        }
+
+        inline constexpr Enum kEnums[] = {
+#define WXL_ENUM(type) { #type, kEnumValues + FirstValueOf(#type), ValueCountOf(#type) },
+#define WXL_ENUM_VALUE(type, constant, value, name)
+#include "wxl/enums.def"
+#undef WXL_ENUM_VALUE
+#undef WXL_ENUM
+        };
+
+        /// Not constexpr: reaching it in EnumNamed stops the build at the row that named a type
+        /// enums.def does not declare.
+        inline const Enum* EnumerationMissingFromEnumsDef() { return nullptr; }
+
+        /// The enumeration of a WXL_ARGS_ENUM row.
+        constexpr const Enum* EnumNamed(const char* type)
+        {
+            for (const Enum& e : kEnums)
+                if (Same(e.type, type)) return &e;
+            return EnumerationMissingFromEnumsDef();
+        }
+
         inline constexpr Field kFields[] = {
 #define WXL_ARGS_FIELD(args, member, kind) \
     { #args, #member, uint32_t(offsetof(args, member)), detail::kind_##kind, nullptr, 0 },
@@ -104,18 +173,16 @@ namespace wxl::reflect
 #define WXL_ARGS_BUFFER(args, member, capacity)                                         \
     { #args, #member, uint32_t(offsetof(args, member)), Kind::buffer, #capacity,         \
       uint32_t(offsetof(args, capacity)) },
+#define WXL_ARGS_ENUM(args, member, type)                                               \
+    { #args, #member, uint32_t(offsetof(args, member)), Kind::u32, nullptr, 0,           \
+      detail::EnumNamed(#type) },
 #include "wxl/fields.def"
+#undef WXL_ARGS_ENUM
 #undef WXL_ARGS_BUFFER
 #undef WXL_ARGS_ANSWER
 #undef WXL_ARGS_BYTES
 #undef WXL_ARGS_FIELD
         };
-
-        constexpr bool Same(const char* a, const char* b)
-        {
-            while (*a && *a == *b) ++a, ++b;
-            return *a == *b;
-        }
 
         /// The first row of a struct's members; the rows of one struct are contiguous.
         constexpr uint32_t FirstOf(const char* args)
@@ -153,6 +220,30 @@ namespace wxl::reflect
     {
         *count = uint32_t(sizeof detail::kFields / sizeof detail::kFields[0]);
         return detail::kFields;
+    }
+
+    /// Every enumeration of enums.def, in table order.
+    inline const Enum* Enums(uint32_t* count)
+    {
+        *count = uint32_t(sizeof detail::kEnums / sizeof detail::kEnums[0]);
+        return detail::kEnums;
+    }
+
+    /// The enumeration of this C type -- "wxl_object_type" -- or null.
+    inline const Enum* FindEnum(const char* type)
+    {
+        if (!type) return nullptr;
+        for (const Enum& e : detail::kEnums)
+            if (std::strcmp(e.type, type) == 0) return &e;
+        return nullptr;
+    }
+
+    /// The name a script sees for a value, or null for a number the enumeration does not name.
+    inline const char* NameOf(const Enum& enumeration, uint32_t value)
+    {
+        for (uint32_t i = 0; i < enumeration.count; ++i)
+            if (enumeration.values[i].value == value) return enumeration.values[i].name;
+        return nullptr;
     }
 
     /// Every event of events.def, in table order (not id order).

@@ -5,7 +5,7 @@
 **The contract a WarcraftXL mod is written against**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![ABI](https://img.shields.io/badge/ABI-0.1.7-blue.svg)](include/wxl/abi.h)
+[![ABI](https://img.shields.io/badge/ABI-0.1.8-blue.svg)](include/wxl/abi.h)
 [![C++](https://img.shields.io/badge/C%2B%2B-17%20and%20up-blue.svg)](#-getting-started)
 [![Header only](https://img.shields.io/badge/header--only-yes-lightgrey.svg)](include/wxl)
 
@@ -61,7 +61,8 @@ and the rules of the boundary between them. There is nothing to link and nothing
 ### Prerequisites
 
 - CMake 3.21 or newer
-- A C++17 compiler (MSVC 19.3+, GCC 11+, Clang 14+)
+- A C++ compiler: the SDK headers take C++17 (MSVC 19.3+, GCC 11+, Clang 14+); a mod builds as
+  C++20 by default, for `std::format` (MSVC 19.3+, GCC 13+, Clang 17+)
 - The runtime you are targeting, to run what you build
 
 ### Build the template
@@ -158,8 +159,7 @@ class Greeter final : public wxl::WorldScript
     {
         const wxl::Player me = wxl::Player::Local();
         if (wxl::Expected<std::string> name = me.Name())
-            wxl::Log(WXL_LOG_INFO, "greeter",
-                     "hello, " + *name + ", on map " + std::to_string(map_id));
+            wxl::Log(WXL_LOG_INFO, "greeter", "hello, {}, on map {}", *name, map_id);
     }
 };
 
@@ -177,7 +177,7 @@ public:
     void OnReady() override { wxl::Log(WXL_LOG_INFO, "greeter", "client is up"); }
 };
 
-WXL_MOD(GreeterMod, "wxl.greeter", "Greeter", 1)
+WXL_MOD(GreeterMod, "wxl.greeter", "Greeter")
 ```
 
 Or write it in Lua, with nothing to build: a folder with an `init.lua`, run by the `wxl.lua`
@@ -230,6 +230,7 @@ include/wxl/
     events.def     the event table -- the single source of ids, names and args
     events.h       the event enum, and the argument structs fields.def declares
     fields.def     every argument struct, member by member, with what each member carries
+    enums.def      the enumerations those members hold, with the name a script sees for each
     reflect.hpp    the events and their members as data, for a runtime that is not C++
     host.h         what a runtime offers a mod
     mod.h          what a mod exposes to a runtime
@@ -261,7 +262,7 @@ supplies only the bindings that reach its own client.
 
 ## 🔢 Versioning
 
-`major.minor.feature`, in [`abi.h`](include/wxl/abi.h): today `0.1.7`.
+`major.minor.feature`, in [`abi.h`](include/wxl/abi.h): today `0.1.8`.
 
 - **Major** changes when an existing field, signature or id changes meaning. A runtime refuses a
   mod built against a different major.

@@ -24,7 +24,8 @@ wxl_add_mod(wxl-lua
         src/ScriptMod.cpp
     MANIFEST mod.json
     OUTPUT_NAME wxl-lua
-    TARGETS win-x64 win-x86)
+    TARGETS win-x64 win-x86
+    CXX_STANDARD 17)
 
 if(TARGET wxl-lua)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/luajit.cmake")

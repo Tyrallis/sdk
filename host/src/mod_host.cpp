@@ -125,6 +125,7 @@ namespace wxl::host
         table_.unsubscribe     = &ModHost::ThunkUnsubscribe;
         table_.emit            = &ModHost::ThunkEmit;
         table_.abi_feature     = WXL_ABI_VERSION_FEATURE;
+        table_.disable         = &ModHost::ThunkDisable;
 
         for (const PublishedService& service : config_.services)
         {
@@ -215,6 +216,11 @@ namespace wxl::host
         if (current_) current_->events_.Emit(event, args);
     }
 
+    void WXL_CALL ModHost::ThunkDisable(wxl_str reason)
+    {
+        if (current_) current_->DisableOnRequest(t_currentMod, View(reason));
+    }
+
     // --- The current mod ---------------------------------------------------------------------
 
     ModHost::ModToken ModHost::CurrentMod() const { return t_currentMod; }
@@ -298,11 +304,38 @@ namespace wxl::host
 
     const LoadedMod* ModHost::ModOf(ModToken token) const
     {
-        if (token == 0 || token > loaded_.size()) return nullptr;
+        // The count is published after the entry is built, and loaded_ never reallocates while
+        // mods load, so a handler on another thread reads a whole entry or none.
+        if (token == 0 || token > loadedCount_.load(std::memory_order_acquire)) return nullptr;
         return &loaded_[token - 1];
     }
 
     void ModHost::Disable(ModToken token, std::string_view what)
+    {
+        DisableWith(token, "faulted " + std::string(what), std::string(what));
+    }
+
+    void ModHost::DisableOnRequest(ModToken token, std::string_view reason)
+    {
+        if (token == 0)
+        {
+            logger_.Warn(kHostTag, "disable was called from code that is no mod's; nothing is "
+                                   "disabled. The reason given: " + std::string(reason));
+            return;
+        }
+        const std::string text = reason.empty() ? std::string("no reason given") : std::string(reason);
+        // A mod still inside wxl_mod_load is not in loaded_ yet: its load is refused instead.
+        if (OnMainThread() && !loadingId_.empty() && token == loaded_.size() + 1)
+        {
+            events_.DropOwner(token);
+            loadingDisabled_    = text;
+            loadingDisabledSet_ = true;
+            return;
+        }
+        DisableWith(token, "disabled itself: " + text, text);
+    }
+
+    void ModHost::DisableWith(ModToken token, std::string headline, std::string fault)
     {
         if (token == 0) return;
 
@@ -312,22 +345,22 @@ namespace wxl::host
         if (!OnMainThread())
         {
             std::lock_guard<std::mutex> lock(stateLock_);
-            pendingDisables_.emplace_back(token, std::string(what));
+            pendingDisables_.push_back(PendingDisable{token, std::move(headline), std::move(fault)});
             disablesPending_.store(true, std::memory_order_release);
             return;
         }
-        FinishDisable(token, std::string(what));
+        FinishDisable(token, headline, fault);
     }
 
-    void ModHost::FinishDisable(ModToken token, const std::string& what)
+    void ModHost::FinishDisable(ModToken token, const std::string& headline, const std::string& fault)
     {
         if (token == 0 || token > loaded_.size()) return;
         LoadedMod& mod = loaded_[token - 1];
         if (mod.disabled) return;
 
         mod.disabled = true;
-        mod.fault    = what;
-        logger_.Error(kHostTag, "mod " + mod.id + " faulted " + mod.fault +
+        mod.fault    = fault;
+        logger_.Error(kHostTag, "mod " + mod.id + " " + headline +
                                     "; it is disabled: its handlers are dropped, its remaining "
                                     "stages and its unload are skipped, its binary stays mapped, "
                                     "and what it published or wrote stays as it was");
@@ -338,13 +371,13 @@ namespace wxl::host
     {
         if (!disablesPending_.load(std::memory_order_acquire) || !OnMainThread()) return;
 
-        std::vector<std::pair<ModToken, std::string>> pending;
+        std::vector<PendingDisable> pending;
         {
             std::lock_guard<std::mutex> lock(stateLock_);
             pending.swap(pendingDisables_);
             disablesPending_.store(false, std::memory_order_release);
         }
-        for (const auto& [token, what] : pending) FinishDisable(token, what);
+        for (const PendingDisable& one : pending) FinishDisable(one.token, one.headline, one.fault);
     }
 
     bool ModHost::CallEntry(ModToken token, GuardedFn fn, void* context, char* description,
@@ -402,12 +435,14 @@ namespace wxl::host
         {
             std::string& id;
             bool&        abiKnown;
+            bool&        disabled;
             ~Loading()
             {
                 id.clear();
                 abiKnown = false;
+                disabled = false;
             }
-        } loading{loadingId_, loadingAbiKnown_};
+        } loading{loadingId_, loadingAbiKnown_, loadingDisabledSet_};
         loadingId_ = manifest.id;
 
         // The first mod code to run, and by contract side-effect free.
@@ -439,7 +474,6 @@ namespace wxl::host
         loaded.id             = manifest.id;
         loaded.built_abi      = built;
         loaded.name           = query.result->name ? query.result->name : manifest.name;
-        loaded.version        = query.result->version;
         loaded.directory_name = candidate.directory_name;
         loaded.directory      = candidate.directory;
         loaded.binary         = path;
@@ -457,6 +491,15 @@ namespace wxl::host
                        "; the binary stays mapped and nothing of it is called again");
             return;
         }
+        if (loadingDisabledSet_)
+        {
+            events_.DropOwner(token);
+            binary.Abandon();
+            Refuse(manifest.id, candidate.directory_name, candidate.directory, Verdict::Refuse,
+                   "it disabled itself in wxl_mod_load: " + loadingDisabled_ +
+                       "; the binary stays mapped and nothing of it is called again");
+            return;
+        }
         if (load.result != WXL_OK)
         {
             events_.DropOwner(token);
@@ -469,6 +512,7 @@ namespace wxl::host
                                    loaded.name + ") from " + admitted.binary);
         loaded_.push_back(std::move(loaded));
         binaries_.push_back(std::move(binary));
+        loadedCount_.store(loaded_.size(), std::memory_order_release);
     }
 
     void ModHost::LoadAll()
@@ -487,6 +531,8 @@ namespace wxl::host
             Refuse(problem.id, problem.directory_name, problem.directory, Verdict::Refuse,
                    problem.message);
 
+        loaded_.reserve(order.ordered.size());
+        binaries_.reserve(order.ordered.size());
         for (const ModCandidate& candidate : order.ordered) TryLoad(candidate);
 
         logger_.Info(kHostTag, std::to_string(loaded_.size()) + " mod(s) loaded, " +
@@ -560,11 +606,18 @@ namespace wxl::host
                     binaries_[i].Abandon();
                     continue;
                 }
+                // It disabled itself inside its unload: its code is not trusted with a close.
+                if (loaded_[i].disabled)
+                {
+                    binaries_[i].Abandon();
+                    continue;
+                }
             }
             logger_.Info(kHostTag, "unloaded " + loaded_[i].id);
             if (stuck) binaries_[i].Abandon();
             else binaries_[i].Close();
         }
+        loadedCount_.store(0, std::memory_order_release);
         binaries_.clear();
         loaded_.clear();
     }

@@ -51,6 +51,34 @@ namespace
         return "any";
     }
 
+    /// "wxl.ScriptContext" for wxl_script_context: an enumeration's alias.
+    std::string AliasOf(const wxl::reflect::Enum& enumeration)
+    {
+        std::string alias = "wxl.";
+        const char* name  = enumeration.type;
+        if (std::strncmp(name, "wxl_", 4) == 0) name += 4;
+        bool upper = true;
+        for (; *name; ++name)
+        {
+            if (*name == '_')
+            {
+                upper = true;
+                continue;
+            }
+            alias += upper ? static_cast<char>(*name - ('a' <= *name && *name <= 'z' ? 'a' - 'A' : 0))
+                           : *name;
+            upper = false;
+        }
+        return alias;
+    }
+
+    /// A member's Lua type: an enumeration's value arrives by name, or as a number it lacks.
+    std::string LuaTypeOf(const Field& field)
+    {
+        if (field.enumeration) return AliasOf(*field.enumeration) + "|integer";
+        return LuaType(field.kind);
+    }
+
     bool Writable(const Field& field) { return field.kind == Kind::answer || field.kind == Kind::buffer; }
 
     bool Answerable(const Event& event)
@@ -71,7 +99,7 @@ namespace
             if (!text.empty()) text += ", ";
             text += field.name;
             text += ": ";
-            text += LuaType(field.kind);
+            text += LuaTypeOf(field);
         }
         return text;
     }
@@ -154,6 +182,18 @@ namespace
                "---@alias wxl.Bytes string\n\n"
                "---@class wxl.Vec3\n---@field x number\n---@field y number\n---@field z number\n\n";
 
+        // --- the enumerations (enums.def) -------------------------------------------------------
+        uint32_t                  enumCount = 0;
+        const wxl::reflect::Enum* enums     = wxl::reflect::Enums(&enumCount);
+        for (uint32_t e = 0; e < enumCount; ++e)
+        {
+            out << "---A " << enums[e].type << " value, by name; a newer value than these headers know\n"
+                   "---arrives as its number.\n---@alias " << AliasOf(enums[e]) << " ";
+            for (uint32_t i = 0; i < enums[e].count; ++i)
+                out << (i ? "|" : "") << '"' << enums[e].values[i].name << '"';
+            out << "\n\n";
+        }
+
         // --- the families -------------------------------------------------------------------
         out << "-- The script families. A function defined on one of these tables as On<Event> is\n"
                "-- subscribed when the entry file has run and called with the event's parameters;\n"
@@ -223,7 +263,6 @@ namespace
                "function registerForEvent(event, fn) end\n\n";
 
         // --- objects ------------------------------------------------------------------------
-        out << "---@alias wxl.ObjectType \"Item\"|\"Container\"|\"Unit\"|\"Player\"|\"GameObject\"|\"DynamicObject\"|\"Corpse\"|\"Unknown\"\n\n";
         out << "---A world object, by handle. Every getter answers the value, or nil and why:\n"
                "---\"gone\" for an object that left, \"unsupported\" for a runtime without the read, or\n"
                "---what the object is not (\"a GameObject has no Health\").\n"

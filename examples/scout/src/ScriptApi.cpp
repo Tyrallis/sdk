@@ -5,7 +5,6 @@
 
 #include <cmath>
 #include <optional>
-#include <string>
 
 #include "wxl/objects.hpp"
 
@@ -23,34 +22,21 @@ namespace
 
 namespace scout
 {
-    void ScriptApi::OnScriptVmReady(uint32_t context, void*)
+    void ScriptApi::OnScriptVmReady(wxl_script_context context, void*)
     {
         const wxl::ScriptService script;
         if (!script) return; // wxl.script is optional: without it, Scout keeps its journal to itself
 
-        struct Registration
-        {
-            const char* name;
-            Function*   function;
-        };
-        const Registration functions[] = {
-            {"ScoutCount", &scoutCount_},
-            {"ScoutEntry", &scoutEntry_},
-            {"ScoutNearby", &scoutNearby_},
-            {"ScoutTraffic", &scoutTraffic_},
-            {"ScoutDrop", &scoutDrop_},
-        };
+        Register<&ScriptApi::Count>(script, "ScoutCount");
+        Register<&ScriptApi::EntryAt>(script, "ScoutEntry");
+        Register<&ScriptApi::Nearby>(script, "ScoutNearby");
+        Register<&ScriptApi::TrafficOf>(script, "ScoutTraffic");
+        Register<&ScriptApi::Drop>(script, "ScoutDrop");
 
-        for (const Registration& registration : functions)
-        {
-            const wxl_result result = script.RegisterFunction(registration.name, registration.function);
-            if (result != WXL_OK)
-                wxl::Log(WXL_LOG_WARN, kTag,
-                         std::string("could not register ") + registration.name + ": result " +
-                             std::to_string(result));
-        }
-        if (script.RegisterEvent(kUpdatedEvent) != WXL_OK)
-            wxl::Log(WXL_LOG_WARN, kTag, std::string("could not declare ") + kUpdatedEvent);
+        const wxl_result declared = script.RegisterEvent(kUpdatedEvent);
+        if (declared != WXL_OK)
+            wxl::Log(WXL_LOG_WARN, kTag, "could not declare {}: {}", kUpdatedEvent,
+                     wxl::ResultName(declared));
 
         open_ = true;
         wxl::Log(WXL_LOG_INFO, kTag,
@@ -58,7 +44,7 @@ namespace scout
                                                     : "functions registered in the game");
     }
 
-    void ScriptApi::OnScriptVmClosing(uint32_t, void*)
+    void ScriptApi::OnScriptVmClosing(wxl_script_context, void*)
     {
         open_ = false;
     }

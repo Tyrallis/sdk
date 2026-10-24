@@ -61,7 +61,6 @@ namespace wxl::host
     {
         std::string           id;
         std::string           name;
-        uint32_t              version = 0;
         std::string           directory_name;
         std::filesystem::path directory;
         std::filesystem::path binary;
@@ -69,8 +68,8 @@ namespace wxl::host
         AbiVersion            built_abi;          ///< what wxl_mod_info reports: the headers it was built against
         bool                  has_stage  = false; ///< exports wxl_mod_stage
         bool                  has_unload = false; ///< exports wxl_mod_unload
-        bool                  disabled   = false; ///< faulted; no more of its code is called
-        std::string           fault;              ///< what it was doing when it faulted
+        bool                  disabled   = false; ///< faulted or disabled itself; no more of its code is called
+        std::string           fault;              ///< what it was doing when it faulted, or the reason it gave
     };
 
     /// A folder that did not become a loaded mod, and why.
@@ -95,7 +94,9 @@ namespace wxl::host
      * crash guard. A mod that faults is logged with what it was doing and disabled: its
      * subscriptions are dropped, its later stages and its unload are skipped, its binary stays
      * mapped, and the host goes on. The services it published stay published, since another mod
-     * may hold the pointer.
+     * may hold the pointer. A mod that fails in a way the guard cannot see, such as a C++
+     * exception reaching its entry point, disables itself the same way through the table's
+     * `disable`.
      *
      * Threads. The host is built, loads, reports stages and unloads on one thread, the main
      * one: the thread that constructs it. Events may be raised and handlers may subscribe from
@@ -154,6 +155,13 @@ namespace wxl::host
          */
         void Disable(ModToken token, std::string_view what);
 
+        /**
+         * @brief Disables a mod at its own request (wxl_host.disable), as @ref Disable does
+         *        after a fault.
+         * @param reason  what the mod says went wrong: "OnReady threw an exception: ...".
+         */
+        void DisableOnRequest(ModToken token, std::string_view reason);
+
         /// Called after a mod is disabled. A runtime uses it to withdraw what the mod registered
         /// with its services.
         void SetDisableHandler(DisableFn handler, void* user)
@@ -208,13 +216,18 @@ namespace wxl::host
                                                         void* user, int32_t priority);
         static void WXL_CALL             ThunkUnsubscribe(wxl_subscription subscription);
         static void WXL_CALL             ThunkEmit(wxl_event event, const void* args);
+        static void WXL_CALL             ThunkDisable(wxl_str reason);
 
         static void     OnHandlerFault(void* user, uint32_t owner, wxl_event event, const Fault& fault);
         static uint32_t SwapOwner(void* user, uint32_t owner);
 
         /// Finishes, on the main thread, the disables a fault on another thread left pending.
         void SettleDisables();
-        void FinishDisable(ModToken token, const std::string& what);
+
+        /// Drops the mod's handlers now and the rest on the main thread. @p headline is what the
+        /// log says happened, after the mod's id: "faulted in ...", "disabled itself: ...".
+        void DisableWith(ModToken token, std::string headline, std::string fault);
+        void FinishDisable(ModToken token, const std::string& headline, const std::string& fault);
 
         /// Logs, once per mod and event, a subscription the runtime refused because it never
         /// raises that event: the handler is real code that will never run.
@@ -250,19 +263,28 @@ namespace wxl::host
         wxl_runtime_info info_{};
         wxl_host         table_{};
 
-        std::vector<LoadedMod>  loaded_;
+        std::vector<LoadedMod>  loaded_;   ///< reserved before the first load: entries never move
+        std::atomic<size_t>     loadedCount_{0}; ///< loaded_.size(), for a reader on another thread
         std::vector<ModBinary>  binaries_; ///< index-aligned with loaded_
         std::vector<RefusedMod> refused_;
         bool                    loadedAll_   = false;
         std::string             loadingId_;  ///< the mod inside wxl_mod_query or wxl_mod_load
         AbiVersion              loadingAbi_;           ///< its built abi, once wxl_mod_query answered
         bool                    loadingAbiKnown_ = false;
+        std::string             loadingDisabled_;      ///< the reason, when it disabled itself while loading
+        bool                    loadingDisabledSet_ = false;
         DisableFn               disableFn_   = nullptr;
         void*                   disableUser_ = nullptr;
         std::thread::id         mainThread_;
 
         mutable std::mutex                              stateLock_; ///< guards the three below
-        std::vector<std::pair<ModToken, std::string>>   pendingDisables_;
+        struct PendingDisable
+        {
+            ModToken    token;
+            std::string headline;
+            std::string fault;
+        };
+        std::vector<PendingDisable>                     pendingDisables_;
         std::set<std::pair<ModToken, uint32_t>>         warnedUnraised_;
         std::set<std::pair<ModToken, uint32_t>>         warnedNewer_;
         std::atomic<bool>                               disablesPending_{false};

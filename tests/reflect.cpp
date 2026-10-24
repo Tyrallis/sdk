@@ -58,7 +58,12 @@ namespace
 #define WXL_ARGS_BUFFER(args, member, capacity)                                            \
     static_assert(Fits<Kind::buffer, decltype(args::member)>(), #args "." #member);         \
     static_assert(std::is_same_v<decltype(args::capacity), uint32_t>, #args "." #capacity);
+#define WXL_ARGS_ENUM(args, member, type)                                                  \
+    static_assert(std::is_same_v<decltype(args::member), uint32_t>,                         \
+                  #args "." #member " holds an enumeration's values in a uint32_t");        \
+    static_assert(std::is_enum_v<type>, #args "." #member ": " #type " is an enum of enums.def");
 #include "wxl/fields.def"
+#undef WXL_ARGS_ENUM
 #undef WXL_ARGS_BUFFER
 #undef WXL_ARGS_BYTES
 #undef WXL_ARGS_FIELD
@@ -276,6 +281,50 @@ int main()
                   wxl::reflect::SinceOf(WXL_EV_ChatMessage).feature == 6 &&
                   wxl::reflect::SinceOf(WXL_EV_ChatAddonMessage).feature == 7,
               "CombatMiss came with 0.1.5, ZoneChanged and ChatMessage with 0.1.6, ChatAddonMessage with 0.1.7");
+    }
+
+    std::printf("the enumerations name every value once\n");
+    {
+        uint32_t                  enumCount = 0;
+        const wxl::reflect::Enum* enums     = wxl::reflect::Enums(&enumCount);
+        Check(enumCount > 0, "enums.def declares enumerations");
+        for (uint32_t e = 0; e < enumCount; ++e)
+        {
+            const wxl::reflect::Enum& one = enums[e];
+            char                      what[200];
+            std::snprintf(what, sizeof what, "%s has values", one.type);
+            Check(one.count > 0, what);
+            for (uint32_t i = 0; i < one.count; ++i)
+                for (uint32_t j = i + 1; j < one.count; ++j)
+                {
+                    std::snprintf(what, sizeof what, "%s: %s and %s differ in number and in name",
+                                  one.type, one.values[i].constant, one.values[j].constant);
+                    Check(one.values[i].value != one.values[j].value &&
+                              std::strcmp(one.values[i].name, one.values[j].name) != 0,
+                          what);
+                }
+            std::snprintf(what, sizeof what, "%s is found by its type", one.type);
+            Check(wxl::reflect::FindEnum(one.type) == &one, what);
+        }
+        for (uint32_t i = 0; i < fieldCount; ++i)
+        {
+            if (!fields[i].enumeration) continue;
+            char what[200];
+            std::snprintf(what, sizeof what, "%s.%s holds %s in a u32", fields[i].args,
+                          fields[i].name, fields[i].enumeration->type);
+            Check(fields[i].kind == Kind::u32, what);
+        }
+        const wxl::reflect::Event* ready   = wxl::reflect::Find(WXL_EV_ScriptVmReady);
+        const wxl::reflect::Field* context = ready ? wxl::reflect::FieldOf(*ready, "context") : nullptr;
+        Check(context && context->enumeration &&
+                  std::strcmp(context->enumeration->type, "wxl_script_context") == 0 &&
+                  std::strcmp(wxl::reflect::NameOf(*context->enumeration, WXL_SCRIPT_CONTEXT_GAME),
+                              "game") == 0 &&
+                  wxl::reflect::NameOf(*context->enumeration, 9) == nullptr,
+              "a member knows its enumeration, which names a value and not a number it lacks");
+        const wxl::reflect::Event* create = wxl::reflect::Find(WXL_EV_ObjectCreate);
+        const wxl::reflect::Field* guid   = create ? wxl::reflect::FieldOf(*create, "guid") : nullptr;
+        Check(guid && !guid->enumeration, "a member of another kind has none");
     }
 
     std::printf("lookups\n");

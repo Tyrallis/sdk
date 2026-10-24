@@ -57,4 +57,4 @@ namespace
     };
 } // namespace
 
-WXL_MOD(LuaMod, "wxl.lua", "Lua", 1)
+WXL_MOD(LuaMod, "wxl.lua", "Lua")

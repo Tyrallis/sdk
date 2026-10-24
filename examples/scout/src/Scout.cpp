@@ -3,8 +3,6 @@
 //
 // The mod: it owns Scout's state and its scripts, and registers the scripts when it loads.
 
-#include <string>
-
 #include "wxl/sdk.hpp"
 #include "wxl/services/script.hpp"
 
@@ -29,7 +27,7 @@ namespace
             wxl::ScriptMgr::Add(&script_);
 
             const std::string_view runtime = wxl::View(wxl::Host()->runtime()->name);
-            wxl::Log(WXL_LOG_INFO, scout::kTag, "watching, on " + std::string(runtime));
+            wxl::Log(WXL_LOG_INFO, scout::kTag, "watching, on {}", runtime);
             return WXL_OK;
         }
 
@@ -42,8 +40,7 @@ namespace
 
         void OnShutdown() override
         {
-            wxl::Log(WXL_LOG_INFO, scout::kTag,
-                     std::to_string(journal_.Written()) + " line(s) written this session");
+            wxl::Log(WXL_LOG_INFO, scout::kTag, "{} line(s) written this session", journal_.Written());
         }
 
     private:
@@ -60,4 +57,4 @@ namespace
 } // namespace
 
 // The id must be the manifest's, letter for letter.
-WXL_MOD(Scout, "wxl.scout", "Scout", 1)
+WXL_MOD(Scout, "wxl.scout", "Scout")

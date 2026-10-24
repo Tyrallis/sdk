@@ -573,7 +573,7 @@ int main(int argc, char** argv)
         Check(sink.Has("[wxl.probe] implicit texture World\\x.blp"), "a family-table handler is subscribed without a declaration");
         const wxl_world_click_args click{{1.0f, 2.0f, 3.5f}, WXL_HANDLE_NONE, 2};
         host.Raise(WXL_EV_WorldClick, &click);
-        Check(sink.Has("[wxl.probe] implicit click 2 at 3.5"), "and reads its args");
+        Check(sink.Has("[wxl.probe] implicit click middle at 3.5"), "and reads its args, an enumeration by name");
 
         // An answer returned, and seen by the handler after it.
         wxl_bool       handled = WXL_FALSE;
@@ -671,7 +671,7 @@ int main(int argc, char** argv)
               "wxl.object lists, finds the local player, resolves a guid, and compares by handle");
         const wxl_object_args created{wxltest::FakeObjects::kChest, 0x300, WXL_OBJECT_GAMEOBJECT};
         host.Raise(WXL_EV_ObjectCreate, &created);
-        Check(sink.Has("[wxl.probe] created GameObject(0x000000000000002C) guid 0x0000000000000300 type 5"),
+        Check(sink.Has("[wxl.probe] created GameObject(0x000000000000002C) guid 0x0000000000000300 type GameObject"),
               "a handle, a guid and a number arrive as parameters");
         Check(sink.Has("[wxl.probe] chest health nil a GameObject has no Health"),
               "a unit getter on a game object answers nil and why");
@@ -687,7 +687,7 @@ int main(int argc, char** argv)
         int                vm = 0;
         wxl_script_vm_args ready{WXL_SCRIPT_CONTEXT_GAME, &vm};
         host.Raise(WXL_EV_ScriptVmReady, &ready);
-        Check(sink.Has("[wxl.probe] vm 1 userdata"), "a ptr member is a lightuserdata");
+        Check(sink.Has("[wxl.probe] vm game userdata"), "a ptr member is a lightuserdata, a context its name");
 
         const uint8_t             hits[16]   = {};
         const uint8_t             misses[8]  = {};

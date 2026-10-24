@@ -217,16 +217,26 @@ namespace wxl
         }
 
     private:
+        /// Draws a panel. What it throws ends this frame's drawing of it and is logged.
+        template <class F>
+        static void Draw(F&& f)
+        {
+            detail::Thrown thrown;
+            if (detail::Contain(std::forward<F>(f), thrown)) return;
+            detail::LogThrown("a panel registered with wxl.ui", thrown,
+                              "; this frame's drawing of it ended there");
+        }
+
         template <void (*Fn)()>
         static void WXL_CALL FunctionThunk(void*)
         {
-            Fn();
+            Draw([] { Fn(); });
         }
 
         template <class Handler>
         static void WXL_CALL HandlerThunk(void* user)
         {
-            (*static_cast<Handler*>(user))();
+            Draw([user] { (*static_cast<Handler*>(user))(); });
         }
     };
 } // namespace wxl

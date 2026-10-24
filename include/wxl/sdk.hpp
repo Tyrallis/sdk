@@ -119,6 +119,8 @@ namespace wxl
     //   answer                wxl::Answer
     //   buffer                wxl::Buffer
     //   ptr                   the member's own C type
+    //   enum                  the C enumeration its row names: wxl_object_type,
+    //                         wxl_script_context, ... (enums.def)
     //
     // wxl::HandlerOf<Event> names the list as a function type. The parameters are read from the
     // struct the runtime raised, which stays the C ABI: a C handler still receives the struct.
@@ -257,6 +259,17 @@ namespace wxl
             }
         };
 
+        template <auto M, class Enum>
+        struct AsEnum
+        {
+            static constexpr auto member = M;
+            using type                   = Enum;
+            static Enum Read(const typename MemberOf<decltype(M)>::owner& args)
+            {
+                return static_cast<Enum>(args.*M);
+            }
+        };
+
         template <auto M>
         struct AsBool
         {
@@ -343,9 +356,11 @@ namespace wxl
 #define WXL_ARGS_ANSWER(args, member)           AsAnswer<&args::member>,
 #define WXL_ARGS_BUFFER(args, member, capacity) AsBuffer<&args::member, &args::capacity>,
 #define WXL_ARGS_PTR(args, member, type)        AsValue<&args::member>,
+#define WXL_ARGS_ENUM(args, member, type)       AsEnum<&args::member, type>,
 #define WXL_ARGS_END(args) EndOfArgs>; };
 #include "wxl/fields.def"
 #undef WXL_ARGS_END
+#undef WXL_ARGS_ENUM
 #undef WXL_ARGS_PTR
 #undef WXL_ARGS_BUFFER
 #undef WXL_ARGS_ANSWER
@@ -473,13 +488,52 @@ namespace wxl
 
     namespace detail
     {
+        /// "UnitDeath" for WXL_EV_UnitDeath; "?" for an id this SDK does not know.
+        constexpr const char* EventName(wxl_event event)
+        {
+            switch (event)
+            {
+#define WXL_EVENT(family, name, id, args) \
+    case WXL_EV_##name: return #name;
+#include "wxl/events.def"
+#undef WXL_EVENT
+            default: return "?";
+            }
+        }
+
+        /// "ObjectScript::OnUnitDeath": a script's handler, as a log line names it.
+        constexpr const char* HandlerName(wxl_event event)
+        {
+            switch (event)
+            {
+#define WXL_EVENT(family, name, id, args) \
+    case WXL_EV_##name: return #family "Script::On" #name;
+#include "wxl/events.def"
+#undef WXL_EVENT
+            default: return "?";
+            }
+        }
+
+        /// What a handler that threw is told it cost: that one call, nothing more.
+        constexpr const char* kHandlerGoesOn =
+            "; that call ended there, and the mod goes on receiving events";
+
         template <wxl_event Event, class Handler>
         struct HandlerThunk
         {
             static void WXL_CALL Dispatch(void* user, const void* args)
             {
-                UnpackOf<EventArgsOf<Event>>::Call(*static_cast<const EventArgsOf<Event>*>(args),
-                                                   *static_cast<Handler*>(user));
+                Thrown thrown;
+                const bool returned = Contain(
+                    [&] {
+                        UnpackOf<EventArgsOf<Event>>::Call(
+                            *static_cast<const EventArgsOf<Event>*>(args), *static_cast<Handler*>(user));
+                    },
+                    thrown);
+                if (returned) return;
+                char where[96];
+                std::snprintf(where, sizeof where, "a wxl::Subscribe handler for %s", EventName(Event));
+                LogThrown(where, thrown, kHandlerGoesOn);
             }
         };
     } // namespace detail
@@ -684,7 +738,7 @@ namespace wxl
          *
          * The virtual call happens here, inside the mod, so no vtable crosses the boundary.
          */
-        template <class Script, class Args, auto Method>
+        template <class Script, class Args, auto Method, wxl_event Event>
         struct Thunk
         {
             static void WXL_CALL Dispatch(void*, const void* args)
@@ -701,10 +755,16 @@ namespace wxl
 
                 // By index, over the scripts there were when the event arrived: a script added
                 // by a handler waits for the next event, one removed is skipped from here on.
+                // A script that throws loses that call only; the next script still gets it.
                 const size_t count = family.scripts.size();
                 for (size_t i = 0; i < count; ++i)
-                    if (Script* script = family.scripts[i])
-                        UnpackOf<Args>::Call(typed, Method, script);
+                {
+                    Script* script = family.scripts[i];
+                    if (!script) continue;
+                    Thrown thrown;
+                    if (!Contain([&] { UnpackOf<Args>::Call(typed, Method, script); }, thrown))
+                        LogThrown(HandlerName(Event), thrown, kHandlerGoesOn);
+                }
             }
         };
 
@@ -786,8 +846,8 @@ namespace wxl
         {                                                                                      \
             family.fed[WXL_EV_##name] = true;                                                  \
             family.subscriptions.push_back(Subscribe(                                          \
-                WXL_EV_##name, &Thunk<Script, args, &Script::On##name>::Dispatch, nullptr,     \
-                WXL_PRIORITY_DEFAULT));                                                        \
+                WXL_EV_##name, &Thunk<Script, args, &Script::On##name, WXL_EV_##name>::Dispatch, \
+                nullptr, WXL_PRIORITY_DEFAULT));                                               \
         }                                                                                      \
     }
 
@@ -1070,7 +1130,8 @@ namespace wxl
     public:
         virtual ~Mod() = default;
 
-        /// Set-up. Nothing the boot brings up exists yet. Return anything but WXL_OK to abort.
+        /// Set-up. Nothing the boot brings up exists yet. Return anything but WXL_OK to abort;
+        /// an exception that leaves it aborts too, and is logged.
         virtual wxl_result OnLoad() { return WXL_OK; }
 
         /// WXL_STAGE_EARLY: nothing is up yet.
@@ -1102,8 +1163,15 @@ namespace wxl
         /// Tear-down, after WXL_STAGE_SHUTDOWN. ScriptMgr is cleared right after it returns.
         virtual void OnUnload() {}
 
-        /// Routes a stage to its named virtual, then to OnStage. Called by WXL_MOD.
+        /// Routes a stage to its named virtual, then to OnStage.
         void DispatchStage(wxl_stage stage)
+        {
+            DispatchNamedStage(stage);
+            OnStage(stage);
+        }
+
+        /// Calls the named virtual of a stage; nothing for a stage without one.
+        void DispatchNamedStage(wxl_stage stage)
         {
             switch (stage)
             {
@@ -1115,54 +1183,210 @@ namespace wxl
             case WXL_STAGE_SHUTDOWN: OnShutdown(); break;
             default: break;
             }
-            OnStage(stage);
         }
     };
+
+    // --- What a throw costs ----------------------------------------------------------------
+    //
+    // No C++ exception crosses into the runtime. One that leaves the mod's own code is caught
+    // where the SDK called that code, logged as an error under the mod's id with its what(), and
+    // costs what it interrupted:
+    //
+    //   the mod's constructor, OnLoad       the load: the mod is not loaded
+    //   a stage's virtual, OnStage,         the mod: the runtime disables it as it disables a mod
+    //   OnUnload                            that faults (wxl_host.disable), and none of its code
+    //                                       runs again
+    //   a script's handler, a handler       that call: the next script, the next handler and the
+    //   given to wxl::Subscribe             next event still run, and the mod stays enabled
+    //   a function registered with          that call: wxl.script fails it with what() as the
+    //   wxl.script or wxl.ui                script's error; wxl.ui ends that frame's drawing of it
+    //
+    // A destructor that throws still ends the process: C++ makes destructors noexcept, so
+    // nothing can catch it.
+
+    namespace detail
+    {
+        /// Set once the mod failed beyond recovery: WXL_MOD then calls none of its code.
+        inline std::atomic<bool>& FailedRef()
+        {
+            static std::atomic<bool> failed{false};
+            return failed;
+        }
+
+        /// "early", "storage", ...: a stage as a log line names it.
+        constexpr const char* StageName(wxl_stage stage)
+        {
+            switch (stage)
+            {
+            case WXL_STAGE_EARLY: return "early";
+            case WXL_STAGE_STORAGE: return "storage";
+            case WXL_STAGE_GRAPHICS: return "graphics";
+            case WXL_STAGE_SCRIPT: return "script";
+            case WXL_STAGE_READY: return "ready";
+            case WXL_STAGE_SHUTDOWN: return "shutdown";
+            }
+            return "?";
+        }
+
+        /// The named virtual a stage calls, or null for a stage without one.
+        constexpr const char* StageMethod(wxl_stage stage)
+        {
+            switch (stage)
+            {
+            case WXL_STAGE_EARLY: return "OnEarly";
+            case WXL_STAGE_STORAGE: return "OnStorageReady";
+            case WXL_STAGE_GRAPHICS: return "OnGraphicsReady";
+            case WXL_STAGE_SCRIPT: return "OnScriptReady";
+            case WXL_STAGE_READY: return "OnReady";
+            case WXL_STAGE_SHUTDOWN: return "OnShutdown";
+            }
+            return nullptr;
+        }
+
+        /**
+         * @brief Stops the mod after a failure it cannot recover from.
+         *
+         * The runtime disables it through wxl_host.disable. A runtime older than that member
+         * cannot, so the mod stops itself as far as it can: its scripts are dropped, and WXL_MOD
+         * calls nothing more of it.
+         */
+        inline void FailMod(const char* reason)
+        {
+            FailedRef().store(true);
+            ScriptMgr::Clear();
+            const wxl_host* host = Host();
+            if (!host) return;
+            if (Carries(host, &wxl_host::disable))
+            {
+                host->disable(Str(reason));
+                return;
+            }
+            char line[768];
+            std::snprintf(line, sizeof line,
+                          "%s; this runtime cannot disable a mod (it predates abi 0.1.8), so the "
+                          "mod stops itself: its scripts are dropped, and its remaining stages "
+                          "and its unload do nothing",
+                          reason);
+            Log(WXL_LOG_ERROR, ModId(), line);
+        }
+
+        /// Fails the mod with "<where> <what it threw>".
+        inline void FailThrown(const char* where, const Thrown& thrown)
+        {
+            char described[320];
+            char reason[448];
+            std::snprintf(reason, sizeof reason, "%s %s", where,
+                          thrown.Describe(described, sizeof described));
+            FailMod(reason);
+        }
+
+        /// wxl_mod_load, as WXL_MOD writes it.
+        template <class M>
+        wxl_result LoadMod(const wxl_host* host, const char* id, Mod*& instance)
+        {
+            static_assert(std::is_base_of_v<Mod, M>,
+                          "WXL_MOD takes the mod's class, which derives from wxl::Mod");
+            if (!host) return WXL_E_INVALID;
+            HostRef()  = host;
+            ModIdRef() = id;
+            FailedRef().store(false);
+
+            Thrown thrown;
+            M*     built = nullptr;
+            if (!Contain([&] { built = new M(); }, thrown))
+            {
+                LogThrown("the constructor of the mod's class", thrown, "; the mod is not loaded");
+                return WXL_E_FAILED;
+            }
+
+            wxl_result result = WXL_E_FAILED;
+            if (!Contain([&] { result = built->OnLoad(); }, thrown))
+            {
+                LogThrown("OnLoad", thrown, "; the mod is not loaded");
+                result = WXL_E_FAILED;
+            }
+            if (result != WXL_OK)
+            {
+                ScriptMgr::Clear();
+                delete built;
+                return result;
+            }
+            instance = built;
+            return WXL_OK;
+        }
+
+        /// wxl_mod_stage, as WXL_MOD writes it.
+        inline void StageMod(Mod* instance, wxl_stage stage)
+        {
+            if (!instance || FailedRef().load()) return;
+
+            Thrown thrown;
+            if (const char* method = StageMethod(stage))
+            {
+                if (!Contain([&] { instance->DispatchNamedStage(stage); }, thrown))
+                {
+                    FailThrown(method, thrown);
+                    return;
+                }
+            }
+            if (!Contain([&] { instance->OnStage(stage); }, thrown))
+            {
+                char where[48];
+                std::snprintf(where, sizeof where, "OnStage(%s)", StageName(stage));
+                FailThrown(where, thrown);
+            }
+        }
+
+        /// wxl_mod_unload, as WXL_MOD writes it. A mod that failed is left as it is: none of its
+        /// code, its destructor included, runs again.
+        inline void UnloadMod(Mod*& instance)
+        {
+            if (instance && !FailedRef().load())
+            {
+                Thrown thrown;
+                if (!Contain([&] { instance->OnUnload(); }, thrown)) FailThrown("OnUnload", thrown);
+            }
+            ScriptMgr::Clear();
+            if (!FailedRef().load()) delete instance;
+            instance = nullptr;
+        }
+    } // namespace detail
 } // namespace wxl
 
 /**
  * @brief Declares the mod: writes the four entry points a runtime looks for.
  *
- * Place it once, at file scope, in exactly one translation unit:
+ * Place it once, at file scope, in exactly one translation unit, with the mod's class, its id
+ * -- the manifest's, letter for letter -- and its display name:
  *
- *     WXL_MOD(MyMod, "wxl.example", "Example", 1)
+ *     WXL_MOD(MyMod, "wxl.example", "Example")
+ *
+ * The mod's version is the manifest's "version" alone. The entry points catch what the mod's code
+ * throws: see "What a throw costs" above.
  */
-#define WXL_MOD(ModClass, ModId, ModName, ModVersion)                                         \
+#define WXL_MOD(ModClass, ModId, ModName)                                                     \
     namespace                                                                                 \
     {                                                                                         \
-        ModClass* wxl_mod_instance_ = nullptr;                                                \
+        ::wxl::Mod* wxl_mod_instance_ = nullptr;                                              \
     }                                                                                         \
     extern "C" WXL_EXPORT const wxl_mod_info* WXL_CALL wxl_mod_query(void)                    \
     {                                                                                         \
         static const wxl_mod_info info = {sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR,        \
-                                          WXL_ABI_VERSION_MINOR, ModId, ModName, ModVersion,  \
+                                          WXL_ABI_VERSION_MINOR, ModId, ModName, 0u,          \
                                           WXL_ABI_VERSION_FEATURE};                           \
         return &info;                                                                         \
     }                                                                                         \
     extern "C" WXL_EXPORT wxl_result WXL_CALL wxl_mod_load(const wxl_host* host)              \
     {                                                                                         \
-        if (!host) return WXL_E_INVALID;                                                      \
-        ::wxl::detail::HostRef() = host;                                                      \
-        wxl_mod_instance_        = new ModClass();                                            \
-        const wxl_result result  = wxl_mod_instance_->OnLoad();                               \
-        if (result != WXL_OK)                                                                 \
-        {                                                                                     \
-            ::wxl::ScriptMgr::Clear();                                                        \
-            delete wxl_mod_instance_;                                                         \
-            wxl_mod_instance_ = nullptr;                                                      \
-        }                                                                                     \
-        return result;                                                                        \
+        return ::wxl::detail::LoadMod<ModClass>(host, ModId, wxl_mod_instance_);              \
     }                                                                                         \
     extern "C" WXL_EXPORT void WXL_CALL wxl_mod_stage(wxl_stage stage)                        \
     {                                                                                         \
-        if (wxl_mod_instance_) wxl_mod_instance_->DispatchStage(stage);                       \
+        ::wxl::detail::StageMod(wxl_mod_instance_, stage);                                    \
     }                                                                                         \
     extern "C" WXL_EXPORT void WXL_CALL wxl_mod_unload(void)                                  \
     {                                                                                         \
-        if (wxl_mod_instance_) wxl_mod_instance_->OnUnload();                                 \
-        ::wxl::ScriptMgr::Clear();                                                            \
-        delete wxl_mod_instance_;                                                             \
-        wxl_mod_instance_ = nullptr;                                                          \
+        ::wxl::detail::UnloadMod(wxl_mod_instance_);                                          \
     }
 
 #endif // WXL_SDK_HPP

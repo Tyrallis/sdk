@@ -14,6 +14,34 @@
 ---@field y number
 ---@field z number
 
+---A wxl_object_type value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.ObjectType "Unknown"|"Item"|"Container"|"Unit"|"Player"|"GameObject"|"DynamicObject"|"Corpse"
+
+---A wxl_script_context value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.ScriptContext "glue"|"game"
+
+---A wxl_mouse_button value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.MouseButton "left"|"right"|"middle"
+
+---A wxl_cooldown_change value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.CooldownChange "started"|"cleared"|"shifted"
+
+---A wxl_damage_kind value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.DamageKind "melee"|"spell"|"periodic"|"environment"
+
+---A wxl_environment value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.Environment "exhaustion"|"drowning"|"fall"|"lava"|"slime"|"fire"
+
+---A wxl_xp_source value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.XpSource "kill"|"other"
+
 -- The script families. A function defined on one of these tables as On<Event> is
 -- subscribed when the entry file has run and called with the event's parameters;
 -- on an event that can be answered its return values are taken, as Override
@@ -23,7 +51,7 @@
 ---@field OnUpdate fun(self: WorldScript, delta: number)
 ---@field OnWorldEnter fun(self: WorldScript, map_id: integer, position: wxl.Vec3)
 ---@field OnWorldLeave fun(self: WorldScript, map_id: integer, position: wxl.Vec3)
----@field OnWorldClick fun(self: WorldScript, point: wxl.Vec3, object: wxl.Object|nil, button: integer)
+---@field OnWorldClick fun(self: WorldScript, point: wxl.Vec3, object: wxl.Object|nil, button: wxl.MouseButton|integer)
 ---@field OnInput fun(self: WorldScript, message: integer, wparam: integer, lparam: integer, handled: boolean|nil): boolean|nil answers through handled
 ---@field OnSoundPlay fun(self: WorldScript, sound_id: integer, path: string, suppressed: boolean|nil): boolean|nil answers through suppressed
 ---@field OnZoneChanged fun(self: WorldScript, area_id: integer, subzone_id: integer, wmo_group_id: integer, zone_text: string, subzone_text: string, real_zone_text: string, indoors: boolean, new_area: boolean)
@@ -42,9 +70,9 @@ WorldScript = {}
 RenderScript = {}
 
 ---@class ObjectScript
----@field OnObjectCreate fun(self: ObjectScript, object: wxl.Object|nil, guid: wxl.Guid, type: integer)
----@field OnObjectUpdate fun(self: ObjectScript, object: wxl.Object|nil, guid: wxl.Guid, type: integer)
----@field OnObjectDestroy fun(self: ObjectScript, object: wxl.Object|nil, guid: wxl.Guid, type: integer)
+---@field OnObjectCreate fun(self: ObjectScript, object: wxl.Object|nil, guid: wxl.Guid, type: wxl.ObjectType|integer)
+---@field OnObjectUpdate fun(self: ObjectScript, object: wxl.Object|nil, guid: wxl.Guid, type: wxl.ObjectType|integer)
+---@field OnObjectDestroy fun(self: ObjectScript, object: wxl.Object|nil, guid: wxl.Guid, type: wxl.ObjectType|integer)
 ---@field OnTargetChanged fun(self: ObjectScript, previous: wxl.Object|nil, current: wxl.Object|nil)
 ---@field OnDoodadSpawn fun(self: ObjectScript, doodad: wxl.Object|nil, path: string, position: wxl.Vec3)
 ---@field OnEquipmentChanged fun(self: ObjectScript, unit: wxl.Object|nil, slot: integer, item_id: integer)
@@ -62,7 +90,7 @@ RenderScript = {}
 ---@field OnSpellCastResume fun(self: ObjectScript, caster: wxl.Object|nil, caster_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, duration: integer, remaining: integer)
 ---@field OnSpellCastDelayed fun(self: ObjectScript, caster: wxl.Object|nil, caster_guid: wxl.Guid, spell_id: integer, delay: integer)
 ---@field OnSpellCooldown fun(self: ObjectScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, item: wxl.Object|nil, item_guid: wxl.Guid, spell_id: integer, duration: integer, flags: integer)
----@field OnSpellCooldownChanged fun(self: ObjectScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, spell_id: integer, change: integer, delay: integer)
+---@field OnSpellCooldownChanged fun(self: ObjectScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, spell_id: integer, change: wxl.CooldownChange|integer, delay: integer)
 ---@field OnSpellCastCancel fun(self: ObjectScript, caster: wxl.Object|nil, caster_guid: wxl.Guid, spell_id: integer, cast_count: integer, reason: integer, notify_server: boolean)
 ObjectScript = {}
 
@@ -84,16 +112,16 @@ AssetScript = {}
 NetScript = {}
 
 ---@class LuaScript
----@field OnScriptVmReady fun(self: LuaScript, context: integer, native_state: lightuserdata|nil)
----@field OnScriptVmClosing fun(self: LuaScript, context: integer, native_state: lightuserdata|nil)
+---@field OnScriptVmReady fun(self: LuaScript, context: wxl.ScriptContext|integer, native_state: lightuserdata|nil)
+---@field OnScriptVmClosing fun(self: LuaScript, context: wxl.ScriptContext|integer, native_state: lightuserdata|nil)
 ---@field OnUiEvent fun(self: LuaScript, index: integer, name: string, format: string, values: wxl.Bytes, value_count: integer)
----@field OnScriptError fun(self: LuaScript, context: integer, message: string)
+---@field OnScriptError fun(self: LuaScript, context: wxl.ScriptContext|integer, message: string)
 LuaScript = {}
 
 ---@class CombatScript
 ---@field OnCombatAttackStart fun(self: CombatScript, attacker: wxl.Object|nil, attacker_guid: wxl.Guid, victim: wxl.Object|nil, victim_guid: wxl.Guid)
 ---@field OnCombatAttackStop fun(self: CombatScript, attacker: wxl.Object|nil, attacker_guid: wxl.Guid, victim: wxl.Object|nil, victim_guid: wxl.Guid)
----@field OnCombatDamage fun(self: CombatScript, source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, kind: integer, environment: integer, amount: integer, overkill: integer, school: integer, absorbed: integer, resisted: integer, blocked: integer, crit: boolean, hit_info: integer)
+---@field OnCombatDamage fun(self: CombatScript, source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, kind: wxl.DamageKind|integer, environment: wxl.Environment|integer, amount: integer, overkill: integer, school: integer, absorbed: integer, resisted: integer, blocked: integer, crit: boolean, hit_info: integer)
 ---@field OnCombatHeal fun(self: CombatScript, source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, amount: integer, overheal: integer, absorbed: integer, crit: boolean, periodic: boolean)
 ---@field OnCombatMiss fun(self: CombatScript, source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, melee: boolean, reason: integer, hit_info: integer)
 ---@field OnCombatEnergize fun(self: CombatScript, source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, power_type: integer, amount: integer, periodic: boolean, drain: boolean, multiplier: number)
@@ -103,7 +131,7 @@ CombatScript = {}
 ---@field OnPlayerMoveStart fun(self: PlayerScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, opcode: integer, flags: integer, position: wxl.Vec3, facing: number)
 ---@field OnPlayerMoveStop fun(self: PlayerScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, opcode: integer, flags: integer, position: wxl.Vec3, facing: number)
 ---@field OnPlayerLevelUp fun(self: PlayerScript, level: integer, health: integer, mana: integer, rage: integer, focus: integer, energy: integer, happiness: integer, runes: integer, runic_power: integer, strength: integer, agility: integer, stamina: integer, intellect: integer, spirit: integer)
----@field OnPlayerXpGain fun(self: PlayerScript, source: wxl.Object|nil, source_guid: wxl.Guid, amount: integer, kind: integer, bonus: integer, group_multiplier: number, refer_a_friend: boolean)
+---@field OnPlayerXpGain fun(self: PlayerScript, source: wxl.Object|nil, source_guid: wxl.Guid, amount: integer, kind: wxl.XpSource|integer, bonus: integer, group_multiplier: number, refer_a_friend: boolean)
 ---@field OnPlayerMoneyChanged fun(self: PlayerScript, player: wxl.Object|nil, previous: integer, current: integer)
 PlayerScript = {}
 
@@ -130,7 +158,7 @@ ChatScript = {}
 ---@overload fun(family: "WorldScript", method: "OnUpdate", handler: fun(delta: number)): integer
 ---@overload fun(family: "WorldScript", method: "OnWorldEnter", handler: fun(map_id: integer, position: wxl.Vec3)): integer
 ---@overload fun(family: "WorldScript", method: "OnWorldLeave", handler: fun(map_id: integer, position: wxl.Vec3)): integer
----@overload fun(family: "WorldScript", method: "OnWorldClick", handler: fun(point: wxl.Vec3, object: wxl.Object|nil, button: integer)): integer
+---@overload fun(family: "WorldScript", method: "OnWorldClick", handler: fun(point: wxl.Vec3, object: wxl.Object|nil, button: wxl.MouseButton|integer)): integer
 ---@overload fun(family: "WorldScript", method: "OnInput", handler: fun(message: integer, wparam: integer, lparam: integer, handled: boolean|nil)): integer
 ---@overload fun(family: "WorldScript", method: "OnSoundPlay", handler: fun(sound_id: integer, path: string, suppressed: boolean|nil)): integer
 ---@overload fun(family: "RenderScript", method: "OnFrameBegin", handler: fun(index: integer, delta: number)): integer
@@ -140,9 +168,9 @@ ChatScript = {}
 ---@overload fun(family: "RenderScript", method: "OnUiRenderEnd", handler: fun(index: integer, delta: number)): integer
 ---@overload fun(family: "RenderScript", method: "OnSwapchainLost", handler: fun(width: integer, height: integer)): integer
 ---@overload fun(family: "RenderScript", method: "OnSwapchainRestored", handler: fun(width: integer, height: integer)): integer
----@overload fun(family: "ObjectScript", method: "OnObjectCreate", handler: fun(object: wxl.Object|nil, guid: wxl.Guid, type: integer)): integer
----@overload fun(family: "ObjectScript", method: "OnObjectUpdate", handler: fun(object: wxl.Object|nil, guid: wxl.Guid, type: integer)): integer
----@overload fun(family: "ObjectScript", method: "OnObjectDestroy", handler: fun(object: wxl.Object|nil, guid: wxl.Guid, type: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnObjectCreate", handler: fun(object: wxl.Object|nil, guid: wxl.Guid, type: wxl.ObjectType|integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnObjectUpdate", handler: fun(object: wxl.Object|nil, guid: wxl.Guid, type: wxl.ObjectType|integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnObjectDestroy", handler: fun(object: wxl.Object|nil, guid: wxl.Guid, type: wxl.ObjectType|integer)): integer
 ---@overload fun(family: "ObjectScript", method: "OnTargetChanged", handler: fun(previous: wxl.Object|nil, current: wxl.Object|nil)): integer
 ---@overload fun(family: "ObjectScript", method: "OnDoodadSpawn", handler: fun(doodad: wxl.Object|nil, path: string, position: wxl.Vec3)): integer
 ---@overload fun(family: "ObjectScript", method: "OnEquipmentChanged", handler: fun(unit: wxl.Object|nil, slot: integer, item_id: integer)): integer
@@ -157,8 +185,8 @@ ChatScript = {}
 ---@overload fun(family: "NetScript", method: "OnMessageSent", handler: fun(opcode: integer, data: wxl.Bytes, suppressed: boolean|nil)): integer
 ---@overload fun(family: "NetScript", method: "OnConnected", handler: fun(address: string)): integer
 ---@overload fun(family: "NetScript", method: "OnDisconnected", handler: fun(address: string)): integer
----@overload fun(family: "LuaScript", method: "OnScriptVmReady", handler: fun(context: integer, native_state: lightuserdata|nil)): integer
----@overload fun(family: "LuaScript", method: "OnScriptVmClosing", handler: fun(context: integer, native_state: lightuserdata|nil)): integer
+---@overload fun(family: "LuaScript", method: "OnScriptVmReady", handler: fun(context: wxl.ScriptContext|integer, native_state: lightuserdata|nil)): integer
+---@overload fun(family: "LuaScript", method: "OnScriptVmClosing", handler: fun(context: wxl.ScriptContext|integer, native_state: lightuserdata|nil)): integer
 ---@overload fun(family: "ObjectScript", method: "OnUnitDeath", handler: fun(unit: wxl.Object|nil)): integer
 ---@overload fun(family: "ObjectScript", method: "OnUnitAuraChanged", handler: fun(unit: wxl.Object|nil, spell_id: integer, removed: boolean)): integer
 ---@overload fun(family: "ObjectScript", method: "OnSpellCastStart", handler: fun(caster: wxl.Object|nil, caster_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, cast_item: wxl.Guid, spell_id: integer, cast_count: integer, cast_flags: integer, target_flags: integer, cast_time: integer, hit_count: integer, hits: wxl.Bytes, misses: wxl.Bytes, miss_reasons: wxl.Bytes)): integer
@@ -168,18 +196,18 @@ ChatScript = {}
 ---@overload fun(family: "ObjectScript", method: "OnSpellCastRequest", handler: fun(caster: wxl.Object|nil, spell_id: integer, item: wxl.Object|nil, target_guid: wxl.Guid, confirmed: boolean, refused: boolean|nil)): integer
 ---@overload fun(family: "ObjectScript", method: "OnItemUseRequest", handler: fun(item: wxl.Object|nil, item_guid: wxl.Guid, target_guid: wxl.Guid, confirmed: boolean, refused: boolean|nil)): integer
 ---@overload fun(family: "LuaScript", method: "OnUiEvent", handler: fun(index: integer, name: string, format: string, values: wxl.Bytes, value_count: integer)): integer
----@overload fun(family: "LuaScript", method: "OnScriptError", handler: fun(context: integer, message: string)): integer
+---@overload fun(family: "LuaScript", method: "OnScriptError", handler: fun(context: wxl.ScriptContext|integer, message: string)): integer
 ---@overload fun(family: "ObjectScript", method: "OnSpellChannelStart", handler: fun(caster: wxl.Object|nil, caster_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, duration: integer, remaining: integer)): integer
 ---@overload fun(family: "ObjectScript", method: "OnSpellChannelUpdate", handler: fun(caster: wxl.Object|nil, caster_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, duration: integer, remaining: integer)): integer
 ---@overload fun(family: "ObjectScript", method: "OnSpellChannelStop", handler: fun(caster: wxl.Object|nil, caster_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, duration: integer, remaining: integer)): integer
 ---@overload fun(family: "ObjectScript", method: "OnSpellCastResume", handler: fun(caster: wxl.Object|nil, caster_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, duration: integer, remaining: integer)): integer
 ---@overload fun(family: "ObjectScript", method: "OnSpellCastDelayed", handler: fun(caster: wxl.Object|nil, caster_guid: wxl.Guid, spell_id: integer, delay: integer)): integer
 ---@overload fun(family: "ObjectScript", method: "OnSpellCooldown", handler: fun(unit: wxl.Object|nil, unit_guid: wxl.Guid, item: wxl.Object|nil, item_guid: wxl.Guid, spell_id: integer, duration: integer, flags: integer)): integer
----@overload fun(family: "ObjectScript", method: "OnSpellCooldownChanged", handler: fun(unit: wxl.Object|nil, unit_guid: wxl.Guid, spell_id: integer, change: integer, delay: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnSpellCooldownChanged", handler: fun(unit: wxl.Object|nil, unit_guid: wxl.Guid, spell_id: integer, change: wxl.CooldownChange|integer, delay: integer)): integer
 ---@overload fun(family: "ObjectScript", method: "OnSpellCastCancel", handler: fun(caster: wxl.Object|nil, caster_guid: wxl.Guid, spell_id: integer, cast_count: integer, reason: integer, notify_server: boolean)): integer
 ---@overload fun(family: "CombatScript", method: "OnCombatAttackStart", handler: fun(attacker: wxl.Object|nil, attacker_guid: wxl.Guid, victim: wxl.Object|nil, victim_guid: wxl.Guid)): integer
 ---@overload fun(family: "CombatScript", method: "OnCombatAttackStop", handler: fun(attacker: wxl.Object|nil, attacker_guid: wxl.Guid, victim: wxl.Object|nil, victim_guid: wxl.Guid)): integer
----@overload fun(family: "CombatScript", method: "OnCombatDamage", handler: fun(source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, kind: integer, environment: integer, amount: integer, overkill: integer, school: integer, absorbed: integer, resisted: integer, blocked: integer, crit: boolean, hit_info: integer)): integer
+---@overload fun(family: "CombatScript", method: "OnCombatDamage", handler: fun(source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, kind: wxl.DamageKind|integer, environment: wxl.Environment|integer, amount: integer, overkill: integer, school: integer, absorbed: integer, resisted: integer, blocked: integer, crit: boolean, hit_info: integer)): integer
 ---@overload fun(family: "CombatScript", method: "OnCombatHeal", handler: fun(source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, amount: integer, overheal: integer, absorbed: integer, crit: boolean, periodic: boolean)): integer
 ---@overload fun(family: "CombatScript", method: "OnCombatMiss", handler: fun(source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, melee: boolean, reason: integer, hit_info: integer)): integer
 ---@overload fun(family: "WorldScript", method: "OnZoneChanged", handler: fun(area_id: integer, subzone_id: integer, wmo_group_id: integer, zone_text: string, subzone_text: string, real_zone_text: string, indoors: boolean, new_area: boolean)): integer
@@ -188,7 +216,7 @@ ChatScript = {}
 ---@overload fun(family: "PlayerScript", method: "OnPlayerMoveStart", handler: fun(unit: wxl.Object|nil, unit_guid: wxl.Guid, opcode: integer, flags: integer, position: wxl.Vec3, facing: number)): integer
 ---@overload fun(family: "PlayerScript", method: "OnPlayerMoveStop", handler: fun(unit: wxl.Object|nil, unit_guid: wxl.Guid, opcode: integer, flags: integer, position: wxl.Vec3, facing: number)): integer
 ---@overload fun(family: "PlayerScript", method: "OnPlayerLevelUp", handler: fun(level: integer, health: integer, mana: integer, rage: integer, focus: integer, energy: integer, happiness: integer, runes: integer, runic_power: integer, strength: integer, agility: integer, stamina: integer, intellect: integer, spirit: integer)): integer
----@overload fun(family: "PlayerScript", method: "OnPlayerXpGain", handler: fun(source: wxl.Object|nil, source_guid: wxl.Guid, amount: integer, kind: integer, bonus: integer, group_multiplier: number, refer_a_friend: boolean)): integer
+---@overload fun(family: "PlayerScript", method: "OnPlayerXpGain", handler: fun(source: wxl.Object|nil, source_guid: wxl.Guid, amount: integer, kind: wxl.XpSource|integer, bonus: integer, group_multiplier: number, refer_a_friend: boolean)): integer
 ---@overload fun(family: "PlayerScript", method: "OnPlayerMoneyChanged", handler: fun(player: wxl.Object|nil, previous: integer, current: integer)): integer
 ---@overload fun(family: "GlueScript", method: "OnGlueScreenChanged", handler: fun(screen: string, previous: string)): integer
 ---@overload fun(family: "GlueScript", method: "OnGlueCharacterList", handler: fun(count: integer, valid: boolean)): integer
@@ -241,8 +269,6 @@ function Unobserve(id) end
 ---@param event wxl.CallbackName
 ---@param fn function
 function registerForEvent(event, fn) end
-
----@alias wxl.ObjectType "Item"|"Container"|"Unit"|"Player"|"GameObject"|"DynamicObject"|"Corpse"|"Unknown"
 
 ---A world object, by handle. Every getter answers the value, or nil and why:
 ---"gone" for an object that left, "unsupported" for a runtime without the read, or

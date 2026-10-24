@@ -106,4 +106,4 @@ namespace
     };
 } // namespace
 
-WXL_MOD(ExampleMod, "wxl.example", "Example", 1)
+WXL_MOD(ExampleMod, "wxl.example", "Example")

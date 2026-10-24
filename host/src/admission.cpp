@@ -3,6 +3,8 @@
 
 #include "wxl/host/admission.hpp"
 
+#include "wxl/base.hpp"
+
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
@@ -22,19 +24,7 @@ namespace wxl::host
         return "?";
     }
 
-    const char* ResultName(wxl_result result)
-    {
-        switch (result)
-        {
-        case WXL_OK: return "WXL_OK";
-        case WXL_E_UNSUPPORTED: return "WXL_E_UNSUPPORTED";
-        case WXL_E_VERSION: return "WXL_E_VERSION";
-        case WXL_E_INVALID: return "WXL_E_INVALID";
-        case WXL_E_NOT_FOUND: return "WXL_E_NOT_FOUND";
-        case WXL_E_FAILED: return "WXL_E_FAILED";
-        }
-        return "an unknown wxl_result";
-    }
+    const char* ResultName(wxl_result result) { return ::wxl::ResultName(result); }
 
     AbiVersion RuntimeAbi()
     {
