@@ -571,6 +571,97 @@ When no runtime offers the `wxl.object` service, every read answers `nil, "unsup
 `Valid()` included, and `InView` an empty list. List the service under `requires` in your
 manifest if your mod is no use without it.
 
+### Descriptor fields: everything the server says about an object
+
+The methods above read a few facts by name. Behind them, the client keeps every object's state in
+a block of numbers the server fills and updates: its **descriptor fields**. A unit has 89 of
+them -- health, each power, its stats, its resistances, its flags, the guid of what it targets --
+and a player 215 more. [`include/wxl/update_fields.def`](../include/wxl/update_fields.def) lists
+them all, with the names the client gives them (`UNIT_FIELD_HEALTH`, `PLAYER_XP`). These methods
+need abi `0.1.9`, so a mod that uses them asks for `"abi": "0.1.9"` in its `mod.json`.
+
+**Reading one.** `Field(name)` reads a field of an object:
+
+```lua
+local me = wxl.object.LocalPlayer()
+print(me:Field("UNIT_FIELD_HEALTH"))    -- the client's name
+print(me:Field("Unit.Health"))          -- the kind and a shorter name, the same field
+print(me:Field("Health"))               -- the short name alone, when it is not ambiguous
+```
+
+The short name is the client's without its kind's prefix, the words joined: `UNIT_FIELD_MAXHEALTH`
+is `Maxhealth`, `PLAYER_FIELD_COINAGE` is `Coinage`. Alone it must name one field of the object:
+a player has both `Unit.Flags` and `Player.Flags`, so `me:Field("Flags")` is an error that names
+the two, and you write the one you mean. A name the object does not have is an error too: a typo
+is a mistake to fix, not a value to test.
+
+What comes back depends on what the field holds, as its row in `update_fields.def` says:
+
+| The row's value | `Field` answers |
+|---|---|
+| `u32`, `i32`, `f32` | a number |
+| `guid`, `u64` | a string, `"0x"` and sixteen hex digits, as `Guid()` gives |
+| `bytes` | four numbers, one per byte from the low end: `local race, class, sex, power = me:Field("Bytes0")` |
+| `u16x2`, `i16x2` | two numbers, the low half first |
+
+A field with several elements, such as the seven of `UNIT_FIELD_RESISTANCES`, takes the element
+as a second argument, counted from 0: `unit:Field("Resistances", 6)`. `Fields(name)` answers all
+of them as a list. `FieldCount()` answers how many numbers the object's block holds.
+
+A player other than yours has a shorter block: the client keeps the fields after
+`PLAYER_FIELD_PAD_0` -- bags, money, experience, skills -- for the player it controls only. Asking
+another player for `PLAYER_XP` answers `nil, "invalid"`, and the runtime's log says why.
+
+**Many objects at once.** `wxl.object.Fields(list, name)` reads one field of every object of a
+list in one call, and answers a list in the same order, with `false` for an object that has no
+such field (a game object in a list of units):
+
+```lua
+local units = wxl.object.InView("Unit")
+local health = wxl.object.Fields(units, "Health")
+for i, unit in ipairs(units) do
+    if health[i] and health[i] < 100 then print(unit:Name() .. " is nearly dead") end
+end
+```
+
+**Writing one.** `SetField(name, value)` changes the field in your client, with the same kinds of
+value (a table of four numbers for bytes, of two for halves):
+
+```lua
+target:SetField("Unit.Boundingradius", 3)
+```
+
+Only your client sees it, and only until the server next updates that field, which puts its own
+value back. Nothing else is told: the client does not redraw a model or refresh its interface
+because of a write, so a value the client reads every frame shows at once and others show when
+the client next looks at them. The guid and the type, the first three numbers, are the keys the
+client finds the object by and cannot be written.
+
+**Seeing one change.** `OnObjectFieldChanged` tells you when an update of the server changes a
+field. Nothing is raised until a mod asks for a field with `wxl.object.Watch(type, name)`, since
+watching every field of every object would cost on every packet:
+
+```lua
+wxl.object.Watch("Player", "Coinage")
+Observe("ObjectScript", "OnObjectFieldChanged", function(object, type, field, count, old, new)
+    if field == wxl.field.Player.Coinage then
+        print("money " .. old .. " -> " .. new)
+    end
+end)
+```
+
+`type` is the kind of objects to watch (`"Unit"` covers players too; `nil` every object) and the
+event fires for those only. `field` is the number of the field that changed -- `wxl.field.Unit.Health`
+and the like give each field's number -- and `old` and `new` are its values, of the same kinds as
+`Field` gives, a table for bytes and halves. For a field with several elements, each element that
+changed raises its own event, `field` being the element's number.
+
+The client finds a change by comparing a field with a copy it keeps from before the update, and
+it keeps one for most fields but not all: `Watch` answers `nil` and the reason for one it does not,
+such as `UNIT_FIELD_CREATEDBY`. The `watch` column of `update_fields.def` says which: `any` on every
+object, `local` on your own player only (bags, money, experience), `none` not at all. A watch
+lasts while the game runs, and every mod observing the event receives every watched change.
+
 ---
 
 ## 🔁 6. Your mod's life
@@ -783,6 +874,9 @@ Writes its arguments to the log, through `tostring`, separated by tabs, at the `
 | `wxl.object.LocalPlayer()` | the player you control, or `nil` |
 | `wxl.object.FromGuid(guid)` | the object with that guid (`"0x"` and up to sixteen hex digits, or a whole number), or `nil` when it is not in view |
 | `wxl.object.InView(type)` | a list of the objects of a type in view; every object without a type |
+| `wxl.object.Fields(list, name, element)` | one descriptor field of every object of a list, in order, `false` where an object has none (abi `0.1.9`) |
+| `wxl.object.Watch(type, name)` | asks for `OnObjectFieldChanged` when the field changes on objects of the type, `nil` for every object; `true`, or `nil` and why (abi `0.1.9`) |
+| `wxl.field` | every descriptor field's number, by kind: `wxl.field.Unit.Health` |
 | `wxl.events` | each family's events by name, `wxl.events.NetScript[1] == "OnMessageReceived"` |
 | `wxl.log(level, ...)` | a log line at `"trace"`, `"debug"`, `"info"`, `"warn"` or `"error"` |
 
@@ -796,6 +890,10 @@ Writes its arguments to the log, through `tostring`, separated by tabs, at the `
 | `Name()` | its name |
 | `Target()` | for a unit, the object it targets, or `nil` |
 | `Handle()` | its handle as text, `"0x..."`, for logs |
+| `Field(name, element)` | a descriptor field by name (`"UNIT_FIELD_HEALTH"`, `"Unit.Health"`, `"Health"`): a number, a guid, or the bytes or halves as several numbers (abi `0.1.9`) |
+| `Fields(name)` | every element of a field, as a list |
+| `SetField(name, value, element)` | writes a field in your client until the server's next update of it; `true`, or `nil` and why |
+| `FieldCount()` | how many numbers the object's block holds |
 | every other method | a read from the runtime's table: the value, or `nil` and why. The list, with the kinds each applies to, is in [`wxl.d.lua`](../lua/types/wxl.d.lua) |
 
 `tostring(object)` gives its kind and handle, `Unit(0x000000000000002B)`, `gone Unit(...)` once it
@@ -827,13 +925,15 @@ A few to start from:
 | `ChatScript` | `OnChatMessage` | `type`, `language`, `sender`, `sender_guid`, `sender_name`, ... `text`, ... | a chat message of the server became a line the chat shows (abi `0.1.6`; `line_id`, `shown_text` `0.1.7`) |
 | | `OnChatAddonMessage` | `type`, `sender`, `sender_guid`, `sender_name`, `prefix`, `text`, `channel`, `gm` | an addon message reached the interface as `CHAT_MSG_ADDON` (abi `0.1.7`) |
 | `GlueScript` | `OnGlueScreenChanged` | `screen`, `previous` | the login screens moved on: `"login"`, `"charselect"`... (abi `0.1.6`) |
+| `ObjectScript` | `OnObjectFieldChanged` | `object`, `type`, `field`, `count`, `old_value`, `new_value` | a descriptor field `wxl.object.Watch` asked for changed (abi `0.1.9`) |
 
 The families `PlayerScript`, `GlueScript` and `ChatScript`, and `WorldScript`'s `OnZoneChanged`,
 `OnMouseoverChanged` and `OnCVarChanged`, came with `0.1.6`: a mod that uses one asks for
 `"abi": "0.1.6"`, so that an older runtime refuses it with a reason rather than failing at the
 unknown name. A mod asking for less cannot subscribe to them. `ChatScript`'s `OnChatAddonMessage`,
 and `OnChatMessage`'s last two parameters, came with `0.1.7`: a mod that uses them asks for
-`"abi": "0.1.7"`.
+`"abi": "0.1.7"`. `ObjectScript`'s `OnObjectFieldChanged` and the descriptor fields came with
+`0.1.9`.
 
 Not every runtime raises every event. Subscribing to one that yours does not raise logs a warning
 naming it, and the handler never runs.

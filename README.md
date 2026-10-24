@@ -5,7 +5,7 @@
 **The contract a WarcraftXL mod is written against**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![ABI](https://img.shields.io/badge/ABI-0.1.8-blue.svg)](include/wxl/abi.h)
+[![ABI](https://img.shields.io/badge/ABI-0.1.9-blue.svg)](include/wxl/abi.h)
 [![C++](https://img.shields.io/badge/C%2B%2B-17%20and%20up-blue.svg)](#-getting-started)
 [![Header only](https://img.shields.io/badge/header--only-yes-lightgrey.svg)](include/wxl)
 
@@ -231,6 +231,9 @@ include/wxl/
     events.h       the event enum, and the argument structs fields.def declares
     fields.def     every argument struct, member by member, with what each member carries
     enums.def      the enumerations those members hold, with the name a script sees for each
+    update_fields.def
+                   every descriptor field of every kind of object, by the client's names, with
+                   its dword index, size and value; generated from the client fork
     reflect.hpp    the events and their members as data, for a runtime that is not C++
     host.h         what a runtime offers a mod
     mod.h          what a mod exposes to a runtime
@@ -240,8 +243,9 @@ include/wxl/
                    WXL_MOD
     objects.hpp    world objects as C++ values: the umbrella over objects/
     objects/       one header per kind the client knows: Object, Item, Container, Unit, Player,
-                   GameObject, DynamicObject, Corpse; plus the view, the ObjectService facade and
-                   ObjectMap, data kept per object until it leaves
+                   GameObject, DynamicObject, Corpse; plus the view, the ObjectService facade,
+                   ObjectMap, data kept per object until it leaves, and fields.hpp, the update
+                   fields as typed constants (wxl::field::Unit::Health)
     services.hpp   every typed facade at once
     services/      one C header per service, and one .hpp with its typed facade
 host/              the mod host: discovery, manifests, load order, registry, event bus
@@ -262,7 +266,7 @@ supplies only the bindings that reach its own client.
 
 ## 🔢 Versioning
 
-`major.minor.feature`, in [`abi.h`](include/wxl/abi.h): today `0.1.8`.
+`major.minor.feature`, in [`abi.h`](include/wxl/abi.h): today `0.1.9`.
 
 - **Major** changes when an existing field, signature or id changes meaning. A runtime refuses a
   mod built against a different major.

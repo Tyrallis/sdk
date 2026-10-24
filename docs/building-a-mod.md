@@ -289,6 +289,52 @@ wxl::ObjectMap<uint32_t> hits;                                // a member of the
 void OnUnitDeath(wxl::Object unit) override { ++hits[unit]; } // gone with the unit
 ```
 
+### Descriptor fields
+
+Every object carries a block of dwords the server fills: its descriptor fields, all of them in
+[`include/wxl/update_fields.def`](../include/wxl/update_fields.def) with the client's names, dword
+indices, sizes and what they hold. `wxl/objects/fields.hpp` turns each row into a typed constant,
+`wxl::field::<Kind>::<Name>` -- `UNIT_FIELD_HEALTH` is `wxl::field::Unit::Health`, `PLAYER_XP`
+`wxl::field::Player::Xp` -- and `Field` reads it as the type its row says (abi `0.1.9`; on an older
+runtime every call answers `WXL_E_UNSUPPORTED`):
+
+```cpp
+wxl::Expected<int32_t> health = unit.Field(wxl::field::Unit::Health);
+wxl::Expected<float>   arcane = unit.Field(wxl::field::Unit::Resistances, 6); // element 6 of 7
+wxl::Expected<wxl_guid> aim   = unit.Field(wxl::field::Unit::Target);
+auto bytes = unit.Field(wxl::field::Unit::Bytes0);  // std::array<uint8_t, 4>: race, class, sex, power
+```
+
+A field of a kind the object is not -- a unit's field asked of a game object -- answers
+`WXL_E_INVALID`, as does a player other than the active one asked for a field past
+`PLAYER_FIELD_PAD_0`: the client keeps those for the player it controls only. `Fields(field)`
+reads every element, `RawFields(first, count)` the dwords by index, and
+`wxl::ObjectService().Fields(view, field)` one field of a whole view in one call.
+
+`SetField(field, value)` writes the client's copy. The server's next update of the field puts its
+own value back, and nothing else learns of the write: no handler of the client runs and no model
+is rebuilt. The guid and the type are refused.
+
+To hear of a change, ask for the field once, then override `OnObjectFieldChanged` in an
+`ObjectScript`:
+
+```cpp
+wxl::ObjectService().Watch(wxl::field::Unit::Health);   // in the mod's OnLoad, say
+
+void OnObjectFieldChanged(wxl::Object object, wxl_object_type, uint32_t field, uint32_t,
+                          wxl::FieldValue was, wxl::FieldValue now) override
+{
+    if (field == wxl::field::Unit::Health.index && now.As(wxl::field::Unit::Health) == 0)
+        ... // a unit's health reached 0
+}
+```
+
+`Watch` takes the field's own kind -- units and players, here -- or the type given
+(`Watch(wxl::field::Unit::Health, WXL_OBJECT_PLAYER)`), and nothing is raised for a field nobody
+asked for. The client sees a change by comparing a field with a copy it keeps from before the
+update, which it keeps for most fields and not all: the `watch` column of `update_fields.def` says
+which, and `Watch` answers `WXL_E_UNSUPPORTED` for the others, naming them in the log.
+
 ### Services
 
 Each service has a typed facade with its name and version sealed in: `wxl::ObjectService`,
