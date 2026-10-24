@@ -123,6 +123,9 @@ namespace
 
 int main()
 {
+    // Unbuffered, so the last line printed before a crash is never held back in a buffer.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+
     uint32_t fieldCount = 0, eventCount = 0;
     const wxl::reflect::Field* fields = wxl::reflect::Fields(&fieldCount);
     const wxl::reflect::Event* events = wxl::reflect::Events(&eventCount);

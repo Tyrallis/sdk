@@ -444,6 +444,9 @@ namespace
 
 int main(int argc, char** argv)
 {
+    // Unbuffered, so the last line printed before a crash is never held back in a buffer.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+
     const fs::path fixture = argc > 1 ? fs::path(argv[1]) : fs::path();
     const fs::path scratch = argc > 2 ? fs::path(argv[2]) : fs::path();
 

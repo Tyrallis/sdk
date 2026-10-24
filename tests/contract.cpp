@@ -313,6 +313,9 @@ WXL_MOD(LifecycleMod, "wxl.contract", "Contract", 1)
 
 int main()
 {
+    // Unbuffered, so the last line printed before a crash is never held back in a buffer.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+
     wxltest::FakeHost host;
     wxl::detail::HostRef() = host.Table();
 

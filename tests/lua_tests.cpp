@@ -284,6 +284,9 @@ end)
 
 int main(int argc, char** argv)
 {
+    // Unbuffered, so the last line printed before a crash is never held back in a buffer.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+
     if (argc < 4)
     {
         std::printf("usage: wxl-lua-tests <wxl-lua.dll> <examples/lua-hello> <scratch>\n");

@@ -140,6 +140,9 @@ namespace
 
 int main()
 {
+    // Unbuffered, so the last line printed before a crash is never held back in a buffer.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+
     FakeObject player;
     player.guid      = 0x100;
     player.type      = WXL_OBJECT_PLAYER;
