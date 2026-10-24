@@ -338,9 +338,9 @@ which, and `Watch` answers `WXL_E_UNSUPPORTED` for the others, naming them in th
 ### Services
 
 Each service has a typed facade with its name and version sealed in: `wxl::ObjectService`,
-`wxl::ScriptService`, `wxl::StorageService`, `wxl::NetService`, `wxl::UiService`,
-`wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService` (`include/wxl/services/*.hpp`,
-or all of them through `include/wxl/services.hpp`). A facade is stateless -- construct one
+`wxl::ScriptService`, `wxl::StorageService`, `wxl::DataService`, `wxl::NetService`,
+`wxl::UiService`, `wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService`
+(`include/wxl/services/*.hpp`, or all of them through `include/wxl/services.hpp`). A facade is stateless -- construct one
 wherever it is needed -- and resolves its table on first use. It tests false while the runtime
 does not publish the service, and every call through it then answers `WXL_E_UNSUPPORTED` or the
 empty object.
@@ -355,6 +355,28 @@ script.FireEvent("MY_EVENT", {wxl::Value::Number(1), wxl::Value::String("x")});
 wxl::StorageService storage;
 if (wxl::Expected<std::string> text = storage.ReadText("Interface\\x.lua")) ...
 ```
+
+The plain methods of a facade -- a string or a number in, a result, a bool, a string or an
+`Expected` out -- are not written in its header: each is a row of the service's table, beside its
+C header (`include/wxl/services/storage.def` for `wxl.storage`), and the facade takes it from
+there. The row names the C member and what it takes and answers, so the method calls the member
+when the runtime's table reaches it and answers as a missing service does when it does not:
+
+```cpp
+// storage.def:
+//   WXL_API(storage, add_search_path, AddSearchPath, result, (str directory, i32 priority), ...)
+wxl::StorageService storage;
+if (storage.AddSearchPath("Mods\\mymod\\assets", 1) != WXL_OK) ...   // a wxl_result
+wxl::Expected<uint64_t> size = storage.Size("Interface\\x.blp");       // out<u64>: an Expected
+
+wxl::DataService data;
+if (!data.IsLoaded("Spell.dbc")) data.ServeTable("Spell.dbc", "Mods\\mymod\\Spell.dbc");
+```
+
+What C++ does better than the raw table stays written by hand in the header: `Read` into a
+vector, `Open` as a `wxl::File` that closes itself, `Find` as a vector of strings, the templates
+of `RegisterFunction`. The same rows build the Lua modules of `wxl.lua`, so a member reaches C++
+and Lua alike from its one row.
 
 `wxl::Service<T>(name, version)` still gives the raw table, for a service these do not cover.
 

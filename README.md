@@ -203,7 +203,8 @@ Beyond events, a runtime publishes services, and a mod asks for the ones it need
 |---|---|---|
 | `wxl.object` | units, players, game objects | yes |
 | `wxl.script` | the client's Lua | yes |
-| `wxl.storage` | archives and files | yes |
+| `wxl.storage` | archives and files, and folders a mod adds to them | yes |
+| `wxl.data` | the client's databases, served from a mod's files | yes |
 | `wxl.net` | messages to and from the server | yes; no runtime publishes it yet |
 | `wxl.ui` | frames and the interface | yes; no runtime publishes it yet |
 | `wxl.hook` | hook points a runtime names and keeps working | yes |
@@ -211,9 +212,11 @@ Beyond events, a runtime publishes services, and a mod asks for the ones it need
 | `wxl.patch` | bytes written into the image | no: runtimes that load into a shipped binary |
 
 Each service has a typed facade with its name and version sealed in -- `wxl::ObjectService`,
-`wxl::ScriptService`, `wxl::StorageService`, `wxl::NetService`, `wxl::UiService`,
-`wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService` -- taking and returning C++ types.
-`wxl::Service<T>` is still there for the raw table.
+`wxl::ScriptService`, `wxl::StorageService`, `wxl::DataService`, `wxl::NetService`,
+`wxl::UiService`, `wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService` -- taking and
+returning C++ types. `wxl::Service<T>` is still there for the raw table. Lua mods reach the same
+services as `wxl.storage`, `wxl.data`, `wxl.script`, `wxl.hook` and `wxl.patch`, built from the
+same tables.
 
 **Portable means a runtime may serve it, not that yours does.** A facade tests false and every
 call through it answers `WXL_E_UNSUPPORTED` while the service is absent; require it in your
@@ -247,7 +250,9 @@ include/wxl/
                    ObjectMap, data kept per object until it leaves, and fields.hpp, the update
                    fields as typed constants (wxl::field::Unit::Health)
     services.hpp   every typed facade at once
-    services/      one C header per service, and one .hpp with its typed facade
+    services/      one C header per service, its table (<service>.def: every member with the
+                   kinds it takes and answers) and one .hpp with its typed facade; rows.hpp
+                   reads the tables, for wxl.lua's modules and the facades' plain methods
 host/              the mod host: discovery, manifests, load order, registry, event bus
 runtime/           service scaffolding every runtime shares: handles, wxl.object over a table of
                    reads (object_reads.def) each runtime implements
@@ -258,6 +263,8 @@ lua/               wxl.lua: the Lua mod runtime, a mod itself (LuaJIT, one state
 template/          a buildable mod to start from
 examples/scout/    a worked example: the world, the client's Lua, the server traffic
 examples/lua-hello/ the same in Lua: a folder, no build
+examples/lua-services/ a Lua mod using the services: files, a search path, databases, the
+                   client's own script
 tests/             the contract, the mod host, the shared runtime and wxl.lua, each against fakes
 ```
 

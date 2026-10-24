@@ -391,7 +391,7 @@ own: `ObjectScript.count = 0` stops the mod from loading.
 
 A handler receives what the event carries, one parameter per member, in a fixed order. The
 order, names and types of every event's parameters are in the editor definitions,
-[`lua/types/wxl.d.lua`](../lua/types/wxl.d.lua) (see [Your editor](#-6-your-editor)), generated
+[`lua/types/wxl.d.lua`](../lua/types/wxl.d.lua) (see [Your editor](#-8-your-editor)), generated
 from the SDK's tables so that they always say what the runtime does. For example:
 
 ```lua
@@ -664,7 +664,232 @@ lasts while the game runs, and every mod observing the event receives every watc
 
 ---
 
-## 🔁 6. Your mod's life
+## 🗂️ 6. The client's services
+
+Events tell your mod what the client does. **Services** are the other direction: things your mod
+asks the client for. A runtime publishes them -- the files of the game, its databases, its own
+Lua -- and `wxl.lua` gives each one a module in the `wxl` table:
+
+| Module | What it reaches |
+|---|---|
+| `wxl.storage` | the game's files, in its archives and in folders your mod adds |
+| `wxl.data` | the client's databases (`Spell.dbc` and the others), served from your own files |
+| `wxl.script` | the client's own Lua, the one its interface and addons run in |
+| `wxl.hook` | the points a runtime names for a native detour |
+| `wxl.patch` | bytes written into the client's program; your `mod.json` has to ask for it |
+
+Every function of these modules answers the way an object's reads do: its value, or `nil` and a
+reason. The reason is a short word: `"unsupported"` when this runtime does not have the service or
+that function, `"not_found"`, `"invalid"` or `"failed"` when the client said so. A number you
+leave out is 0.
+
+The example of this chapter is [`examples/lua-services/`](../examples/lua-services/). Copy it into
+`Mods/` next to `lua-hello` and start the client; each line below is from its log.
+
+### Files: `wxl.storage`
+
+A file is named the way the client names it: with backslashes, in any case, relative to the
+game's `Data` folder. Whether it sits in an archive (`common.MPQ`, `patch.MPQ`...) or somewhere
+else does not change its name:
+
+**`examples/lua-services/init.lua`**
+
+```lua
+local TOC = "Interface\\FrameXML\\FrameXML.toc"
+```
+
+In a Lua string a backslash is written twice, so this is `Interface\FrameXML\FrameXML.toc`: the
+list of files the game's own interface is made of. `Read` gives you a whole file as a string, or
+`nil` and why:
+
+**`examples/lua-services/init.lua`**
+
+```lua
+    local toc, reason = wxl.storage.Read(TOC)
+    if toc then
+        local _, lines = toc:gsub("\n", "")
+        print(TOC .. ": " .. #toc .. " bytes, " .. lines .. " lines")
+    else
+        print(TOC .. " was not read: " .. reason)
+    end
+```
+
+A Lua string holds any bytes, so a texture or a model reads as well as text does. For a large
+file you want a piece of, `Open` gives you a `File`, which reads at an offset as many bytes as you
+ask for, or what is left:
+
+**`examples/lua-services/init.lua`**
+
+```lua
+    local file = wxl.storage.Open(TOC)
+    if file then
+        print("it starts with " .. string.format("%q", file:ReadAt(0, 12)))
+        file:Close()
+    end
+```
+
+`file:Close()` gives the file back to the client. A file you forget to close is closed for you
+when nothing refers to it any more, and when your mod reloads, but closing it yourself frees it
+at once. `Exists(name)` and `Size(name)` answer without reading.
+
+`Find` lists the names that match a pattern, `*` standing for any run of characters. It reads the
+list of every archive, which takes a moment: keep it out of `onUpdate`.
+
+**`examples/lua-services/init.lua`**
+
+```lua
+    local tocs = wxl.storage.Find("Interface\\FrameXML\\*.toc")
+    print(#tocs .. " table(s) of contents in Interface\\FrameXML")
+```
+
+### Files of your own: the search path
+
+Your mod can ship files the client then finds as its own: a texture, a sound, a database. Put
+them in a folder of your mod, under the names the client uses, and add the folder to the files
+the client searches:
+
+**`examples/lua-services/init.lua`**
+
+```lua
+local added, why = wxl.storage.AddSearchPath(wxl.mod.directory .. "\\assets", 1)
+if not added then
+    print("the assets folder is not searched: " .. why)
+end
+```
+
+The example has `assets\Interface\lua-services\hello.txt`, so the client now has a file named
+`Interface\lua-services\hello.txt`, which `Read` finds like any other:
+
+**`examples/lua-services/init.lua`**
+
+```lua
+    local hello = wxl.storage.Read("Interface\\lua-services\\hello.txt")
+    print("from the assets folder: " .. (hello and hello:gsub("\n", "") or "nothing"))
+```
+
+```
+[wxl.lua-services] from the assets folder: hello from the assets folder
+```
+
+The second argument is the folder's **priority**. The game's own files are at 0. A folder above
+0 wins a name both have: put `Interface\Icons\INV_Misc_Coin_01.blp` in your folder at priority 1
+and every coin in the interface is your picture. A folder at 0 or below only adds names the game
+does not have. The folder has to be inside the client's folder, which your mod's own folder in
+`Mods/` is; this call is best made when the mod loads, at the top of `init.lua`, so the client
+finds your files from its first look. `MountArchive(path, priority)` does the same for a whole
+`.MPQ`.
+
+### The client's databases: `wxl.data`
+
+The client keeps its game data -- spells, items, maps -- in databases, files ending in `.dbc`,
+which it reads once, early in its start, and never again. `wxl.data.ServeTable(table, path)`
+makes it read one from your file instead, provided you ask before that moment: at the top of
+`init.lua`, which runs as the client starts. The file must have the columns of the client's own;
+adding rows is what this is for.
+
+```lua
+-- an illustration: Spell.dbc read from assets\DBFilesClient\Spell.dbc of your search path
+wxl.data.ServeTable("Spell.dbc", "DBFilesClient\\Spell.dbc")
+```
+
+The path is a client name, so a database in your search path works. `IsLoaded(table)` tells you
+whether the client has read it already, in which case serving it comes too late this session:
+
+**`examples/lua-services/init.lua`**
+
+```lua
+    print("Spell.dbc read already: " .. tostring(wxl.data.IsLoaded("Spell.dbc")))
+```
+
+`ServedFrom(table)` says which file a table is served from, `""` for the client's own, and
+`RestoreTable(table)` gives it back. One mod serves a table at a time: a second one is refused
+with `"failed"`, and the log names the first.
+
+### The client's own Lua: `wxl.script`
+
+The client runs a Lua of its own, separate from your mod's: the one its interface, its addons and
+the `/run` command use. Your mod can add a function to it:
+
+**`examples/lua-services/init.lua`**
+
+```lua
+wxl.script.RegisterFunction("LuaServicesGreet", function(name)
+    return "hello " .. tostring(name) .. ", from " .. wxl.mod.name
+end)
+```
+
+Type `/run print(LuaServicesGreet("you"))` in the chat box and the client calls your function,
+in your mod's state, with what its caller passed, and takes back what you return. Both sides
+are numbers, strings, booleans and `nil`; a table does not cross. An error in your function
+shows in the client as its error, and counts in your log as any error of your mod does.
+
+The client throws its Lua away and starts a new one more than once: at the login screen, when
+you enter the world, when the interface reloads. `wxl.lua` registers your function again in each
+one, so you call `RegisterFunction` once, at the top of `init.lua`. A third argument,
+`"glue"` (the login and character screens) or `"game"`, keeps it to one of them.
+
+`RegisterEvent` adds an event the client's frames can listen to, kept the same way, and
+`FireEvent` raises it with values:
+
+**`examples/lua-services/init.lua`**
+
+```lua
+wxl.script.RegisterEvent("LUA_SERVICES_WORLD")
+
+function WorldScript:OnWorldEnter(map_id)
+    wxl.script.FireEvent("LUA_SERVICES_WORLD", map_id)
+    -- Script text, run in the client's context: it writes a line in the chat frame.
+    wxl.script.Run("DEFAULT_CHAT_FRAME:AddMessage('lua-services: entered map " .. map_id .. "')",
+                   "lua-services")
+end
+```
+
+An addon's frame that called `frame:RegisterEvent("LUA_SERVICES_WORLD")` now receives it each
+time you enter the world. `Run(text, name)` runs Lua text in the client's state, as `/run` would;
+`name` is what its errors are labelled with. `wxl.script.Context()` says which state is live,
+`"glue"` or `"game"`.
+
+### Hook points: `wxl.hook`
+
+A runtime can name points of the client a native mod may detour. Lua lists them; attaching one is
+for C++, since a detour is native code:
+
+**`examples/lua-services/init.lua`**
+
+```lua
+    print(#wxl.hook.Points() .. " hook point(s) named")
+```
+
+Each point is a table with its `name` and `signature`; `HasPoint(name)` asks for one.
+
+### Writing into the client: `wxl.patch`
+
+`wxl.patch` writes bytes into the client's program: a jump turned around, a constant changed.
+It exists on the stock `Wow.exe` only, where every address is known, and it is a sharp tool, so
+a mod reaches it only when its `mod.json` declares it:
+
+```json
+"requires": [ { "service": "wxl.patch", "version": 1 } ]
+```
+
+(`"optional"` works too, for a mod that does without on the other client.) Without it, every use
+of `wxl.patch` stops with an error saying what to add. Each write names the bytes it expects to
+find, and is refused when they are not there, so a wrong address becomes a log line rather than
+a broken client:
+
+```lua
+-- an illustration: two NOPs at an address that holds two INT3 now
+local patch, why = wxl.patch.Apply("my change", 0x00401000, "\204\204", "\144\144")
+```
+
+Bytes are written as a Lua string, `"\204"` being the byte 204 (0xCC). `Apply` answers a `Patch`,
+or `nil` and why; `patch:Restore()` puts the old bytes back. Your mod's patches are put back,
+newest first, when it reloads or stops, so a reload starts from the client as it was. `Matches`
+checks bytes without writing, `Find(bytes, after)` searches the program's constant data for them.
+
+---
+
+## 🔁 7. Your mod's life
 
 ### Loading
 
@@ -777,7 +1002,7 @@ there.
 
 ---
 
-## ✏️ 7. Your editor
+## ✏️ 8. Your editor
 
 [`lua/types/wxl.d.lua`](../lua/types/wxl.d.lua) describes the whole API for
 [lua-language-server](https://github.com/LuaLS/lua-language-server), which the *Lua* extension
@@ -802,7 +1027,7 @@ built with, so it describes the events your `wxl.lua` knows.
 
 ---
 
-## 📚 8. Reference
+## 📚 9. Reference
 
 ### The manifest
 
@@ -879,6 +1104,29 @@ Writes its arguments to the log, through `tostring`, separated by tabs, at the `
 | `wxl.field` | every descriptor field's number, by kind: `wxl.field.Unit.Health` |
 | `wxl.events` | each family's events by name, `wxl.events.NetScript[1] == "OnMessageReceived"` |
 | `wxl.log(level, ...)` | a log line at `"trace"`, `"debug"`, `"info"`, `"warn"` or `"error"` |
+
+### Service modules
+
+Each answers its value, or `nil` and the reason; a number left out is 0. Every function, typed,
+is in [`wxl.d.lua`](../lua/types/wxl.d.lua), and every row behind them in
+`include/wxl/services/<service>.def`.
+
+| Function | Answers |
+|---|---|
+| `wxl.storage.Exists(name)`, `.Size(name)` | whether a file is there; its length in bytes |
+| `wxl.storage.Read(name)` | the whole file, as a string |
+| `wxl.storage.Open(name)` | a `File`: `file:ReadAt(offset, count)` reads, `file:Close()` gives it back |
+| `wxl.storage.Find(pattern)` | a list of the names matching, `*` any run of characters |
+| `wxl.storage.AddSearchPath(folder, priority)` | `true`: the folder's files are the client's, above 0 over its own |
+| `wxl.storage.MountArchive(path, priority)` | `true`: an archive joins the client's |
+| `wxl.data.ServeTable(table, path)`, `.RestoreTable(table)` | `true`: the client reads the table from `path`, or its own again |
+| `wxl.data.ServedFrom(table)`, `.IsLoaded(table)` | where a table comes from, `""` for the client's own; whether the client read it already |
+| `wxl.script.RegisterFunction(name, fn, context)` | `true`: `name` calls `fn` from the client's Lua, in every context or in `"glue"` or `"game"` |
+| `wxl.script.RegisterEvent(name, context)`, `.FireEvent(name, ...)` | `true`: an event the client's frames can listen to; raised with values |
+| `wxl.script.Run(text, name)`, `.Context()` | `true` once the text ran; `"glue"` or `"game"` |
+| `wxl.hook.Points()`, `.HasPoint(name)` | the points as `{ name, signature }`; whether one is named |
+| `wxl.patch.Apply(name, address, expected, bytes)` | a `Patch`, `patch:Restore()` to undo; the module needs `wxl.patch` in `mod.json` |
+| `wxl.patch.Matches(address, expected)`, `.Find(bytes, after)` | whether the bytes are there; where they are |
 
 ### Object methods
 
@@ -973,7 +1221,9 @@ your mod's id first.
 ## 🧭 Where to go next
 
 - [`examples/lua-hello/`](../examples/lua-hello/), the example of section 3, to copy and change.
-- [`lua/types/wxl.d.lua`](../lua/types/wxl.d.lua), for every event and object method.
-- [Your first mod](your-first-mod.md), the same platform from C++, for the services the Lua API
-  does not offer yet: the client's interface Lua (`wxl.script`), files and archives, hooks and
-  patches.
+- [`examples/lua-services/`](../examples/lua-services/), the example of section 6: files, a
+  search path, the databases, the client's own Lua.
+- [`lua/types/wxl.d.lua`](../lua/types/wxl.d.lua), for every event, object method and service
+  function.
+- [Your first mod](your-first-mod.md), the same platform from C++, for what only native code
+  does: detours on the hook points, and the interface panels of `wxl.ui`.
