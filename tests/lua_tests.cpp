@@ -27,6 +27,8 @@
 #include "wxl/host/mod_host.hpp"
 #include "wxl/lua.h"
 
+#include "../lua/src/ObjectNames.hpp"
+
 namespace fs = std::filesystem;
 using namespace wxl::host;
 
@@ -279,6 +281,82 @@ local sum = 0
 Observe("CombatScript", "OnCombatDamage", function(source, source_guid, target, target_guid, spell_id, kind,
                                                     environment, amount)
     sum = sum + amount
+end)
+)lua";
+    constexpr const char* kIdentity = R"lua(
+local kept, keptGuid, reported, collected
+local byObject = {}
+local weak = setmetatable({}, { __mode = "k" })
+
+Observe("ObjectScript", "OnObjectCreate", function(object, guid)
+    if guid == "0x0000000000000600" and not kept then
+        kept, keptGuid = object, guid
+        object.tag = "first"
+        byObject[object] = 1
+        print("same at lookup " .. tostring(rawequal(wxl.object.FromGuid(guid), object)))
+        local ok, err = pcall(function() object.Health = 1 end)
+        print("method name refused " .. tostring(not ok and err:find("is a method of objects") ~= nil))
+    elseif guid == "0x0000000000000610" then
+        object.note = "kept while in view"
+        weak[object] = true
+    elseif guid == "0x0000000000000600" then
+        print("revived new value " .. tostring(object ~= kept) .. " key " .. tostring(byObject[object]) ..
+              " tag " .. tostring(object.tag) .. " same guid " .. tostring(object:Guid() == keptGuid) ..
+              " lookup " .. tostring(rawequal(wxl.object.FromGuid(guid), object)) ..
+              " old " .. tostring(kept:Valid()))
+    end
+end)
+
+Observe("ObjectScript", "OnTargetChanged", function(previous, current)
+    if not current or current:Guid() ~= "0x0000000000000600" then return end
+    print("same at event " .. tostring(rawequal(current, kept)) .. " key " .. tostring(byObject[current]) ..
+          " tag " .. tostring(current.tag) .. " unset " .. tostring(current.nothing))
+end)
+
+Observe("ObjectScript", "OnObjectDestroy", function(object, guid)
+    if guid ~= "0x0000000000000600" or not rawequal(object, kept) then return end
+    print("destroy sees tag " .. tostring(object.tag) .. " health " .. tostring(object:Health()))
+end)
+
+registerForEvent("onUpdate", function()
+    if kept and not kept:Valid() and not reported then
+        reported = true
+        local hp, why = kept:Health()
+        local ok, err = pcall(function() kept.tag = "again" end)
+        print("after destroy " .. tostring(hp) .. " " .. why .. " tag " .. tostring(kept.tag) ..
+              " valid " .. tostring(kept:Valid()) .. " type " .. tostring(select(2, kept:Type())) ..
+              " store " .. tostring(not ok and err:find("gone") ~= nil) .. " " .. tostring(kept))
+    end
+    if not collected then
+        collectgarbage("collect")
+        if next(weak) == nil then
+            collected = true
+            local again = wxl.object.FromGuid("0x0000000000000610")
+            print("collected, data kept " .. tostring(again and again.note))
+        end
+    end
+end)
+
+Observe("ObjectScript", "OnTargetChanged", function(previous, current)
+    if not current or current:Guid() ~= "0x0000000000000100" then return end
+    local chest = previous
+    print("chest kind " .. chest:Type() .. " game object type " .. tostring(chest:GameObjectType()))
+    local forms = {}
+    for _, guid in ipairs({ "0x200", "0X0000000000000200", 512 }) do
+        forms[#forms + 1] = tostring(wxl.object.FromGuid(guid) ~= nil)
+    end
+    for _, guid in ipairs({ "0512", "512", "0x", "0x00000000000000200", "0x20g", 1.5, -1 }) do
+        forms[#forms + 1] = tostring(pcall(wxl.object.FromGuid, guid))
+    end
+    print("guid forms " .. table.concat(forms, " "))
+end)
+)lua";
+
+    constexpr const char* kNoService = R"lua(
+Observe("ObjectScript", "OnTargetChanged", function(previous, current)
+    local valid, why = current:Valid()
+    local hp, why2 = current:Health()
+    print("no service " .. tostring(valid) .. " " .. tostring(why) .. " " .. tostring(hp) .. " " .. tostring(why2))
 end)
 )lua";
 } // namespace
@@ -580,6 +658,117 @@ int main(int argc, char** argv)
         Check(sink.Has("[host] unloaded wxl.lua") && host.Loaded().empty(), "and wxl.lua unloads");
 
         if (g_failures) sink.Dump();
+    }
+
+    Section("object method names");
+    {
+        namespace names = wxl::lua::names;
+        std::vector<names::Member> rows = {
+#define WXL_OBJECT_READ(kinds, member, Method, type)    names::Member{#member, names::k##kinds},
+#define WXL_OBJECT_READ_AT(kinds, member, Method, type) names::Member{#member, names::k##kinds},
+#include "wxl/runtime/object_reads.def"
+#undef WXL_OBJECT_READ_AT
+#undef WXL_OBJECT_READ
+        };
+        const std::vector<std::string> real = names::LuaNames(rows);
+        Check(names::Clash(rows, real).empty(), "the real rows leave no name ambiguous");
+
+        const std::vector<names::Member> made = {
+            {"gameobject_type", names::kGameObjects}, {"unit_flags", names::kUnits},
+            {"player_flags", names::kPlayers},        {"gameobject_flags", names::kGameObjects},
+            {"unit_name", names::kUnits},             {"item_owner", names::kItems},
+            {"corpse_owner", names::kCorpses}};
+        const std::vector<std::string> named = names::LuaNames(made);
+        Check(named[0] == "GameObjectType" && named[4] == "UnitName",
+              "a row named like a hand-written method says its kind instead");
+        Check(named[1] == "Flags" && named[2] == "PlayerFlags" && named[3] == "Flags",
+              "of two rows sharing a name on one object the narrower says its kind; disjoint kinds share it");
+        Check(named[5] == "Owner" && named[6] == "Owner", "kinds no object has both of share a name");
+
+        const std::vector<names::Member> tied = {{"unit_level", names::kUnits}, {"unit_level", names::kUnits}};
+        const std::vector<std::string>   both = names::LuaNames(tied);
+        Check(both[0] == "UnitLevel" && both[1] == "UnitLevel" && !names::Clash(tied, both).empty(),
+              "a clash no qualifier resolves is reported rather than shadowed");
+    }
+
+    Section("object identity");
+    {
+        using wxltest::FakeObjects;
+        const fs::path mods = MakeTree(scratch, "identity", binary, fs::path());
+        WriteFile(mods / "identity" / "mod.json", LuaManifest("wxl.identity"));
+        WriteFile(mods / "identity" / "init.lua", kIdentity);
+
+        CaptureSink sink;
+        ModHost     host(Config(mods, sink));
+        host.LoadAll();
+        host.Stage(WXL_STAGE_READY);
+
+        FakeObjects::Spawn(60, 0x600);
+        FakeObjects::Spawn(61, 0x610);
+        const wxl_object_args wolf{60, 0x600, WXL_OBJECT_UNIT};
+        const wxl_object_args cub{61, 0x610, WXL_OBJECT_UNIT};
+        host.Raise(WXL_EV_ObjectCreate, &wolf);
+        host.Raise(WXL_EV_ObjectCreate, &cub);
+        Check(sink.Has("[wxl.identity] same at lookup true"),
+              "an object is the same Lua value at its event and at a lookup by guid");
+        Check(sink.Has("[wxl.identity] method name refused true"),
+              "a field named like a method is refused");
+
+        const wxl_target_args toWolf{WXL_HANDLE_NONE, 60};
+        host.Raise(WXL_EV_TargetChanged, &toWolf);
+        Check(sink.Has("[wxl.identity] same at event true key 1 tag first unset nil"),
+              "the same value at a later event: a table key, with the fields the mod stored");
+
+        const wxl_update_args tick{0.1f};
+        host.Raise(WXL_EV_Update, &tick);
+        Check(sink.Has("[wxl.identity] collected, data kept kept while in view"),
+              "an object nothing holds is collected, and its fields wait for the next push");
+
+        host.Raise(WXL_EV_ObjectDestroy, &wolf);
+        FakeObjects::Despawn(60);
+        Check(sink.Has("[wxl.identity] destroy sees tag first health 50"),
+              "a mod's ObjectDestroy handler still reads the object and its fields");
+        host.Raise(WXL_EV_Update, &tick);
+        Check(sink.Has("[wxl.identity] after destroy nil gone tag nil valid false type gone store true "
+                       "gone Unit(0x000000000000003C)"),
+              "after ObjectDestroy the value is dead: reads answer gone, its fields are dropped, none "
+              "can be stored");
+
+        // The client brings the same object back: another visibility episode, another handle.
+        FakeObjects::Spawn(70, 0x600);
+        const wxl_object_args revived{70, 0x600, WXL_OBJECT_UNIT};
+        host.Raise(WXL_EV_ObjectCreate, &revived);
+        Check(sink.Has("[wxl.identity] revived new value true key nil tag nil same guid true lookup true old false"),
+              "a revived object is a new value with no fields; the guid is what it shares with the old one");
+
+        const wxl_target_args chest{FakeObjects::kChest, FakeObjects::kPlayer};
+        host.Raise(WXL_EV_TargetChanged, &chest);
+        Check(sink.Has("[wxl.identity] chest kind GameObject game object type 3"),
+              "Type() is the kind's name and a game object's own type is GameObjectType()");
+        Check(sink.Has("[wxl.identity] guid forms true true true false false false false false false false"),
+              "FromGuid takes \"0x\" and up to sixteen hex digits or a whole number, nothing else");
+
+        FakeObjects::Despawn(61);
+        FakeObjects::Despawn(70);
+        host.Stage(WXL_STAGE_SHUTDOWN);
+        if (g_failures) sink.Dump();
+    }
+
+    Section("objects without the service");
+    {
+        const fs::path mods = MakeTree(scratch, "noservice", binary, fs::path());
+        WriteFile(mods / "noservice" / "mod.json", LuaManifest("wxl.noservice"));
+        WriteFile(mods / "noservice" / "init.lua", kNoService);
+
+        CaptureSink sink;
+        HostConfig  config = Config(mods, sink);
+        config.services.clear();
+        ModHost host(std::move(config));
+        host.LoadAll();
+        const wxl_target_args target{WXL_HANDLE_NONE, wxltest::FakeObjects::kBoar};
+        host.Raise(WXL_EV_TargetChanged, &target);
+        Check(sink.Has("[wxl.noservice] no service nil unsupported nil unsupported"),
+              "without the object service Valid() answers like every read: nil, \"unsupported\"");
     }
 
     Section("cost of one dispatch");

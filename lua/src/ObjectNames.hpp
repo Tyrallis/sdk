@@ -60,6 +60,32 @@ namespace wxl::lua::names
         }
     }
 
+    /// What a name keeps of its kind when it has to say it: GameObjectType, PlayerFlags.
+    inline const char* QualifierOf(uint32_t kinds)
+    {
+        switch (kinds)
+        {
+        case kUnits: return "Unit";
+        case kPlayers: return "Player";
+        case kItems: return "Item";
+        case kContainers: return "Container";
+        case kGameObjects: return "GameObject";
+        case kDynamics: return "Dynamic";
+        case kCorpses: return "Corpse";
+        default: return "";
+        }
+    }
+
+    /// The methods every object has, written by hand rather than generated from a row.
+    constexpr const char* kHandWritten[] = {"Valid", "Guid", "Type", "TypeId", "Name", "Target", "Handle"};
+
+    inline bool IsHandWritten(const std::string& name)
+    {
+        for (const char* own : kHandWritten)
+            if (name == own) return true;
+        return false;
+    }
+
     inline uint32_t Bits(uint32_t mask)
     {
         uint32_t count = 0;
@@ -67,21 +93,23 @@ namespace wxl::lua::names
         return count;
     }
 
-    /// unit_max_health -> MaxHealth: the kind's prefix dropped, the rest PascalCased.
-    inline std::string LuaName(const char* member, uint32_t kinds)
+    /// unit_max_health -> MaxHealth: the kind's prefix dropped, the rest PascalCased. Qualified,
+    /// the prefix is said instead: gameobject_type -> GameObjectType.
+    inline std::string LuaName(const char* member, uint32_t kinds, bool qualified = false)
     {
         const char*  prefix = PrefixOf(kinds);
-        const size_t skip = std::strncmp(member, prefix, std::strlen(prefix)) == 0 ? std::strlen(prefix) : 0;
-        std::string  name;
-        bool         upper = true;
-        for (const char* c = member + skip; *c; ++c)
+        const size_t length = std::strlen(prefix);
+        const bool   has    = length && std::strncmp(member, prefix, length) == 0;
+        std::string  name   = qualified && has ? QualifierOf(kinds) : "";
+        bool         upper  = true;
+        for (const char* c = member + (has ? length : 0); *c; ++c)
         {
             if (*c == '_')
             {
                 upper = true;
                 continue;
             }
-            name += upper ? static_cast<char>(*c - 'a' + 'A') : *c;
+            name += upper && *c >= 'a' && *c <= 'z' ? static_cast<char>(*c - 'a' + 'A') : *c;
             upper = false;
         }
         return name;
@@ -97,24 +125,51 @@ namespace wxl::lua::names
     /**
      * @brief The Lua method name of every row, in order.
      *
-     * Two rows may share a name (unit_flags and gameobject_flags are both Flags) when no object
-     * is of both kinds: the object's kind picks the row. When their kinds overlap -- unit_flags
-     * and player_flags both apply to a player -- the row of the narrower kind keeps its prefix:
-     * PlayerFlags.
+     * A row is named without its kind's prefix: unit_max_health is MaxHealth. Two rows may share
+     * that name (unit_flags and gameobject_flags are both Flags) when no object is of both kinds:
+     * the object's kind picks the row. A name says its kind instead -- GameObjectType,
+     * PlayerFlags -- when it would otherwise be ambiguous:
+     *
+     *   - it is the name of a hand-written method (gameobject_type is not Type, the kind's name);
+     *   - another row of an overlapping kind has it (unit_flags and player_flags both apply to a
+     *     player): the narrower row says its kind, both do when neither is narrower.
+     *
+     * Nothing is ever shadowed in silence: Clash() names what this leaves ambiguous, and the
+     * tests require it to name nothing.
      */
     inline std::vector<std::string> LuaNames(const std::vector<Member>& rows)
     {
         std::vector<std::string> names;
+        std::vector<bool>        qualify(rows.size(), false);
         for (const Member& row : rows) names.push_back(LuaName(row.member, row.kinds));
         for (size_t i = 0; i < rows.size(); ++i)
         {
+            if (IsHandWritten(names[i])) qualify[i] = true;
             for (size_t j = 0; j < rows.size(); ++j)
             {
                 if (i == j || names[i] != names[j] || !(rows[i].kinds & rows[j].kinds)) continue;
-                if (Bits(rows[i].kinds) < Bits(rows[j].kinds)) names[i] = LuaName(rows[i].member, 0);
+                if (Bits(rows[i].kinds) <= Bits(rows[j].kinds)) qualify[i] = true;
             }
         }
+        for (size_t i = 0; i < rows.size(); ++i)
+            if (qualify[i]) names[i] = LuaName(rows[i].member, rows[i].kinds, true);
         return names;
+    }
+
+    /// What a set of names leaves ambiguous, as text; empty when nothing is.
+    inline std::string Clash(const std::vector<Member>& rows, const std::vector<std::string>& names)
+    {
+        std::string text;
+        for (size_t i = 0; i < rows.size(); ++i)
+        {
+            if (IsHandWritten(names[i]))
+                text += std::string(rows[i].member) + " is named " + names[i] + ", a hand-written method; ";
+            for (size_t j = i + 1; j < rows.size(); ++j)
+                if (names[i] == names[j] && (rows[i].kinds & rows[j].kinds))
+                    text += std::string(rows[i].member) + " and " + rows[j].member + " are both " +
+                            names[i] + " on one object; ";
+        }
+        return text;
     }
 
     /// "Unit, Player": the types a kinds mask accepts.

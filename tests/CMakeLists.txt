@@ -43,7 +43,8 @@ if(TARGET wxl-lua)
     target_link_libraries(wxl-lua-tests PRIVATE wxl::host)
     target_include_directories(wxl-lua-tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_CURRENT_SOURCE_DIR}/../lua/include)
+        ${CMAKE_CURRENT_SOURCE_DIR}/../lua/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include)
     add_dependencies(wxl-lua-tests wxl-lua)
 
     if(MSVC)

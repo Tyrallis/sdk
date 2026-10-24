@@ -37,7 +37,8 @@ namespace wxltest
 {
     // --- wxl.object -------------------------------------------------------------------------
     //
-    // Three objects: 42 the local player (dead), 43 a boar, 44 a chest. Anything else is stale.
+    // Three objects: 42 the local player (dead), 43 a boar, 44 a chest. Anything else is stale,
+    // except the wolves a test spawns: units with a guid, one handle per visibility episode.
 
     struct FakeObjects
     {
@@ -46,8 +47,19 @@ namespace wxltest
         static constexpr wxl_handle kChest  = 44;
         static constexpr wxl_handle kStale  = 7;
 
-        static bool Live(wxl_handle h) { return h == kPlayer || h == kBoar || h == kChest; }
-        static bool IsUnit(wxl_handle h) { return h == kPlayer || h == kBoar; }
+        /// handle -> guid of the spawned units still in view.
+        static std::map<wxl_handle, wxl_guid>& Spawned()
+        {
+            static std::map<wxl_handle, wxl_guid> spawned;
+            return spawned;
+        }
+
+        static void Spawn(wxl_handle h, wxl_guid guid) { Spawned()[h] = guid; }
+        static void Despawn(wxl_handle h) { Spawned().erase(h); }
+
+        static bool IsSpawned(wxl_handle h) { return Spawned().count(h) != 0; }
+        static bool Live(wxl_handle h) { return h == kPlayer || h == kBoar || h == kChest || IsSpawned(h); }
+        static bool IsUnit(wxl_handle h) { return h == kPlayer || h == kBoar || IsSpawned(h); }
 
         static wxl_bool WXL_CALL Valid(wxl_handle h) { return Live(h) ? WXL_TRUE : WXL_FALSE; }
 
@@ -55,13 +67,14 @@ namespace wxltest
         {
             if (h == kPlayer) return 0x100;
             if (h == kBoar) return 0x200;
+            if (IsSpawned(h)) return Spawned()[h];
             return WXL_GUID_NONE;
         }
 
         static uint32_t WXL_CALL Type(wxl_handle h)
         {
             if (h == kPlayer) return WXL_OBJECT_PLAYER;
-            if (h == kBoar) return WXL_OBJECT_UNIT;
+            if (h == kBoar || IsSpawned(h)) return WXL_OBJECT_UNIT;
             if (h == kChest) return WXL_OBJECT_GAMEOBJECT;
             return WXL_OBJECT_UNKNOWN;
         }
@@ -70,7 +83,19 @@ namespace wxltest
         {
             if (guid == 0x100) return kPlayer;
             if (guid == 0x200) return kBoar;
+            for (const auto& spawned : Spawned())
+                if (spawned.second == guid) return spawned.first;
             return WXL_HANDLE_NONE;
+        }
+
+        /// A chest is a game object of type 3.
+        static wxl_result WXL_CALL GameObjectType(wxl_handle h, uint32_t* out)
+        {
+            if (!out) return WXL_E_INVALID;
+            if (!Live(h)) return WXL_E_NOT_FOUND;
+            if (h != kChest) return WXL_E_INVALID;
+            *out = 3;
+            return WXL_OK;
         }
 
         static wxl_handle WXL_CALL LocalPlayer() { return kPlayer; }
@@ -96,7 +121,7 @@ namespace wxltest
             if (!out) return WXL_E_INVALID;
             if (!Live(h)) return WXL_E_NOT_FOUND;
             static const char* names[] = {"Thorgrim", "Boar", "Chest"};
-            const char*        name    = names[h - kPlayer];
+            const char*        name    = IsSpawned(h) ? "Wolf" : names[h - kPlayer];
             *out                       = wxl_str{name, static_cast<uint32_t>(std::strlen(name))};
             return WXL_OK;
         }
@@ -106,7 +131,7 @@ namespace wxltest
             if (!out) return WXL_E_INVALID;
             if (!Live(h)) return WXL_E_NOT_FOUND;
             if (!IsUnit(h)) return WXL_E_INVALID;
-            *out = h == kPlayer ? player : boar;
+            *out = h == kPlayer ? player : h == kBoar ? boar : 50;
             return WXL_OK;
         }
 
@@ -162,6 +187,7 @@ namespace wxltest
                 t.unit_target     = &Target;
                 t.enumerate       = &Enumerate;
                 t.positions       = &Positions;
+                t.gameobject_type = &GameObjectType;
                 return t;
             }();
             return &api;

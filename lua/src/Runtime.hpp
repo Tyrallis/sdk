@@ -125,6 +125,9 @@ namespace wxl::lua
 
         static void WXL_CALL OnNativeEvent(void* user, const void* args);
 
+        /// ObjectDestroy, after every handler: each state forgets the object (ForgetObject).
+        static void WXL_CALL OnObjectGone(void* user, const void* args);
+
         void OnEvent(Slot& slot, const void* args);
         void Dispatch(Slot& slot, const void* args, bool answerable);
         /// Writes an Override's return values, at @p first on the stack, through the slot's
@@ -166,6 +169,9 @@ namespace wxl::lua
         const wxl_host* host_;
         std::thread::id mainThread_;
         Slot            slots_[WXL_EV_COUNT];
+
+        /// ObjectDestroy at the lowest priority, so every mod's handlers see the object first.
+        wxl::Subscription objectGone_;
 
         std::vector<std::unique_ptr<ScriptMod>> mods_;
         std::vector<ScriptMod*>                 pendingReloads_;

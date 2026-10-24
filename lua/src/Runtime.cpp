@@ -3,6 +3,8 @@
 
 #include "Runtime.hpp"
 
+#include "Objects.hpp"
+
 #include "wxl/host/admission.hpp"
 #include "wxl/host/manifest.hpp"
 
@@ -57,6 +59,19 @@ namespace wxl::lua
         // Update drives the queue, the reload poll and onUpdate; UiRenderEnd drives onDraw.
         EnsureNative(slots_[WXL_EV_Update], nullptr);
         EnsureNative(slots_[WXL_EV_UiRenderEnd], nullptr);
+        // An object's Lua identity and the fields stored on it end with it, once every handler
+        // of every mod, Lua or not, has seen it leave.
+        objectGone_ = wxl::Subscribe(WXL_EV_ObjectDestroy, &Runtime::OnObjectGone, this, INT32_MAX);
+    }
+
+    void WXL_CALL Runtime::OnObjectGone(void* user, const void* args)
+    {
+        Runtime* self = static_cast<Runtime*>(user);
+        // Objects belong to the main thread; a runtime raising this elsewhere broke that first.
+        if (!args || std::this_thread::get_id() != self->mainThread_) return;
+        const wxl_handle handle = static_cast<const wxl_object_args*>(args)->object;
+        for (const std::unique_ptr<ScriptMod>& mod : self->mods_)
+            if (mod->Loaded()) ForgetObject(mod->State(), handle);
     }
 
     Runtime::~Runtime()
@@ -258,6 +273,7 @@ namespace wxl::lua
 
     void Runtime::Stop()
     {
+        objectGone_.Reset();
         for (size_t i = mods_.size(); i-- > 0;)
         {
             DropHandlers(*mods_[i]);

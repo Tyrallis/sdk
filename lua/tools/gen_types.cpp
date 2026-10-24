@@ -22,6 +22,9 @@
 
 namespace
 {
+    /// What the object methods' names leave ambiguous; the generator refuses to write then.
+    std::string g_clash;
+
     using wxl::reflect::Event;
     using wxl::reflect::Field;
     using wxl::reflect::Kind;
@@ -224,15 +227,20 @@ namespace
         out << "---A world object, by handle. Every getter answers the value, or nil and why:\n"
                "---\"gone\" for an object that left, \"unsupported\" for a runtime without the read, or\n"
                "---what the object is not (\"a GameObject has no Health\").\n"
+               "---\n"
+               "---One object is one Lua value for as long as it stays in view: the same at every event\n"
+               "---and every lookup, a table key, equal only to itself. A field set on it that is not a\n"
+               "---method's name (`obj.seen = true`) is the mod's own and is kept until the object leaves.\n"
                "---@class wxl.Object\n"
+               "---@field [string] any what the mod stored on the object\n"
                "local Object = {}\n\n"
-               "---Whether the handle still resolves.\n---@return boolean\nfunction Object:Valid() end\n\n"
+               "---Whether the object is still in view.\n---@return boolean|nil valid, string|nil reason\nfunction Object:Valid() end\n\n"
                "---The server's id for the object, as \"0x\" and sixteen hex digits.\n---@return string|nil guid, string|nil reason\nfunction Object:Guid() end\n\n"
-               "---@return wxl.ObjectType|nil type, string|nil reason\nfunction Object:Type() end\n\n"
-               "---@return integer|nil type, string|nil reason\nfunction Object:TypeId() end\n\n"
+               "---The kind's name, \"Unit\", \"GameObject\"...\n---@return wxl.ObjectType|nil type, string|nil reason\nfunction Object:Type() end\n\n"
+               "---The kind as a number.\n---@return integer|nil type, string|nil reason\nfunction Object:TypeId() end\n\n"
                "---@return string|nil name, string|nil reason\nfunction Object:Name() end\n\n"
                "---What a unit targets; nil when nothing in view.\n---@return wxl.Object|nil target, string|nil reason\nfunction Object:Target() end\n\n"
-               "---The handle itself, as \"0x\" and sixteen hex digits: for keys and logs.\n---@return string\nfunction Object:Handle() end\n\n";
+               "---The handle itself, as \"0x\" and sixteen hex digits: for logs.\n---@return string\nfunction Object:Handle() end\n\n";
 
         std::vector<Row> rows = {
 #define WXL_OBJECT_READ(kinds, member, Method, type) Row{#member, wxl::lua::names::k##kinds, #type, false},
@@ -246,6 +254,7 @@ namespace
         std::vector<wxl::lua::names::Member> members;
         for (const Row& row : rows) members.push_back(wxl::lua::names::Member{row.member, row.kinds});
         const std::vector<std::string> luaNames = wxl::lua::names::LuaNames(members);
+        g_clash = wxl::lua::names::Clash(members, luaNames);
 
         std::vector<std::string>                       order;
         std::map<std::string, std::vector<const Row*>> byName;
@@ -282,7 +291,7 @@ namespace
                "---The object the local player controls, or nil while out of the world.\n"
                "---@return wxl.Object|nil\nfunction object.LocalPlayer() end\n\n"
                "---The object carrying a guid, or nil when it is not in view.\n"
-               "---@param guid string|integer\n---@return wxl.Object|nil\nfunction object.FromGuid(guid) end\n\n"
+               "---@param guid string|integer \"0x\" and up to sixteen hex digits, or a whole number\n---@return wxl.Object|nil\nfunction object.FromGuid(guid) end\n\n"
                "---The objects of a type in view, or every object.\n"
                "---@param type? wxl.ObjectType|integer\n---@return wxl.Object[]\nfunction object.InView(type) end\n\n"
                "---@class wxl\n"
@@ -316,6 +325,11 @@ namespace
 int main(int argc, char** argv)
 {
     const std::string text = Generate();
+    if (!g_clash.empty())
+    {
+        std::printf("the object methods' names are ambiguous: %s\n", g_clash.c_str());
+        return 1;
+    }
 
     if (argc == 1)
     {

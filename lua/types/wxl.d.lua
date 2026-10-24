@@ -247,20 +247,27 @@ function registerForEvent(event, fn) end
 ---A world object, by handle. Every getter answers the value, or nil and why:
 ---"gone" for an object that left, "unsupported" for a runtime without the read, or
 ---what the object is not ("a GameObject has no Health").
+---
+---One object is one Lua value for as long as it stays in view: the same at every event
+---and every lookup, a table key, equal only to itself. A field set on it that is not a
+---method's name (`obj.seen = true`) is the mod's own and is kept until the object leaves.
 ---@class wxl.Object
+---@field [string] any what the mod stored on the object
 local Object = {}
 
----Whether the handle still resolves.
----@return boolean
+---Whether the object is still in view.
+---@return boolean|nil valid, string|nil reason
 function Object:Valid() end
 
 ---The server's id for the object, as "0x" and sixteen hex digits.
 ---@return string|nil guid, string|nil reason
 function Object:Guid() end
 
+---The kind's name, "Unit", "GameObject"...
 ---@return wxl.ObjectType|nil type, string|nil reason
 function Object:Type() end
 
+---The kind as a number.
 ---@return integer|nil type, string|nil reason
 function Object:TypeId() end
 
@@ -271,7 +278,7 @@ function Object:Name() end
 ---@return wxl.Object|nil target, string|nil reason
 function Object:Target() end
 
----The handle itself, as "0x" and sixteen hex digits: for keys and logs.
+---The handle itself, as "0x" and sixteen hex digits: for logs.
 ---@return string
 function Object:Handle() end
 
@@ -457,7 +464,7 @@ function Object:State() end
 
 ---For GameObject (gameobject_type).
 ---@return integer|nil value, string|nil reason
-function Object:Type() end
+function Object:GameObjectType() end
 
 ---For GameObject (gameobject_art_kit).
 ---@return integer|nil value, string|nil reason
@@ -510,7 +517,7 @@ local object = {}
 function object.LocalPlayer() end
 
 ---The object carrying a guid, or nil when it is not in view.
----@param guid string|integer
+---@param guid string|integer "0x" and up to sixteen hex digits, or a whole number
 ---@return wxl.Object|nil
 function object.FromGuid(guid) end
 
