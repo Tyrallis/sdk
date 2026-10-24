@@ -371,6 +371,8 @@ namespace wxl::lua
         lua_setfield(L, -2, "log");
         PushObjectModule(L);
         lua_setfield(L, -2, "object");
+        PushFieldModule(L);
+        lua_setfield(L, -2, "field");
 
         lua_createtable(L, 0, 4); // wxl.mod
         lua_pushstring(L, Id().c_str());

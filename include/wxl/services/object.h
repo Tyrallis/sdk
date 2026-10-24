@@ -16,6 +16,9 @@
 #define WXL_OBJECT_SERVICE         "wxl.object"
 #define WXL_OBJECT_SERVICE_VERSION 1
 
+/// write_fields' flags: none is defined yet, so 0 is the only value a runtime accepts.
+#define WXL_FIELD_WRITE_PLAIN 0u
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -193,6 +196,86 @@ typedef struct wxl_object_api
     wxl_result(WXL_CALL* corpse_guild)(wxl_handle corpse, uint32_t* out);
     wxl_result(WXL_CALL* corpse_flags)(wxl_handle corpse, uint32_t* out);
     wxl_result(WXL_CALL* corpse_dynamic_flags)(wxl_handle corpse, uint32_t* out);
+
+    // --- appended in 0.1.9: the descriptor fields, by dword index ---------------------------
+    //
+    // Every object carries a block of dwords the server fills through update packets: its
+    // descriptor fields, OBJECT_FIELD_GUID at dword 0 and each kind's own fields after its
+    // parent's. wxl/update_fields.def names every one of them with its dword index, its size and
+    // what it holds; the getters above read a few of them by name, these reach all of them by
+    // index. A table from a runtime older than this header ends before these members: the typed
+    // facades read struct_size and answer WXL_E_UNSUPPORTED.
+    //
+    // Each of them refuses what it cannot do with WXL_E_INVALID -- a range past the object's
+    // block, a null pointer, a flag it does not know -- and says why in the runtime's log
+    // ("write_fields: dword 0x95 is past a Unit's 0x94").
+
+    /**
+     * @brief The size of the object's descriptor block, in dwords; 0 for a handle that does not
+     *        resolve.
+     *
+     * Each kind's end in update_fields.def (a Unit's 0x94), except for a player other than the
+     * active one: the client keeps the fields past PLAYER_FIELD_PAD_0 -- inventory, skills,
+     * money, experience -- for the player it controls only, so another player's block ends at
+     * 0x144.
+     */
+    uint32_t(WXL_CALL* field_count)(wxl_handle object);
+
+    /// Dwords [first, first + count) of the object's block into @p out, as the client holds them.
+    wxl_result(WXL_CALL* read_fields)(wxl_handle object, uint32_t first, uint32_t count, uint32_t* out);
+
+    /**
+     * @brief The same dwords of many objects at once.
+     *
+     * Writes @p dwords dwords from @p field for each of @p count objects, one after the other,
+     * into @p out, which holds count * dwords. An object that does not answer -- a stale handle,
+     * a block too short for the range -- is written as zeros, and @p results, when not null,
+     * receives each object's result in order: what read_fields would have answered for it.
+     * Returns WXL_OK when the call itself was well formed, whatever each object answered.
+     */
+    wxl_result(WXL_CALL* read_field_many)(const wxl_handle* objects, uint32_t count, uint32_t field,
+                                          uint32_t dwords, uint32_t* out, wxl_result* results);
+
+    /**
+     * @brief Writes dwords [first, first + count) of the object's block in the client.
+     *
+     * A client-side write: the client's copy of the field holds the value from here on, and the
+     * next update of the server that carries the field replaces it, as it replaces anything the
+     * client holds. Nothing else happens -- no handler of the client runs, no model is rebuilt,
+     * the server is not told, and no ObjectFieldChanged is raised -- so a field the client reads
+     * each frame shows the value at once and one it reads on change shows it when it next looks.
+     * OBJECT_FIELD_GUID and OBJECT_FIELD_TYPE, dwords 0 to 2, are the keys the client finds the
+     * object by and are refused.
+     *
+     * @param flags  WXL_FIELD_WRITE_PLAIN. A flag this runtime does not know is refused, so that
+     *               a later one -- a write the runtime keeps re-applying over the server's -- is
+     *               never taken for a plain write.
+     */
+    wxl_result(WXL_CALL* write_fields)(wxl_handle object, uint32_t first, uint32_t count,
+                                       const uint32_t* in, uint32_t flags);
+
+    /**
+     * @brief Asks for ObjectFieldChanged when a field of objects of a type changes.
+     *
+     * Nothing is raised for a field nobody asked for. From this call on, each update of the
+     * server that changes an element of dwords [first, first + count) on an object of @p type --
+     * a wxl_object_type, or WXL_OBJECT_UNKNOWN for every object -- raises one ObjectFieldChanged
+     * per element that changed, with the element's old and new value, once the client has
+     * applied the update: where the client runs its own reactions to a field's change. A field
+     * of a parent kind is watched on the type asked for only: watching UNIT_FIELD_HEALTH for
+     * WXL_OBJECT_PLAYER raises nothing for a creature.
+     *
+     * The range starts and ends on elements (a guid is one element of two dwords) of fields the
+     * client sees change: update_fields.def's watch column. The client finds a change by
+     * comparing an element with the copy it keeps from before the update, and keeps one only for
+     * some fields; the others are refused with WXL_E_UNSUPPORTED and named in the log. The
+     * player's fields past PLAYER_FIELD_PAD_0 (scope local) are seen on the active player only.
+     *
+     * A watch lasts as long as the runtime, across worlds; asking again for what is watched
+     * changes nothing. Every mod subscribed to ObjectFieldChanged receives every watched change,
+     * whoever asked for it.
+     */
+    wxl_result(WXL_CALL* watch_field)(uint32_t type, uint32_t first, uint32_t count);
 } wxl_object_api;
 
 #ifdef __cplusplus

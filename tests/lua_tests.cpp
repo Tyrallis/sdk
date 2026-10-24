@@ -436,6 +436,40 @@ Observe("ObjectScript", "OnTargetChanged", function(previous, current)
     print("no service " .. tostring(valid) .. " " .. tostring(why) .. " " .. tostring(hp) .. " " .. tostring(why2))
 end)
 )lua";
+
+    constexpr const char* kFields = R"lua(
+registerForEvent("onInit", function()
+    local me, boar = wxl.object.LocalPlayer(), wxl.object.FromGuid("0x0000000000000200")
+    local chest = wxl.object.InView("GameObject")[1]
+    print("by name " .. boar:Field("Health") .. " " .. boar:Field("UNIT_FIELD_HEALTH") .. " " ..
+          boar:Field("Unit.Health") .. " at " .. wxl.field.Unit.Health)
+    print("bytes " .. table.concat({me:Field("Bytes0")}, ","))
+    print("float " .. boar:Field("Boundingradius") .. " guid " .. me:Field("Target"))
+    print("element " .. boar:Field("Resistances", 6) .. " of " .. #boar:Fields("Resistances"))
+    print("count " .. me:FieldCount() .. " " .. boar:FieldCount() .. " " .. chest:FieldCount())
+    print("chest " .. chest:Field("GameObject.Flags") .. " " .. chest:Field("OBJECT_FIELD_ENTRY"))
+    local ok, err = pcall(me.Field, me, "Flags")
+    print("ambiguous " .. tostring(ok) .. " " .. err)
+    ok, err = pcall(boar.Field, boar, "Xp")
+    print("unknown " .. err)
+    ok, err = pcall(boar.Field, boar, "Resistances", 7)
+    print("past " .. err)
+    print("set " .. tostring(boar:SetField("Health", 77)) .. " " .. boar:Field("Health"))
+    print("set bytes " .. tostring(me:SetField("Bytes0", {4, 5, 6, 7})) .. " " .. table.concat({me:Field("Bytes0")}, ","))
+    ok, err = pcall(me.SetField, me, "Bytes0", {4, 5, 6, 300})
+    print("set refused " .. err)
+    local many = wxl.object.Fields({me, boar, chest}, "Health")
+    print("many " .. tostring(many[1]) .. " " .. tostring(many[2]) .. " " .. tostring(many[3]))
+    print("watch " .. tostring(wxl.object.Watch("Unit", "Health")) .. " " .. tostring(wxl.object.Watch(nil, "Entry")))
+    print("watch refused " .. tostring(select(2, wxl.object.Watch("Unit", "UNIT_FIELD_CREATEDBY"))))
+end)
+
+Observe("ObjectScript", "OnObjectFieldChanged", function(object, kind, field, count, old, new)
+    local shown = function(v) return type(v) == "table" and table.concat(v, ",") or tostring(v) end
+    print("changed " .. object:Name() .. " " .. kind .. " " .. field .. " " .. count .. " " ..
+          shown(old) .. " -> " .. shown(new))
+end)
+)lua";
 } // namespace
 
 int main(int argc, char** argv)
@@ -989,6 +1023,67 @@ int main(int argc, char** argv)
         Check(gone == "a destroy tag reloaded state health 50 b destroy same true valid true b gone",
               ("after a reload, ObjectDestroy still reaches the reloaded mod first, then the next, and only then "
                "is the object gone in each state: " + gone).c_str());
+
+        host.Shutdown();
+        if (g_failures) sink.Dump();
+    }
+
+    Section("descriptor fields");
+    {
+        using wxltest::FakeObjects;
+        const fs::path mods = MakeTree(scratch, "fields", binary, fs::path());
+        WriteFile(mods / "fields" / "mod.json", LuaManifest("wxl.fields"));
+        WriteFile(mods / "fields" / "init.lua", kFields);
+
+        CaptureSink sink;
+        ModHost     host(Config(mods, sink));
+        host.LoadAll();
+        FakeObjects::Watches().clear();
+        host.Stage(WXL_STAGE_READY);
+
+        Check(sink.Has("[wxl.fields] by name 90 90 90 at 24"),
+              "a field reads by its client name, its kind's and its own, and wxl.field gives its index");
+        Check(sink.Has("[wxl.fields] bytes 1,2,0,1"), "a field of bytes reads as four numbers, low first");
+        Check(sink.Has("[wxl.fields] float 1.5 guid 0x0000000000000200"), "a float as a number, a guid as its string");
+        Check(sink.Has("[wxl.fields] element 0 of 7"), "an element of an array, and the whole array");
+        Check(sink.Has("[wxl.fields] count 1326 148 18"), "FieldCount is the block's size");
+        Check(sink.Has("[wxl.fields] chest 32 0"), "a game object reads its own fields and the object's");
+        Check(sink.Has("[wxl.fields] ambiguous false 'Flags' is both Unit.Flags and Player.Flags on a Player; name one of them"),
+              "a name two kinds of the object have is refused, naming both");
+        Check(sink.Has("[wxl.fields] unknown a Unit has no field 'Xp'"), "a field the kind lacks is an error");
+        Check(sink.Has("[wxl.fields] past UNIT_FIELD_RESISTANCES has 7 elements (0 to 6); 7 is not one of them"),
+              "an element past the last is an error");
+        Check(sink.Has("[wxl.fields] set true 77"), "SetField writes and Field reads it back");
+        Check(sink.Has("[wxl.fields] set bytes true 4,5,6,7"), "a field of bytes is written from a table");
+        Check(sink.Has("[wxl.fields] set refused SetField: UNIT_FIELD_BYTES_0 takes whole numbers from 0 to 255"),
+              "and a byte out of range is refused");
+        Check(sink.Has("[wxl.fields] many 0 77 false"),
+              "wxl.object.Fields reads a list in one call, false where an object has no such field");
+        Check(sink.Has("[wxl.fields] watch true true"), "Watch asks the runtime");
+        Check(FakeObjects::Watches().size() == 2 && FakeObjects::Watches()[0].type == WXL_OBJECT_UNIT &&
+                  FakeObjects::Watches()[0].first == 0x18 && FakeObjects::Watches()[0].count == 1 &&
+                  FakeObjects::Watches()[1].type == WXL_OBJECT_UNKNOWN && FakeObjects::Watches()[1].first == 3,
+              "with the type and the field's dwords; nil is every object");
+        Check(sink.Has("[wxl.fields] watch refused the client does not see UNIT_FIELD_CREATEDBY change: it keeps no copy of it from before an update"),
+              "a field the client does not see change is refused, saying why");
+
+        const float               before = 1.5f, after = 2.0f;
+        uint32_t                  oldBits = 0, newBits = 0;
+        std::memcpy(&oldBits, &before, 4);
+        std::memcpy(&newBits, &after, 4);
+        const wxl_object_field_args health{FakeObjects::kBoar, WXL_OBJECT_UNIT, 0x18, 1, 90, 77};
+        const wxl_object_field_args radius{FakeObjects::kBoar, WXL_OBJECT_UNIT, 0x41, 1, oldBits, newBits};
+        const wxl_object_field_args target{FakeObjects::kPlayer, WXL_OBJECT_PLAYER, 0x12, 2, 0, 0xF130000000001234ull};
+        const wxl_object_field_args bytes{FakeObjects::kPlayer, WXL_OBJECT_PLAYER, 0x17, 1, 0x01000201u, 0x04000201u};
+        host.Raise(WXL_EV_ObjectFieldChanged, &health);
+        host.Raise(WXL_EV_ObjectFieldChanged, &radius);
+        host.Raise(WXL_EV_ObjectFieldChanged, &target);
+        host.Raise(WXL_EV_ObjectFieldChanged, &bytes);
+        Check(sink.Has("[wxl.fields] changed Boar Unit 24 1 90 -> 77"), "OnObjectFieldChanged hands an integer as a number");
+        Check(sink.Has("[wxl.fields] changed Boar Unit 65 1 1.5 -> 2"), "a float as a number");
+        Check(sink.Has("[wxl.fields] changed Thorgrim Player 18 2 0x0000000000000000 -> 0xF130000000001234"),
+              "a guid as its string, nothing lost");
+        Check(sink.Has("[wxl.fields] changed Thorgrim Player 23 1 1,2,0,1 -> 1,2,0,4"), "bytes as a table");
 
         host.Shutdown();
         if (g_failures) sink.Dump();

@@ -16,6 +16,7 @@
 
 #include "wxl/base.hpp"
 #include "wxl/expected.hpp"
+#include "wxl/objects/fields.hpp"
 #include "wxl/services/object.h"
 
 namespace wxl
@@ -56,6 +57,46 @@ namespace wxl
         /// Positions for a whole view, in its order.
         template <class T>
         Expected<std::vector<wxl_vec3>> Positions(const ObjectView<T>& view) const;
+
+        /**
+         * @brief One element of a field for a whole view, in its order, in one call.
+         *
+         *     auto health = wxl::ObjectService().Fields(units, wxl::field::Unit::Health);
+         *     // health[i] is units[i]'s, or why it has none
+         */
+        template <class V, class T>
+        std::vector<Expected<T>> Fields(const ObjectView<V>& view, const field::Field<T>& which,
+                                        uint32_t element = 0) const;
+
+        /**
+         * @brief Asks for ObjectFieldChanged whenever a field changes on objects of a type
+         *        (wxl_object_api::watch_field): the field's own kind unless another is named.
+         *
+         *     wxl::ObjectService().Watch(wxl::field::Unit::Health);                    // units and players
+         *     wxl::ObjectService().Watch(wxl::field::Unit::Health, WXL_OBJECT_PLAYER); // players only
+         *
+         * WXL_E_UNSUPPORTED for a field the client does not see change (the watch column of
+         * update_fields.def) or a runtime older than abi 0.1.9.
+         */
+        template <class T>
+        wxl_result Watch(const field::Field<T>& which) const
+        {
+            return WatchRaw(which.kind, which.index, which.size);
+        }
+
+        template <class T>
+        wxl_result Watch(const field::Field<T>& which, wxl_object_type type) const
+        {
+            return WatchRaw(type, which.index, which.size);
+        }
+
+        /// The same by dword index.
+        wxl_result WatchRaw(wxl_object_type type, uint32_t first, uint32_t count) const
+        {
+            const wxl_object_api* api = Raw();
+            if (!detail::Carries(api, &wxl_object_api::watch_field)) return WXL_E_UNSUPPORTED;
+            return api->watch_field(type, first, count);
+        }
     };
 
     /// Whether this runtime can read world objects at all.

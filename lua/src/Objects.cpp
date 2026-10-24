@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "wxl/events.h"
+#include "wxl/objects/fields.hpp"
 #include "wxl/sdk.hpp"
 #include "wxl/services/object.h"
 
@@ -320,6 +321,215 @@ namespace wxl::lua
             return 1;
         }
 
+        // --- the descriptor fields -----------------------------------------------------------
+        //
+        // obj:Field(name [, element]), obj:Fields(name), obj:SetField(name, value [, element]),
+        // obj:FieldCount(). A name is the client's ("UNIT_FIELD_HEALTH"), the kind's and the
+        // field's ("Unit.Health"), or the field's alone when the object has one of that name
+        // ("Health"). A name the object does not have is an error: it is a mistake in the mod,
+        // not an absence.
+
+        /// The field of the object at argument `at`, or a Lua error naming why there is none.
+        const field::Row& CheckField(lua_State* L, uint32_t kind, int at)
+        {
+            const char*       name      = luaL_checkstring(L, at);
+            bool              ambiguous = false;
+            const field::Row* row       = field::Find(kind, name, &ambiguous);
+            if (row) return *row;
+            if (ambiguous)
+            {
+                std::string owners;
+                uint32_t    count = 0;
+                const field::Row* rows = field::Rows(&count);
+                for (uint32_t i = 0; i < count; ++i)
+                {
+                    if (!field::Carries(kind, rows[i].kind) || std::strcmp(rows[i].code, name) != 0) continue;
+                    if (!owners.empty()) owners += " and ";
+                    owners += std::string(field::KindOf(rows[i].kind)->name) + "." + rows[i].code;
+                }
+                luaL_error(L, "'%s' is both %s on a %s; name one of them", name, owners.c_str(), TypeName(kind));
+            }
+            luaL_error(L, "a %s has no field '%s'; the names are update_fields.def's, like "
+                          "\"UNIT_FIELD_HEALTH\", \"Unit.Health\" or \"Health\"", TypeName(kind), name);
+            return *row; // not reached: luaL_error does not return
+        }
+
+        /// The element at argument `at`, 0 when absent; a Lua error past the field's last.
+        uint32_t CheckElement(lua_State* L, const field::Row& row, int at)
+        {
+            if (lua_isnoneornil(L, at)) return 0;
+            const lua_Integer element = luaL_checkinteger(L, at);
+            if (element < 0 || element >= static_cast<lua_Integer>(row.Elements()))
+                luaL_error(L, "%s has %d element%s (0 to %d); %d is not one of them", row.name,
+                           static_cast<int>(row.Elements()), row.Elements() == 1 ? "" : "s",
+                           static_cast<int>(row.Elements()) - 1, static_cast<int>(element));
+            return static_cast<uint32_t>(element);
+        }
+
+        /// Pushes an element as Field() answers it: the bytes and halves as several values.
+        int PushElementValues(lua_State* L, field::Value value, const uint32_t* dwords)
+        {
+            using field::Value;
+            switch (value)
+            {
+            case Value::u32: lua_pushnumber(L, dwords[0]); return 1;
+            case Value::i32: lua_pushnumber(L, static_cast<int32_t>(dwords[0])); return 1;
+            case Value::f32: lua_pushnumber(L, field::Decode<float>(dwords)); return 1;
+            case Value::guid:
+            case Value::u64: PushGuid(L, field::Decode<uint64_t>(dwords)); return 1;
+            case Value::bytes:
+                for (unsigned i = 0; i < 4; ++i) lua_pushnumber(L, (dwords[0] >> (8 * i)) & 0xFFu);
+                return 4;
+            case Value::u16x2:
+                lua_pushnumber(L, dwords[0] & 0xFFFFu);
+                lua_pushnumber(L, dwords[0] >> 16);
+                return 2;
+            case Value::i16x2:
+                lua_pushnumber(L, static_cast<int16_t>(dwords[0] & 0xFFFFu));
+                lua_pushnumber(L, static_cast<int16_t>(dwords[0] >> 16));
+                return 2;
+            }
+            lua_pushnil(L);
+            return 1;
+        }
+
+        /// Pushes an element as one Lua value: the bytes and halves as a table.
+        void PushElement(lua_State* L, field::Value value, const uint32_t* dwords)
+        {
+            const int top    = lua_gettop(L);
+            const int pushed = PushElementValues(L, value, dwords);
+            if (pushed == 1) return;
+            lua_createtable(L, pushed, 0);
+            for (int i = pushed; i >= 1; --i)
+            {
+                lua_pushvalue(L, top + i);
+                lua_rawseti(L, -2, i);
+            }
+            lua_replace(L, top + 1);
+            lua_settop(L, top + 1);
+        }
+
+        /// A number at `at` as an integer of a range, or a Lua error naming the field.
+        uint32_t CheckPart(lua_State* L, int at, const field::Row& row, double low, double high)
+        {
+            const lua_Number value = luaL_checknumber(L, at);
+            if (value != static_cast<lua_Number>(static_cast<int64_t>(value)) || value < low || value > high)
+                luaL_error(L, "SetField: %s takes whole numbers from %.0f to %.0f", row.name, low, high);
+            return static_cast<uint32_t>(static_cast<int64_t>(value));
+        }
+
+        /// The value at argument `at` as an element's dwords, or a Lua error saying what it takes.
+        void CheckElementValue(lua_State* L, const field::Row& row, int at, uint32_t* dwords)
+        {
+            using field::Value;
+            dwords[0] = dwords[1] = 0;
+            const int    top   = lua_gettop(L);
+            const double parts = row.value == Value::bytes ? 4 : 2;
+            switch (row.value)
+            {
+            case Value::u32: dwords[0] = CheckPart(L, at, row, 0, 4294967295.0); return;
+            case Value::i32: dwords[0] = CheckPart(L, at, row, -2147483648.0, 2147483647.0); return;
+            case Value::f32: field::Encode(static_cast<float>(luaL_checknumber(L, at)), dwords); return;
+            case Value::guid:
+            case Value::u64:
+            {
+                wxl_guid value = 0;
+                if (!ToGuid(L, at, value))
+                    luaL_error(L, "SetField: %s takes a guid: \"0x\" and up to sixteen hex digits, or a "
+                                  "whole number", row.name);
+                field::Encode(value, dwords);
+                return;
+            }
+            case Value::bytes:
+            case Value::u16x2:
+            case Value::i16x2:
+            {
+                luaL_checktype(L, at, LUA_TTABLE);
+                const bool   bytes  = row.value == Value::bytes;
+                const double low    = row.value == Value::i16x2 ? -32768 : 0;
+                const double high   = bytes ? 255 : (row.value == Value::i16x2 ? 32767 : 65535);
+                const int    n      = static_cast<int>(parts);
+                for (int i = 1; i <= n; ++i)
+                {
+                    lua_rawgeti(L, at, i);
+                    if (lua_type(L, -1) != LUA_TNUMBER)
+                        luaL_error(L, "SetField: %s takes a table of %d numbers", row.name, n);
+                    const uint32_t part = CheckPart(L, lua_gettop(L), row, low, high);
+                    dwords[0] |= (part & (bytes ? 0xFFu : 0xFFFFu)) << ((i - 1) * (bytes ? 8 : 16));
+                    lua_settop(L, top);
+                }
+                return;
+            }
+            }
+        }
+
+        int FieldCount(lua_State* L)
+        {
+            const ObjectBox*      box    = CheckBox(L, 1);
+            int                   pushed = 0;
+            const wxl_object_api* api    = Live(L, box, pushed);
+            if (!api) return pushed;
+            if (!wxl::detail::Carries(api, &wxl_object_api::field_count)) return PushFailure(L, WXL_E_UNSUPPORTED);
+            const uint32_t count = api->field_count(box->handle);
+            if (!count) return PushFailure(L, WXL_E_NOT_FOUND);
+            lua_pushnumber(L, count);
+            return 1;
+        }
+
+        int Field(lua_State* L)
+        {
+            const ObjectBox*      box    = CheckBox(L, 1);
+            int                   pushed = 0;
+            const wxl_object_api* api    = Live(L, box, pushed);
+            if (!api) return pushed;
+            const field::Row& row     = CheckField(L, box->kind, 2);
+            const uint32_t    element = CheckElement(L, row, 3);
+            if (!wxl::detail::Carries(api, &wxl_object_api::read_fields)) return PushFailure(L, WXL_E_UNSUPPORTED);
+            uint32_t         dwords[2] = {0, 0};
+            const wxl_result result    = api->read_fields(box->handle, row.index + element * row.Dwords(),
+                                                          row.Dwords(), dwords);
+            if (result != WXL_OK) return PushFailure(L, result);
+            return PushElementValues(L, row.value, dwords);
+        }
+
+        int Fields(lua_State* L)
+        {
+            const ObjectBox*      box    = CheckBox(L, 1);
+            int                   pushed = 0;
+            const wxl_object_api* api    = Live(L, box, pushed);
+            if (!api) return pushed;
+            const field::Row& row = CheckField(L, box->kind, 2);
+            if (!wxl::detail::Carries(api, &wxl_object_api::read_fields)) return PushFailure(L, WXL_E_UNSUPPORTED);
+            std::vector<uint32_t> dwords(row.size);
+            const wxl_result      result = api->read_fields(box->handle, row.index, row.size, dwords.data());
+            if (result != WXL_OK) return PushFailure(L, result);
+            lua_createtable(L, static_cast<int>(row.Elements()), 0);
+            for (uint32_t i = 0; i < row.Elements(); ++i)
+            {
+                PushElement(L, row.value, dwords.data() + i * row.Dwords());
+                lua_rawseti(L, -2, static_cast<int>(i + 1));
+            }
+            return 1;
+        }
+
+        int SetField(lua_State* L)
+        {
+            const ObjectBox*      box    = CheckBox(L, 1);
+            int                   pushed = 0;
+            const wxl_object_api* api    = Live(L, box, pushed);
+            if (!api) return pushed;
+            const field::Row& row = CheckField(L, box->kind, 2);
+            uint32_t          dwords[2];
+            CheckElementValue(L, row, 3, dwords);
+            const uint32_t element = CheckElement(L, row, 4);
+            if (!wxl::detail::Carries(api, &wxl_object_api::write_fields)) return PushFailure(L, WXL_E_UNSUPPORTED);
+            const wxl_result result = api->write_fields(box->handle, row.index + element * row.Dwords(),
+                                                        row.Dwords(), dwords, WXL_FIELD_WRITE_PLAIN);
+            if (result != WXL_OK) return PushFailure(L, result);
+            lua_pushboolean(L, 1);
+            return 1;
+        }
+
         // --- indexing -----------------------------------------------------------------------
 
         /// obj.key: the method of the object's kind (upvalue 1: one methods table per kind), or
@@ -434,13 +644,108 @@ namespace wxl::lua
             }
             return 1;
         }
+
+        /// A type at argument `at` by its name ("Unit"), or every object for nil.
+        uint32_t CheckType(lua_State* L, int at, const char* call)
+        {
+            if (lua_isnoneornil(L, at)) return WXL_OBJECT_UNKNOWN;
+            const char*    name = luaL_checkstring(L, at);
+            const uint32_t type = TypeByName(name);
+            if (type == WXL_OBJECT_UNKNOWN && std::strcmp(name, "Object") != 0)
+                luaL_error(L, "%s: unknown type '%s'; the types are Object (every object), Item, "
+                              "Container, Unit, Player, GameObject, DynamicObject, Corpse",
+                           call, name);
+            return type;
+        }
+
+        /// wxl.object.Fields(objects, name [, element]): one element of a field of every object
+        /// of the list, in its order, read in one call; false for an object that has none.
+        int FieldsOf(lua_State* L)
+        {
+            luaL_checktype(L, 1, LUA_TTABLE);
+            const int count = static_cast<int>(lua_objlen(L, 1));
+            std::vector<wxl_handle> handles;
+            std::vector<uint32_t>   kinds;
+            handles.reserve(count);
+            for (int i = 1; i <= count; ++i)
+            {
+                lua_rawgeti(L, 1, i);
+                const ObjectBox* box = static_cast<const ObjectBox*>(luaL_checkudata(L, -1, kObjectMeta));
+                handles.push_back(box->dead ? WXL_HANDLE_NONE : box->handle);
+                kinds.push_back(box->kind);
+                lua_pop(L, 1);
+            }
+
+            // The name is resolved on the first object's kind, and each object is checked to
+            // carry the field: a list of units and game objects reads the units only.
+            const field::Row* row = nullptr;
+            if (count)
+            {
+                row = &CheckField(L, kinds[0], 2);
+            }
+            else
+            {
+                luaL_checkstring(L, 2);
+                lua_newtable(L);
+                return 1;
+            }
+            const uint32_t        element = CheckElement(L, *row, 3);
+            const wxl_object_api* api     = Api();
+            lua_createtable(L, count, 0);
+            const bool served = api && wxl::detail::Carries(api, &wxl_object_api::read_field_many);
+            std::vector<uint32_t>   values(size_t(count) * row->Dwords(), 0);
+            std::vector<wxl_result> results(count, WXL_E_UNSUPPORTED);
+            if (served)
+                api->read_field_many(handles.data(), static_cast<uint32_t>(count),
+                                     row->index + element * row->Dwords(), row->Dwords(), values.data(),
+                                     results.data());
+            for (int i = 0; i < count; ++i)
+            {
+                if (results[i] == WXL_OK && field::Carries(kinds[i], row->kind))
+                    PushElement(L, row->value, values.data() + size_t(i) * row->Dwords());
+                else
+                    lua_pushboolean(L, 0);
+                lua_rawseti(L, -2, i + 1);
+            }
+            return 1;
+        }
+
+        /// wxl.object.Watch(type, name): ObjectFieldChanged for that field on objects of that
+        /// type (nil for every object), from now on.
+        int Watch(lua_State* L)
+        {
+            const uint32_t        type = CheckType(L, 1, "Watch");
+            const field::Row&     row  = CheckField(L, type, 2);
+            const wxl_object_api* api  = Api();
+            if (!api || !wxl::detail::Carries(api, &wxl_object_api::watch_field))
+                return PushFailure(L, WXL_E_UNSUPPORTED);
+            const wxl_result result = api->watch_field(type, row.index, row.size);
+            if (result == WXL_E_UNSUPPORTED)
+            {
+                lua_pushnil(L);
+                lua_pushfstring(L, "the client does not see %s change on every element: watch "
+                                   "the ones it does by index, see update_fields.def", row.name);
+                if (row.watch == field::Watch::none)
+                {
+                    lua_pop(L, 1);
+                    lua_pushfstring(L, "the client does not see %s change: it keeps no copy of it "
+                                       "from before an update", row.name);
+                }
+                return 2;
+            }
+            if (result != WXL_OK) return PushFailure(L, result);
+            lua_pushboolean(L, 1);
+            return 1;
+        }
     } // namespace
 
     void OpenObjects(lua_State* L)
     {
         const luaL_Reg own[] = {
-            {"Valid", &Valid}, {"Guid", &Guid},     {"Type", &Type},     {"TypeId", &TypeId},
-            {"Name", &Name},   {"Target", &Target}, {"Handle", &Handle}, {nullptr, nullptr},
+            {"Valid", &Valid},       {"Guid", &Guid},         {"Type", &Type},
+            {"TypeId", &TypeId},     {"Name", &Name},         {"Target", &Target},
+            {"Handle", &Handle},     {"Field", &Field},       {"Fields", &Fields},
+            {"SetField", &SetField}, {"FieldCount", &FieldCount}, {nullptr, nullptr},
         };
 
         // Every name a method has, on any kind: what obj.key = value may not use.
@@ -604,13 +909,48 @@ namespace wxl::lua
 
     void PushObjectModule(lua_State* L)
     {
-        lua_createtable(L, 0, 3);
+        lua_createtable(L, 0, 5);
         lua_pushcfunction(L, &LocalPlayer);
         lua_setfield(L, -2, "LocalPlayer");
         lua_pushcfunction(L, &FromGuid);
         lua_setfield(L, -2, "FromGuid");
         lua_pushcfunction(L, &InView);
         lua_setfield(L, -2, "InView");
+        lua_pushcfunction(L, &FieldsOf);
+        lua_setfield(L, -2, "Fields");
+        lua_pushcfunction(L, &Watch);
+        lua_setfield(L, -2, "Watch");
+    }
+
+    void PushFieldModule(lua_State* L)
+    {
+        uint32_t           kinds = 0;
+        const field::Kind* kind  = field::Kinds(&kinds);
+        uint32_t           rows  = 0;
+        const field::Row*  row   = field::Rows(&rows);
+        lua_createtable(L, 0, static_cast<int>(kinds));
+        for (uint32_t k = 0; k < kinds; ++k)
+        {
+            lua_newtable(L);
+            for (uint32_t r = 0; r < rows; ++r)
+            {
+                if (row[r].kind != kind[k].type) continue;
+                lua_pushnumber(L, row[r].index);
+                lua_setfield(L, -2, row[r].code);
+            }
+            lua_setfield(L, -2, kind[k].name);
+        }
+    }
+
+    void PushFieldElement(lua_State* L, uint32_t type, uint32_t index, const uint32_t* dwords)
+    {
+        const field::Row* row = field::RowAt(type, index);
+        if (!row)
+        {
+            lua_pushnumber(L, static_cast<lua_Number>(field::Decode<uint64_t>(dwords)));
+            return;
+        }
+        PushElement(L, row->value, dwords);
     }
 
     void PushGuid(lua_State* L, wxl_guid guid)

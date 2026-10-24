@@ -65,6 +65,12 @@ namespace wxl::reflect
         uint32_t    extent_offset; ///< offsetof that member, 0 when there is none
         /// The enumeration a u32 member holds the values of (a WXL_ARGS_ENUM row); null otherwise.
         const Enum* enumeration = nullptr;
+        /// Whether a u64 member holds the dwords of an update field (a WXL_ARGS_VALUE row): the
+        /// field whose dword index is at `value_field_offset`, of an object whose
+        /// wxl_object_type is at `value_type_offset`. update_fields.def says what it holds.
+        bool     value              = false;
+        uint32_t value_type_offset  = 0;
+        uint32_t value_field_offset = 0;
     };
 
     /// A version of the contract, major.minor.feature, as abi.h numbers it.
@@ -176,7 +182,11 @@ namespace wxl::reflect
 #define WXL_ARGS_ENUM(args, member, type)                                               \
     { #args, #member, uint32_t(offsetof(args, member)), Kind::u32, nullptr, 0,           \
       detail::EnumNamed(#type) },
+#define WXL_ARGS_VALUE(args, member, type, field)                                       \
+    { #args, #member, uint32_t(offsetof(args, member)), Kind::u64, nullptr, 0, nullptr,  \
+      true, uint32_t(offsetof(args, type)), uint32_t(offsetof(args, field)) },
 #include "wxl/fields.def"
+#undef WXL_ARGS_VALUE
 #undef WXL_ARGS_ENUM
 #undef WXL_ARGS_BUFFER
 #undef WXL_ARGS_ANSWER

@@ -70,7 +70,9 @@ namespace wxl::lua::names
     }
 
     /// The methods every object has, written by hand rather than generated from a row.
-    constexpr const char* kHandWritten[] = {"Valid", "Guid", "Type", "TypeId", "Name", "Target", "Handle"};
+    constexpr const char* kHandWritten[] = {"Valid", "Guid",     "Type",   "TypeId",   "Name",
+                                            "Target", "Handle", "Field", "Fields", "SetField",
+                                            "FieldCount"};
 
     inline bool IsHandWritten(const std::string& name)
     {

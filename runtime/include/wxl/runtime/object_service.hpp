@@ -7,6 +7,7 @@
 #define WXL_RUNTIME_OBJECT_SERVICE_HPP
 
 #include <cstdint>
+#include <vector>
 
 #include "wxl/abi.h"
 #include "wxl/events.h"
@@ -54,6 +55,36 @@ namespace wxl::runtime
             (void)guid;
             return nullptr;
         }
+
+        // --- the descriptor fields --------------------------------------------------------------
+
+        /// The object's descriptor block, its dwords as the client holds them (CGObject_C's
+        /// m_obj); nullptr when the runtime cannot reach them, which makes the field calls
+        /// answer WXL_E_UNSUPPORTED.
+        virtual uint32_t* Descriptor(void* object) const
+        {
+            (void)object;
+            return nullptr;
+        }
+
+        /**
+         * @brief Asks the client to report the changes of one element: dwords [first, first +
+         *        dwords) of the fields of `kind`, on every object carrying them, or on the
+         *        active player only when `local`.
+         *
+         * The service asks once per element, the first time a watch covers it. The runtime
+         * keeps asking the client for as long as it runs -- again whenever the client drops its
+         * handlers or the active player comes back -- and hands each report to
+         * ObjectService::FieldChange. False when it cannot.
+         */
+        virtual bool WatchElement(wxl_object_type kind, uint32_t first, uint32_t dwords, bool local) const
+        {
+            (void)kind, (void)first, (void)dwords, (void)local;
+            return false;
+        }
+
+        /// Why a field call was refused, one line for the runtime's log.
+        virtual void Report(const char* line) const { (void)line; }
 
 #define WXL_OBJECT_READ(kinds, member, Method, type) \
     virtual bool Method(void* object, type& out) const = 0;
@@ -121,6 +152,20 @@ namespace wxl::runtime
 
         const HandleTable& Handles() const { return handles_; }
 
+        /**
+         * @brief What the client reported of a watched element, as the event to raise.
+         *
+         * The runtime calls it from the client's mirror handler: the object's guid, the kind
+         * whose fields hold the element, its first dword and size, and the copy of it the
+         * client kept from before the update. Fills @p out and answers true when a watch asked
+         * for that element on the object's type; false otherwise, and nothing is raised.
+         */
+        bool FieldChange(wxl_guid guid, wxl_object_type kind, uint32_t index, uint32_t dwords,
+                         const void* old_value, wxl_object_field_args& out);
+
+        /// Whether a watch asked for dword `index` of `kind` on objects of `type`.
+        bool Watched(wxl_object_type kind, uint32_t index, uint32_t type) const;
+
     private:
         static ObjectService* instance_;
 
@@ -165,6 +210,31 @@ namespace wxl::runtime
         static wxl_result WXL_CALL UnitTargetThunk(wxl_handle unit, wxl_handle* out);
         static uint32_t   WXL_CALL EnumerateThunk(uint32_t type, wxl_handle* out, uint32_t cap);
         static wxl_result WXL_CALL PositionsThunk(const wxl_handle* objects, uint32_t count, wxl_vec3* out);
+
+        static uint32_t   WXL_CALL FieldCountThunk(wxl_handle object);
+        static wxl_result WXL_CALL ReadFieldsThunk(wxl_handle object, uint32_t first, uint32_t count, uint32_t* out);
+        static wxl_result WXL_CALL ReadFieldManyThunk(const wxl_handle* objects, uint32_t count, uint32_t field,
+                                                      uint32_t dwords, uint32_t* out, wxl_result* results);
+        static wxl_result WXL_CALL WriteFieldsThunk(wxl_handle object, uint32_t first, uint32_t count,
+                                                    const uint32_t* in, uint32_t flags);
+        static wxl_result WXL_CALL WatchFieldThunk(uint32_t type, uint32_t first, uint32_t count);
+
+        /// The block of a resolved object and its end, or WXL_E_UNSUPPORTED.
+        wxl_result Block(void* native, uint32_t kind, uint32_t*& dwords, uint32_t& end) const;
+
+        /// Checks [first, first + count) against an object's block, naming what is wrong.
+        wxl_result InBlock(const char* call, void* native, uint32_t kind, uint32_t first,
+                           uint32_t count, uint32_t*& dwords, bool report) const;
+
+        wxl_result Watch(uint32_t type, uint32_t first, uint32_t count);
+
+        /// One line for the log, through the binding.
+        void Refuse(const char* format, ...) const;
+
+        /// Per kind (by wxl_object_type), per dword of the whole block: the types a watch asked
+        /// for, one bit each, and kRegistered once the binding watches the element.
+        static constexpr uint16_t kRegistered = 0x100;
+        std::vector<uint16_t>     watches_[WXL_OBJECT_CORPSE + 1];
 
         ObjectBinding& binding_;
         HandleTable    handles_;

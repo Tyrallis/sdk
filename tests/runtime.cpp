@@ -47,6 +47,7 @@ namespace
         uint32_t        goType = 0;
         uint32_t        spellId = 0;
         wxl_guid        owner   = 0;
+        std::vector<uint32_t> block; ///< the descriptor block; empty for none
     };
 
     /// Every read of the table answering zero, so a row added to it needs nothing here.
@@ -139,6 +140,39 @@ namespace
         bool ContainerSlot(void* o, uint32_t index, wxl_guid& out) const override
         {
             return index < As(o)->numSlots && Give(out, As(o)->slots[index]);
+        }
+
+        uint32_t* Descriptor(void* o) const override
+        {
+            std::vector<uint32_t>& block = As(o)->block;
+            return block.empty() ? nullptr : block.data();
+        }
+
+        /// What the service asked the client to watch, and whether this client can.
+        struct Watched
+        {
+            wxl_object_type kind;
+            uint32_t        first;
+            uint32_t        dwords;
+            bool            local;
+        };
+        mutable std::vector<Watched>     watched;
+        bool                             canWatch = true;
+        mutable std::vector<std::string> reports;
+
+        bool WatchElement(wxl_object_type kind, uint32_t first, uint32_t dwords, bool local) const override
+        {
+            if (!canWatch) return false;
+            watched.push_back(Watched{kind, first, dwords, local});
+            return true;
+        }
+        void Report(const char* line) const override { reports.emplace_back(line); }
+
+        bool Reported(const char* line) const
+        {
+            for (const std::string& report : reports)
+                if (report == line) return true;
+            return false;
         }
 
         bool GameObjectType(void* o, uint32_t& out) const override { return Give(out, As(o)->goType); }
@@ -399,6 +433,118 @@ int main()
         service.Untrack(found);
         binding.held.clear();
         Check(api->from_guid(0x200) == WXL_HANDLE_NONE, "once the client lets it go, nothing resolves");
+    }
+
+    Section("descriptor fields");
+    {
+        FakeObject me;
+        me.guid = 0x700;
+        me.type = WXL_OBJECT_PLAYER;
+        me.block.assign(0x52E, 0u);
+        me.block[0x18] = 4200;
+        FakeObject other;
+        other.guid = 0x710;
+        other.type = WXL_OBJECT_PLAYER;
+        other.block.assign(0x52E, 0u);
+        FakeObject wolf;
+        wolf.guid = 0x720;
+        wolf.type = WXL_OBJECT_UNIT;
+        wolf.block.assign(0x94, 0u);
+        wolf.block[0x18] = 77;
+        FakeObject rock;
+        rock.guid = 0x730;
+        rock.type = WXL_OBJECT_GAMEOBJECT; // no block the runtime can reach
+        binding.localPlayer = &me;
+        binding.held        = {&me, &other, &wolf};
+        const wxl_handle hMe = service.Track(&me), hOther = service.Track(&other);
+        const wxl_handle hWolf = service.Track(&wolf), hRock = service.Track(&rock);
+
+        Check(api->field_count(hMe) == 0x52E && api->field_count(hOther) == 0x144 &&
+                  api->field_count(hWolf) == 0x94 && api->field_count(hRock) == 0 && api->field_count(0xDEAD) == 0,
+              "field_count is the kind's block, a player other than the active one's shorter");
+
+        uint32_t two[2] = {0, 0};
+        Check(api->read_fields(hWolf, 0x18, 1, two) == WXL_OK && two[0] == 77, "read_fields reads by index");
+        Check(api->read_fields(hWolf, 0x93, 2, two) == WXL_E_INVALID &&
+                  binding.Reported("read_fields: dwords 0x93..0x94 run past a Unit's 0x94"),
+              "a range past the block is refused and named");
+        Check(api->read_fields(hOther, 0x27A, 1, two) == WXL_E_INVALID &&
+                  binding.Reported("read_fields: dword 0x27A is past a Player's 0x144: a player other than the "
+                                   "active one has no fields past PLAYER_FIELD_PAD_0"),
+              "and another player's local fields say why they are not there");
+        Check(api->read_fields(hRock, 0, 1, two) == WXL_E_UNSUPPORTED, "an object the runtime cannot reach is unsupported");
+        Check(api->read_fields(0xDEAD, 0, 1, two) == WXL_E_NOT_FOUND, "a stale handle is not found");
+
+        const uint32_t ninety = 90;
+        Check(api->write_fields(hWolf, 0x18, 1, &ninety, WXL_FIELD_WRITE_PLAIN) == WXL_OK && wolf.block[0x18] == 90,
+              "write_fields writes the client's dword");
+        Check(api->write_fields(hWolf, 0x95, 1, &ninety, 0) == WXL_E_INVALID &&
+                  binding.Reported("write_fields: dword 0x95 is past a Unit's 0x94"),
+              "past the block it is refused, as the log says");
+        Check(api->write_fields(hWolf, 0x18, 1, &ninety, 0x1) == WXL_E_INVALID &&
+                  binding.Reported("write_fields: flags 0x1 are not known to this runtime; 0 is a plain write"),
+              "an unknown flag is refused");
+        Check(api->write_fields(hWolf, 0x2, 1, &ninety, 0) == WXL_E_INVALID && wolf.block[0x2] == 0,
+              "the guid and the type are not written");
+
+        const wxl_handle many[] = {hMe, hWolf, 0xDEAD, hOther};
+        uint32_t         out[4] = {1, 1, 1, 1};
+        wxl_result       results[4];
+        Check(api->read_field_many(many, 4, 0x18, 1, out, results) == WXL_OK && out[0] == 4200 && out[1] == 90 &&
+                  out[2] == 0 && results[2] == WXL_E_NOT_FOUND && results[3] == WXL_OK,
+              "read_field_many reads each object, zeros and a result for one that does not answer");
+
+        Check(api->watch_field(WXL_OBJECT_UNIT, 0x18, 1) == WXL_OK && binding.watched.size() == 1 &&
+                  binding.watched[0].kind == WXL_OBJECT_UNIT && binding.watched[0].first == 0x18 &&
+                  !binding.watched[0].local,
+              "watching UNIT_FIELD_HEALTH asks the client once, on the unit's fields");
+        Check(api->watch_field(WXL_OBJECT_PLAYER, 0x18, 1) == WXL_OK && binding.watched.size() == 1,
+              "watching it again for players asks nothing more");
+        Check(api->watch_field(WXL_OBJECT_PLAYER, 0x27A, 1) == WXL_OK && binding.watched.size() == 2 &&
+                  binding.watched[1].kind == WXL_OBJECT_PLAYER && binding.watched[1].local,
+              "PLAYER_XP is watched on the active player");
+        Check(api->watch_field(WXL_OBJECT_UNIT, 0x12, 2) == WXL_OK && binding.watched.size() == 3 &&
+                  binding.watched[2].dwords == 2,
+              "a guid is one element of two dwords");
+        Check(api->watch_field(WXL_OBJECT_UNIT, 0x13, 1) == WXL_E_INVALID &&
+                  binding.Reported("watch_field: dword 0x13 is the second half of an element of UNIT_FIELD_TARGET "
+                                   "(from 0x12); start the range at 0x12"),
+              "half a guid is refused");
+        Check(api->watch_field(WXL_OBJECT_UNIT, 0x10, 2) == WXL_E_UNSUPPORTED &&
+                  binding.Reported("watch_field: UNIT_FIELD_CREATEDBY (dword 0x10) is not one the client sees "
+                                   "change: it keeps no copy of it from before an update"),
+              "a field the client keeps no copy of is unsupported, and named");
+        Check(api->watch_field(WXL_OBJECT_UNIT, 0x95, 1) == WXL_E_INVALID &&
+                  binding.Reported("watch_field: dword 0x95 is past a Unit's 0x94"),
+              "past a kind's block is invalid");
+        Check(api->watch_field(9, 0, 1) == WXL_E_INVALID, "a type past the client's is invalid");
+
+        wxl_object_field_args args{};
+        const uint32_t        was = 80;
+        Check(service.FieldChange(0x720, WXL_OBJECT_UNIT, 0x18, 1, &was, args) && args.object == hWolf &&
+                  args.type == WXL_OBJECT_UNIT && args.field == 0x18 && args.count == 1 && args.old_value == 80 &&
+                  args.new_value == 90,
+              "a reported change becomes the event, the new value read from the block");
+        const uint32_t xp = 5;
+        me.block[0x27A] = 6;
+        Check(service.FieldChange(0x700, WXL_OBJECT_PLAYER, 0x27A, 1, &xp, args) && args.old_value == 5 &&
+                  args.new_value == 6,
+              "the active player's local field too");
+        Check(!service.FieldChange(0x720, WXL_OBJECT_UNIT, 0x3B, 1, &was, args),
+              "a field no watch asked for raises nothing");
+        Check(!service.FieldChange(0x999, WXL_OBJECT_UNIT, 0x18, 1, &was, args),
+              "nor an object the client does not hold");
+
+        api->watch_field(WXL_OBJECT_PLAYER, 0x16, 1);
+        Check(service.FieldChange(0x700, WXL_OBJECT_UNIT, 0x16, 1, &was, args) &&
+                  !service.FieldChange(0x720, WXL_OBJECT_UNIT, 0x16, 1, &was, args),
+              "a unit field watched for players raises for a player and not for a creature");
+
+        binding.canWatch = false;
+        Check(api->watch_field(WXL_OBJECT_UNIT, 0x19, 1) == WXL_E_UNSUPPORTED &&
+                  binding.Reported("watch_field: this runtime cannot watch fields"),
+              "a runtime that cannot watch says so");
+        binding.held.clear();
     }
 
     if (g_failures == 0)

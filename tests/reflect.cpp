@@ -9,6 +9,7 @@
 #include <string_view>
 #include <type_traits>
 
+#include "wxl/objects/fields.hpp"
 #include "wxl/reflect.hpp"
 #include "wxl/sdk.hpp"
 
@@ -325,6 +326,112 @@ int main()
         const wxl::reflect::Event* create = wxl::reflect::Find(WXL_EV_ObjectCreate);
         const wxl::reflect::Field* guid   = create ? wxl::reflect::FieldOf(*create, "guid") : nullptr;
         Check(guid && !guid->enumeration, "a member of another kind has none");
+    }
+
+    std::printf("the update fields cover each kind's block as the client counts it\n");
+    {
+        namespace field = wxl::field;
+        // The client's dwords per kind, s_objDwordCount (0x00AC3D04), in OBJECT_TYPE_ID order:
+        // where each kind's block ends.
+        const uint32_t dwordCount[] = {0x6, 0x40, 0x8A, 0x94, 0x52E, 0x12, 0xC, 0x24};
+        uint32_t           kindCount = 0, rowCount = 0, runCount = 0;
+        const field::Kind* kinds = field::Kinds(&kindCount);
+        const field::Row*  rows  = field::Rows(&rowCount);
+        const field::WatchRun* runs = field::WatchRuns(&runCount);
+        Check(kindCount == 8, "eight kinds, the client's");
+        char what[256];
+        for (uint32_t k = 0; k < kindCount && k < 8; ++k)
+        {
+            const field::Kind& kind = kinds[k];
+            std::snprintf(what, sizeof what, "%s is wxl_object_type %u and ends where s_objDwordCount says, 0x%X",
+                          kind.name, k, dwordCount[k]);
+            Check(static_cast<uint32_t>(kind.type) == k && kind.end == dwordCount[k], what);
+            const field::Kind* parent = field::KindOf(kind.parent);
+            std::snprintf(what, sizeof what, "%s's fields start where its parent's end", kind.name);
+            Check(parent && (k == 0 ? kind.first == 0 : kind.first == parent->end), what);
+            std::snprintf(what, sizeof what, "%s's block ends at its end for every object but another player", kind.name);
+            Check(kind.others_end == (kind.type == WXL_OBJECT_PLAYER ? 0x144u : kind.end), what);
+
+            // Its rows: ascending, contiguous, whole elements, one code name each.
+            uint32_t cursor = kind.first;
+            for (uint32_t i = 0; i < rowCount; ++i)
+            {
+                const field::Row& row = rows[i];
+                if (row.kind != kind.type) continue;
+                std::snprintf(what, sizeof what, "%s starts where the field before it ends (0x%X)", row.name, cursor);
+                Check(row.index == cursor, what);
+                cursor = row.index + row.size;
+                std::snprintf(what, sizeof what, "%s holds whole elements", row.name);
+                Check(row.size && row.size % row.Dwords() == 0, what);
+                for (uint32_t j = i + 1; j < rowCount; ++j)
+                    if (rows[j].kind == row.kind && std::strcmp(rows[j].code, row.code) == 0)
+                    {
+                        std::snprintf(what, sizeof what, "%s and %s share the code name %s", row.name,
+                                      rows[j].name, row.code);
+                        Check(false, what);
+                    }
+                std::snprintf(what, sizeof what, "%s is found by its name and by %s.%s", row.name, kind.name, row.code);
+                const std::string qualified = std::string(kind.name) + "." + row.code;
+                Check(field::Find(kind.type, row.name) == &row && field::Find(kind.type, qualified) == &row &&
+                          field::RowAt(kind.type, row.index + row.size - 1) == &row,
+                      what);
+
+                // The watch column agrees with the WATCH rows, element by element.
+                bool any = false, local = false, none = false;
+                for (uint32_t e = row.index; e < row.index + row.size; e += row.Dwords())
+                {
+                    field::Watch scope = field::WatchOf(kind.type, e);
+                    if (row.Dwords() == 2 && field::WatchOf(kind.type, e + 1) != scope) scope = field::Watch::none;
+                    any |= scope == field::Watch::any;
+                    local |= scope == field::Watch::local;
+                    none |= scope == field::Watch::none;
+                }
+                const field::Watch says = int(any) + int(local) + int(none) > 1 ? field::Watch::some
+                                          : any                                 ? field::Watch::any
+                                          : local                               ? field::Watch::local
+                                                                                : field::Watch::none;
+                std::snprintf(what, sizeof what, "%s's watch column agrees with the WATCH rows", row.name);
+                Check(says == row.watch, what);
+            }
+            std::snprintf(what, sizeof what, "%s's fields cover dwords 0x%X..0x%X", kind.name, kind.first, kind.end);
+            Check(cursor == kind.end, what);
+        }
+        uint32_t last = 0, lastKind = 0;
+        for (uint32_t r = 0; r < runCount; ++r)
+        {
+            const field::Kind* kind = field::KindOf(runs[r].kind);
+            std::snprintf(what, sizeof what, "WATCH run 0x%X..0x%X lies in its kind's block, in order",
+                          runs[r].first, runs[r].end);
+            Check(kind && runs[r].first >= kind->first && runs[r].end <= kind->end && runs[r].first < runs[r].end &&
+                      (runs[r].local ? kind->type == WXL_OBJECT_PLAYER : true) &&
+                      (uint32_t(runs[r].kind) != lastKind || runs[r].local || runs[r].first >= last),
+                  what);
+            if (!runs[r].local) last = runs[r].end;
+            lastKind = uint32_t(runs[r].kind);
+        }
+
+        Check(field::Unit::Health.index == 0x18 && field::Player::Xp.index == 0x27A &&
+                  field::Object::Guid.Dwords() == 2 && field::Unit::Resistances.Elements() == 7,
+              "the constants are the rows: UNIT_FIELD_HEALTH at 0x18, PLAYER_XP at 0x27A");
+        bool ambiguous = false;
+        Check(field::Find(WXL_OBJECT_PLAYER, "Flags", &ambiguous) == nullptr && ambiguous &&
+                  field::Find(WXL_OBJECT_UNIT, "Flags") == field::Find(WXL_OBJECT_UNIT, "UNIT_FIELD_FLAGS") &&
+                  field::Find(WXL_OBJECT_GAMEOBJECT, "Health") == nullptr,
+              "a bare name two kinds of the object have is ambiguous; one of another kind is not found");
+        Check(field::OwnerOf(WXL_OBJECT_PLAYER, 0x18)->type == WXL_OBJECT_UNIT &&
+                  field::OwnerOf(WXL_OBJECT_ITEM, 0x18)->type == WXL_OBJECT_ITEM &&
+                  field::OwnerOf(WXL_OBJECT_UNIT, 0x94) == nullptr,
+              "a dword belongs to the kind along the object's own whose block holds it");
+
+        const wxl::reflect::Event* changed = wxl::reflect::Find(WXL_EV_ObjectFieldChanged);
+        const wxl::reflect::Field* was     = changed ? wxl::reflect::FieldOf(*changed, "old_value") : nullptr;
+        const wxl::reflect::Field* now     = changed ? wxl::reflect::FieldOf(*changed, "new_value") : nullptr;
+        Check(was && now && was->value && now->value && was->kind == Kind::u64 &&
+                  was->value_type_offset == offsetof(wxl_object_field_args, type) &&
+                  now->value_field_offset == offsetof(wxl_object_field_args, field),
+              "ObjectFieldChanged's values know the members naming their field");
+        const wxl::reflect::Version since = wxl::reflect::SinceOf(WXL_EV_ObjectFieldChanged);
+        Check(since.major == 0 && since.minor == 1 && since.feature == 9, "ObjectFieldChanged came with 0.1.9");
     }
 
     std::printf("lookups\n");

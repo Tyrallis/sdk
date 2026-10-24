@@ -169,6 +169,95 @@ namespace wxltest
             return WXL_OK;
         }
 
+        // The descriptor blocks: the player's whole (it is the active player), a unit's for the
+        // boar and the wolves, a game object's for the chest. A few fields are seeded, by index:
+        // UNIT_FIELD_TARGET 0x12, UNIT_FIELD_BYTES_0 0x17, UNIT_FIELD_HEALTH 0x18,
+        // UNIT_FIELD_MAXHEALTH 0x20, UNIT_FIELD_BOUNDINGRADIUS 0x41, GAMEOBJECT_FLAGS 0x9.
+        static std::vector<uint32_t>* Block(wxl_handle h)
+        {
+            static std::map<wxl_handle, std::vector<uint32_t>> blocks;
+            if (!Live(h)) return nullptr;
+            auto found = blocks.find(h);
+            if (found != blocks.end()) return &found->second;
+            std::vector<uint32_t> block(h == kPlayer ? 0x52E : h == kChest ? 0x12 : 0x94, 0u);
+            if (IsUnit(h))
+            {
+                const float radius = 1.5f;
+                std::memcpy(&block[0x41], &radius, sizeof radius);
+                block[0x18] = h == kPlayer ? 0 : 90;
+                block[0x20] = h == kPlayer ? 5000 : 120;
+            }
+            if (h == kPlayer)
+            {
+                block[0x12] = 0x200; // the boar, as a guid of two dwords
+                block[0x17] = 0x01000201u; // race 1, class 2, sex 0, power 1
+            }
+            if (h == kChest) block[0x9] = 32;
+            return &blocks.emplace(h, std::move(block)).first->second;
+        }
+
+        static uint32_t WXL_CALL FieldCount(wxl_handle h)
+        {
+            const std::vector<uint32_t>* block = Block(h);
+            return block ? static_cast<uint32_t>(block->size()) : 0;
+        }
+
+        static wxl_result WXL_CALL ReadFields(wxl_handle h, uint32_t first, uint32_t count, uint32_t* out)
+        {
+            if (!out) return WXL_E_INVALID;
+            const std::vector<uint32_t>* block = Block(h);
+            if (!block) return WXL_E_NOT_FOUND;
+            if (!count || first >= block->size() || count > block->size() - first) return WXL_E_INVALID;
+            std::memcpy(out, block->data() + first, count * sizeof(uint32_t));
+            return WXL_OK;
+        }
+
+        static wxl_result WXL_CALL ReadFieldMany(const wxl_handle* objects, uint32_t count, uint32_t field,
+                                                 uint32_t dwords, uint32_t* out, wxl_result* results)
+        {
+            if ((!objects || !out) && count) return WXL_E_INVALID;
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                const wxl_result result = ReadFields(objects[i], field, dwords, out + i * dwords);
+                if (result != WXL_OK) std::memset(out + i * dwords, 0, dwords * sizeof(uint32_t));
+                if (results) results[i] = result;
+            }
+            return WXL_OK;
+        }
+
+        static wxl_result WXL_CALL WriteFields(wxl_handle h, uint32_t first, uint32_t count, const uint32_t* in,
+                                               uint32_t flags)
+        {
+            if (!in || flags) return WXL_E_INVALID;
+            std::vector<uint32_t>* block = Block(h);
+            if (!block) return WXL_E_NOT_FOUND;
+            if (!count || first < 3 || first >= block->size() || count > block->size() - first) return WXL_E_INVALID;
+            std::memcpy(block->data() + first, in, count * sizeof(uint32_t));
+            return WXL_OK;
+        }
+
+        /// What watch_field was asked, in order. UNIT_FIELD_CREATEDBY (0x10) is refused, as a
+        /// field the client keeps no copy of.
+        struct Watch
+        {
+            uint32_t type;
+            uint32_t first;
+            uint32_t count;
+        };
+
+        static std::vector<Watch>& Watches()
+        {
+            static std::vector<Watch> watches;
+            return watches;
+        }
+
+        static wxl_result WXL_CALL WatchField(uint32_t type, uint32_t first, uint32_t count)
+        {
+            if (first == 0x10) return WXL_E_UNSUPPORTED;
+            Watches().push_back(Watch{type, first, count});
+            return WXL_OK;
+        }
+
         static const wxl_object_api* Table()
         {
             static wxl_object_api api = [] {
@@ -189,6 +278,11 @@ namespace wxltest
                 t.enumerate       = &Enumerate;
                 t.positions       = &Positions;
                 t.gameobject_type = &GameObjectType;
+                t.field_count     = &FieldCount;
+                t.read_fields     = &ReadFields;
+                t.read_field_many = &ReadFieldMany;
+                t.write_fields    = &WriteFields;
+                t.watch_field     = &WatchField;
                 return t;
             }();
             return &api;

@@ -121,6 +121,8 @@ namespace wxl
     //   ptr                   the member's own C type
     //   enum                  the C enumeration its row names: wxl_object_type,
     //                         wxl_script_context, ... (enums.def)
+    //   value                 wxl::FieldValue: an update field's dwords, read with As() by
+    //                         the field's constant (wxl/objects/fields.hpp)
     //
     // wxl::HandlerOf<Event> names the list as a function type. The parameters are read from the
     // struct the runtime raised, which stays the C ABI: a C handler still receives the struct.
@@ -271,6 +273,17 @@ namespace wxl
         };
 
         template <auto M>
+        struct AsFieldValue
+        {
+            static constexpr auto member = M;
+            using type                   = FieldValue;
+            static FieldValue Read(const typename MemberOf<decltype(M)>::owner& args)
+            {
+                return FieldValue(args.*M);
+            }
+        };
+
+        template <auto M>
         struct AsBool
         {
             static constexpr auto member = M;
@@ -357,9 +370,11 @@ namespace wxl
 #define WXL_ARGS_BUFFER(args, member, capacity) AsBuffer<&args::member, &args::capacity>,
 #define WXL_ARGS_PTR(args, member, type)        AsValue<&args::member>,
 #define WXL_ARGS_ENUM(args, member, type)       AsEnum<&args::member, type>,
+#define WXL_ARGS_VALUE(args, member, type, field) AsFieldValue<&args::member>,
 #define WXL_ARGS_END(args) EndOfArgs>; };
 #include "wxl/fields.def"
 #undef WXL_ARGS_END
+#undef WXL_ARGS_VALUE
 #undef WXL_ARGS_ENUM
 #undef WXL_ARGS_PTR
 #undef WXL_ARGS_BUFFER

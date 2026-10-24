@@ -5,6 +5,7 @@
 // passes the same file by linking its own host in place of the fake one.
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <set>
@@ -902,6 +903,70 @@ int main()
         const wxl::Expected<std::vector<wxl_vec3>> positions = objects.Positions(units);
         Check(positions && positions->size() == 2 && (*positions)[0].x == static_cast<float>(units[0].Handle()),
               "positions read in bulk for a whole view");
+    }
+
+    Section("descriptor fields");
+    {
+        using wxltest::FakeObjects;
+        const wxl::ObjectService objects;
+        const wxl::Unit          boar(FakeObjects::kBoar);
+        const wxl::Player        me(FakeObjects::kPlayer);
+        const wxl::GameObject    chest(FakeObjects::kChest);
+
+        const wxl::Expected<int32_t> health = boar.Field(wxl::field::Unit::Health);
+        Check(health && *health == 90, "a field reads through its constant, as the type its row says");
+        const wxl::Expected<std::array<uint8_t, 4>> bytes = me.Field(wxl::field::Unit::Bytes0);
+        Check(bytes && (*bytes)[0] == 1 && (*bytes)[1] == 2 && (*bytes)[3] == 1, "a field of bytes, low first");
+        const wxl::Expected<float> radius = boar.Field(wxl::field::Unit::Boundingradius);
+        Check(radius && *radius == 1.5f, "a float");
+        const wxl::Expected<wxl_guid> target = me.Field(wxl::field::Unit::Target);
+        Check(target && *target == 0x200, "a guid, from its two dwords");
+        Check(chest.Field(wxl::field::Unit::Health).IsInvalid(), "a field of another kind is invalid");
+        Check(boar.Field(wxl::field::Unit::Resistances, 7).IsInvalid(), "as is an element past the last");
+        Check(wxl::Unit(FakeObjects::kStale).Field(wxl::field::Unit::Health).IsNotFound(), "a stale handle is not found");
+        const wxl::Expected<std::vector<int32_t>> resistances = boar.Fields(wxl::field::Unit::Resistances);
+        Check(resistances && resistances->size() == 7, "Fields reads every element");
+        Check(boar.FieldCount().ValueOr(0) == 0x94 && chest.Field(wxl::field::Object::Entry).HasValue(),
+              "a block's size, and the object's own fields on every kind");
+
+        Check(boar.SetField(wxl::field::Unit::Health, 33) == WXL_OK && boar.Field(wxl::field::Unit::Health).ValueOr(0) == 33,
+              "SetField writes an element and Field reads it back");
+        Check(boar.SetField(wxl::field::Object::Guid, wxl_guid(1)) == WXL_E_INVALID, "the guid is not written");
+        const wxl::Expected<std::vector<uint32_t>> raw = boar.RawFields(0x18, 2);
+        Check(raw && (*raw)[0] == 33 && (*raw)[1] == 0, "the raw dwords by index");
+
+        const std::vector<wxl::Expected<int32_t>> many =
+            objects.Fields(objects.InView<>(), wxl::field::Unit::Health);
+        Check(many.size() == 3 && many[0].ValueOr(-1) == 0 && many[1].ValueOr(-1) == 33 && many[2].IsInvalid(),
+              "a field of a whole view in one call, the chest's invalid");
+
+        FakeObjects::Watches().clear();
+        Check(objects.Watch(wxl::field::Unit::Health) == WXL_OK &&
+                  objects.Watch(wxl::field::Unit::Target, WXL_OBJECT_PLAYER) == WXL_OK &&
+                  FakeObjects::Watches().size() == 2 && FakeObjects::Watches()[0].type == WXL_OBJECT_UNIT &&
+                  FakeObjects::Watches()[1].type == WXL_OBJECT_PLAYER && FakeObjects::Watches()[1].count == 2,
+              "Watch asks for the field's kind, or the type named, over the field's dwords");
+        Check(objects.Watch(wxl::field::Unit::Createdby) == WXL_E_UNSUPPORTED, "and passes on a refusal");
+
+        struct Changes final : wxl::ObjectScript
+        {
+            int32_t was = 0, now = 0;
+            void    OnObjectFieldChanged(wxl::Object, wxl_object_type, uint32_t field, uint32_t,
+                                         wxl::FieldValue old_value, wxl::FieldValue new_value) override
+            {
+                if (field != wxl::field::Unit::Health.index) return;
+                was = old_value.As(wxl::field::Unit::Health);
+                now = new_value.As(wxl::field::Unit::Health);
+            }
+        } changes;
+        wxl::ScriptMgr::Add(&changes);
+        const wxl_object_field_args lost{FakeObjects::kBoar, WXL_OBJECT_UNIT, 0x18, 1, 33, uint64_t(uint32_t(-5))};
+        host.Raise(WXL_EV_ObjectFieldChanged, &lost);
+        Check(changes.was == 33 && changes.now == -5, "ObjectFieldChanged hands the values, read by the field's constant");
+        Check(std::is_same_v<wxl::HandlerOf<WXL_EV_ObjectFieldChanged>,
+                             void(wxl::Object, wxl_object_type, uint32_t, uint32_t, wxl::FieldValue, wxl::FieldValue)>,
+              "its handler takes the object, its type, the field, its size and the two values");
+        wxl::ScriptMgr::Remove(&changes);
     }
 
     Section("objects in handlers, and data kept per object");

@@ -63,6 +63,15 @@ namespace wxl::lua
                 lua_pushnumber(L, value);
             return;
         }
+        // An update field's dwords as that field's value: a number, a guid, a table of bytes.
+        if (field.value)
+        {
+            const uint64_t raw       = ReadAt<uint64_t>(args, field.offset);
+            uint32_t       dwords[2] = {static_cast<uint32_t>(raw), static_cast<uint32_t>(raw >> 32)};
+            PushFieldElement(L, ReadAt<uint32_t>(args, field.value_type_offset),
+                             ReadAt<uint32_t>(args, field.value_field_offset), dwords);
+            return;
+        }
         switch (field.kind)
         {
         case Kind::u32: lua_pushnumber(L, ReadAt<uint32_t>(args, field.offset)); return;

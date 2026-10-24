@@ -318,6 +318,13 @@ WXL_EVENTS_SINCE(0, 1, 7, 73)
 /** An addon message of the server is delivered to the interface as CHAT_MSG_ADDON, with its prefix, text and sender. */
 WXL_EVENT(Chat, ChatAddonMessage, 73, wxl_chat_addon_args)
 
+// --- Object, continued ----------------------------------------------------------------------
+
+WXL_EVENTS_SINCE(0, 1, 9, 74)
+
+/** A descriptor field watch_field asked for changed on an object, as an update of the server applied it. */
+WXL_EVENT(Object, ObjectFieldChanged, 74, wxl_object_field_args)
+
 // Give back whatever was defaulted above, so the file can be included again right after with a
 // different selector. What the consumer defined itself is left alone: undefining it here would
 // break the consumer that includes the table twice on purpose.

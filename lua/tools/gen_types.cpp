@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "../src/ObjectNames.hpp"
+#include "wxl/objects/fields.hpp"
 #include "wxl/reflect.hpp"
 
 namespace
@@ -76,6 +77,7 @@ namespace
     std::string LuaTypeOf(const Field& field)
     {
         if (field.enumeration) return AliasOf(*field.enumeration) + "|integer";
+        if (field.value) return "wxl.FieldValue";
         return LuaType(field.kind);
     }
 
@@ -180,7 +182,36 @@ namespace
                "---@alias wxl.Guid string\n\n"
                "---An event's bytes, copied into a string.\n"
                "---@alias wxl.Bytes string\n\n"
-               "---@class wxl.Vec3\n---@field x number\n---@field y number\n---@field z number\n\n";
+               "---@class wxl.Vec3\n---@field x number\n---@field y number\n---@field z number\n\n"
+               "---An element of an update field: a number, a guid's string for a guid or another\n"
+               "---64-bit value, a table of numbers for the bytes or the two halves of a dword.\n"
+               "---@alias wxl.FieldValue number|string|number[]\n\n";
+
+        // --- the update fields (update_fields.def) ----------------------------------------------
+        uint32_t                rowCount  = 0;
+        const wxl::field::Row*  fieldRows = wxl::field::Rows(&rowCount);
+        uint32_t                kindCount = 0;
+        const wxl::field::Kind* kinds     = wxl::field::Kinds(&kindCount);
+        out << "---A field of update_fields.def: the client's name, the kind's and the field's, or\n"
+               "---the field's alone where the object has one of that name.\n---@alias wxl.FieldName\n";
+        for (uint32_t i = 0; i < rowCount; ++i)
+            out << "---| \"" << fieldRows[i].name << "\"\n---| \""
+                << wxl::field::KindOf(fieldRows[i].kind)->name << "." << fieldRows[i].code << "\"\n";
+        out << "\n";
+        for (uint32_t k = 0; k < kindCount; ++k)
+        {
+            out << "---The dword index of every field of a " << kinds[k].name << ".\n---@class wxl.field."
+                << kinds[k].name << "\n";
+            for (uint32_t i = 0; i < rowCount; ++i)
+                if (fieldRows[i].kind == kinds[k].type)
+                    out << "---@field " << fieldRows[i].code << " integer " << fieldRows[i].name << "\n";
+            out << "\n";
+        }
+        out << "---Every field's dword index, by kind: wxl.field.Unit.Health is UNIT_FIELD_HEALTH's.\n"
+               "---@class wxl.field\n";
+        for (uint32_t k = 0; k < kindCount; ++k)
+            out << "---@field " << kinds[k].name << " wxl.field." << kinds[k].name << "\n";
+        out << "\n";
 
         // --- the enumerations (enums.def) -------------------------------------------------------
         uint32_t                  enumCount = 0;
@@ -279,7 +310,18 @@ namespace
                "---The kind as a number.\n---@return integer|nil type, string|nil reason\nfunction Object:TypeId() end\n\n"
                "---@return string|nil name, string|nil reason\nfunction Object:Name() end\n\n"
                "---What a unit targets; nil when nothing in view.\n---@return wxl.Object|nil target, string|nil reason\nfunction Object:Target() end\n\n"
-               "---The handle itself, as \"0x\" and sixteen hex digits: for logs.\n---@return string\nfunction Object:Handle() end\n\n";
+               "---The handle itself, as \"0x\" and sixteen hex digits: for logs.\n---@return string\nfunction Object:Handle() end\n\n"
+               "---The size of the object's descriptor block, in dwords.\n---@return integer|nil count, string|nil reason\nfunction Object:FieldCount() end\n\n"
+               "---One element of a descriptor field: a number, a guid's string, or the four bytes or two\n"
+               "---halves of a dword as that many numbers.\n"
+               "---@param name wxl.FieldName|string\n---@param element? integer 0 for the first\n"
+               "---@return wxl.FieldValue|nil ..., string|nil reason\nfunction Object:Field(name, element) end\n\n"
+               "---Every element of a descriptor field, in order; the bytes and halves as tables.\n"
+               "---@param name wxl.FieldName|string\n---@return wxl.FieldValue[]|nil values, string|nil reason\nfunction Object:Fields(name) end\n\n"
+               "---Writes one element of a descriptor field in the client, until the server's next update\n"
+               "---of it replaces it: a number, a guid, or a table of the bytes or the halves.\n"
+               "---@param name wxl.FieldName|string\n---@param value wxl.FieldValue\n---@param element? integer\n"
+               "---@return boolean|nil written, string|nil reason\nfunction Object:SetField(name, value, element) end\n\n";
 
         std::vector<Row> rows = {
 #define WXL_OBJECT_READ(kinds, member, Method, type) Row{#member, wxl::lua::names::k##kinds, #type, false},
@@ -333,10 +375,19 @@ namespace
                "---@param guid string|integer \"0x\" and up to sixteen hex digits, or a whole number\n---@return wxl.Object|nil\nfunction object.FromGuid(guid) end\n\n"
                "---The objects of a type in view, or every object.\n"
                "---@param type? wxl.ObjectType|integer\n---@return wxl.Object[]\nfunction object.InView(type) end\n\n"
+               "---One element of a field of every object of a list, in its order, in one call; false\n"
+               "---for an object that has none.\n"
+               "---@param objects wxl.Object[]\n---@param name wxl.FieldName|string\n---@param element? integer\n"
+               "---@return (wxl.FieldValue|false)[]\nfunction object.Fields(objects, name, element) end\n\n"
+               "---Asks for ObjectScript's OnObjectFieldChanged whenever the field changes on an object of\n"
+               "---the type (nil for every object), from now on, for every mod observing it.\n"
+               "---@param type wxl.ObjectType|\"Object\"|nil\n---@param name wxl.FieldName|string\n"
+               "---@return boolean|nil watched, string|nil reason\nfunction object.Watch(type, name) end\n\n"
                "---@class wxl\n"
                "---@field mod wxl.ModInfo this mod, from its manifest or its folder\n"
                "---@field runtime wxl.RuntimeInfo the runtime that loaded wxl.lua\n"
                "---@field object wxl.object\n"
+               "---@field field wxl.field every update field's dword index, by kind\n"
                "---@field events table<wxl.Family, string[]> every family's events, as On<Event>\n"
                "wxl = {}\n\n"
                "---Writes a line to the runtime's log, tagged with the mod's id.\n"

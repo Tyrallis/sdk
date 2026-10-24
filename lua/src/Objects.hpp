@@ -27,8 +27,15 @@ namespace wxl::lua
     /// The handle of the object userdata at an index; raises a Lua error for anything else.
     wxl_handle CheckObject(lua_State* L, int index);
 
-    /// Pushes the `wxl.object` table: LocalPlayer, FromGuid, InView.
+    /// Pushes the `wxl.object` table: LocalPlayer, FromGuid, InView, Fields, Watch.
     void PushObjectModule(lua_State* L);
+
+    /// Pushes the `wxl.field` table: kind -> field name -> dword index, from update_fields.def.
+    void PushFieldModule(lua_State* L);
+
+    /// Pushes an element of an update field from its dwords, as Lua reads that field's value:
+    /// a number, a guid's string, or a table of its bytes or halves. Pushes one value.
+    void PushFieldElement(lua_State* L, uint32_t type, uint32_t index, const uint32_t* dwords);
 
     /// A guid as Lua carries it: a hex string, "0x" and sixteen digits, since a double cannot
     /// hold every 64-bit value.
