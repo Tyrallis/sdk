@@ -86,6 +86,64 @@ cmake --build build --config Debug
 ctest --test-dir build -C Debug
 ```
 
+### Run the tests from Linux
+
+The suites are Windows executables. From Linux they build with clang-cl and run under Wine, one
+architecture per tree. Two environment variables set this up: a toolchain file that drives
+clang-cl and lld-link against the MSVC CRT and the Windows SDK (which
+[xwin](https://github.com/Jake-Shadle/xwin) downloads), and an emulator that ctest puts in front
+of every test, as does the build in front of the tools it runs (CMake 3.28 or newer reads it from
+the environment):
+
+```sh
+export CMAKE_TOOLCHAIN_FILE=<toolchain for x86_64-pc-windows-msvc>
+export CMAKE_CROSSCOMPILING_EMULATOR=<path to the wrapper below>
+cmake -S . -B build-x64 -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DWXL_LUAJIT_LIBRARY=<luajit>/src/lua51.lib -DWXL_LUAJIT_INCLUDE_DIR=<luajit>/src
+cmake --build build-x64
+ctest --test-dir build-x64 --output-on-failure
+```
+
+The wrapper runs its arguments under Wine; 32-bit Wine is needed for the x86 tree:
+
+```sh
+#!/bin/sh
+export WINEDEBUG="${WINEDEBUG:--all}"
+exec wine "$@"
+```
+
+`wxl.lua` links LuaJIT, which the tree otherwise fetches and builds with LuaJIT's
+`msvcbuild.bat`. `WXL_LUAJIT_LIBRARY` and `WXL_LUAJIT_INCLUDE_DIR` take one built beforehand
+instead: a static `lua51.lib` for the tree's architecture, built against the dynamic CRT (`/MD`),
+and the directory of its headers. `-DWXL_SDK_LUA=OFF` leaves `wxl.lua` and its tests out
+altogether.
+
+To build that LuaJIT, do the steps of `msvcbuild.bat static` by hand in a checkout's `src/`. The
+host tools are built with the Linux compiler, at the target's pointer size and told the target is
+Windows; the library is compiled with clang-cl, `XWIN` being where xwin put the CRT and the SDK:
+
+```sh
+git show -s --format=%ct > luajit_relver.txt
+gcc -O2 -o minilua host/minilua.c -lm
+./minilua ../dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -D ENDIAN_LE -D FPU -D P64 \
+    -o host/buildvm_arch.h vm_x64.dasc
+./minilua host/genversion.lua
+gcc -O2 -DLUAJIT_OS=LUAJIT_OS_WINDOWS -I. -I../dynasm -o buildvm host/buildvm*.c
+LIBS="lib_base.c lib_math.c lib_bit.c lib_string.c lib_table.c lib_io.c lib_os.c
+      lib_package.c lib_debug.c lib_jit.c lib_ffi.c lib_buffer.c"
+./buildvm -m peobj -o lj_vm.obj
+for m in bcdef ffdef libdef recdef; do ./buildvm -m $m -o lj_$m.h $LIBS; done
+./buildvm -m vmdef -o jit/vmdef.lua $LIBS
+./buildvm -m folddef -o lj_folddef.h lj_opt_fold.c
+clang-cl --target=x86_64-pc-windows-msvc /vctoolsdir $XWIN/crt /winsdkdir $XWIN/sdk \
+    /nologo /c /O2 /MD /D_CRT_SECURE_NO_DEPRECATE \
+    "/D_CRT_STDIO_INLINE=__declspec(dllexport)__inline" lj_*.c lib_*.c
+llvm-lib /nologo /OUT:lua51.lib lj_*.obj lib_*.obj
+```
+
+For x86: `gcc -m32` for both host tools (a multilib gcc), no `-D P64`, `vm_x86.dasc`, and
+`--target=i686-pc-windows-msvc /arch:SSE2`.
+
 ## 🧩 A mod
 
 ```cpp
