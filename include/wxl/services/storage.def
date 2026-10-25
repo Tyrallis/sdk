@@ -42,3 +42,9 @@ WXL_API(storage, redirect, Redirect, result, (str from, str to), shim, generated
         "the latest of two mods' wins.")
 WXL_API(storage, unredirect, Unredirect, result, (str from), shim, generated,
         "Takes the mod's redirect of a name back; not_found for one it did not redirect.")
+
+// MSVC takes a file whose first directive is #ifndef X and whose last is its #endif for one
+// guarded by X, and skips it when it is included again with X defined: this table is read
+// several times in one translation unit. A directive after the rows keeps it from looking so.
+#ifdef WXL_API_TABLE_END
+#endif
