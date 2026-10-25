@@ -411,6 +411,36 @@ and Lua alike from its one row.
 
 `wxl::Service<T>(name, version)` still gives the raw table, for a service these do not cover.
 
+### Profiling memory
+
+`wxl::FootprintService` (abi `0.1.11`) measures where the client's memory goes: Storm's
+allocations by the source file that asked, the big consumers outside Storm, and the address space,
+whose largest free block is what the 32-bit client runs out of first. Counting Storm's allocations
+costs about a tenth of a microsecond on each, so it waits for a mod to start it; start it early,
+in `OnLoad`, to follow everything after:
+
+```cpp
+const wxl::FootprintService footprint;
+footprint.Start();                                   // Storm's allocations from now on
+footprint.WatchPressure(256ull * 1024 * 1024);       // OnMemoryPressure under 256 MB free in one block
+
+// later, on the main thread
+footprint.Snapshot();
+for (const wxl::footprint::Source& source : footprint.Sources())        // largest first
+    wxl::Log(WXL_LOG_INFO, "mymod", "%s: %llu bytes in %llu blocks", source.file.c_str(),
+             (unsigned long long)source.bytes, (unsigned long long)source.count);
+for (const wxl::footprint::Region& region : footprint.Regions())
+    if (region.state == "free")
+        wxl::Log(WXL_LOG_INFO, "mymod", "largest free block: %llu", (unsigned long long)region.largest);
+```
+
+`Categories()`, `Archives()` and `Tables()` read the same picture. To show what your own mod
+holds next to the client's numbers, report it: `footprint.Report("cache", bytes, count)` appears
+among the categories under your mod's id until you report it again or the mod goes. The
+categories overlap (the client's Lua, its databases and its archives' tables are Storm
+allocations too); `include/wxl/services/footprint.h` says what each one counts. The Lua example
+`examples/memory-report/` turns all of it into a report you can read.
+
 ### Resources
 
 Whatever the C boundary hands back as a token comes back as a move-only object that releases in

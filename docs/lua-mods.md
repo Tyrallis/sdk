@@ -692,6 +692,7 @@ Lua -- and `wxl.lua` gives each one a module in the `wxl` table:
 | `wxl.script` | the client's own Lua, the one its interface and addons run in |
 | `wxl.hook` | the points a runtime names for a native detour |
 | `wxl.patch` | bytes written into the client's program; your `mod.json` has to ask for it |
+| `wxl.footprint` | where the client's memory goes: its allocations by source file, its big consumers, its address space |
 
 Every function of these modules answers the way an object's reads do: its value, or `nil` and a
 reason. The reason is a short word: `"unsupported"` when this runtime does not have the service or
@@ -926,6 +927,83 @@ Bytes are written as a Lua string, `"\204"` being the byte 204 (0xCC). `Apply` a
 or `nil` and why; `patch:Restore()` puts the old bytes back. Your mod's patches are put back,
 newest first, when it reloads or stops, so a reload starts from the client as it was. `Matches`
 checks bytes without writing, `Find(bytes, after)` searches the program's constant data for them.
+
+### Where the memory goes: `wxl.footprint`
+
+The original client is a 32-bit program: it has 4 GB of addresses, and it fails when it cannot
+find one free block large enough for what it asks, often long before the total runs out.
+`wxl.footprint` measures where that memory goes, so that you can see what your mod, an addon or a
+zone costs. The example of this section is
+[`examples/memory-report/`](../examples/memory-report/): copy it into `Mods/`, play, and read the
+report it writes into its own folder.
+
+The client asks for nearly all its memory through one allocator, Storm's, and tells it which
+source file is asking. Counting that costs a little on every allocation, so it is off until a mod
+starts it. The example starts it as soon as it loads, before the client loads the world, so that
+everything after is counted:
+
+**`examples/memory-report/init.lua`**
+
+```lua
+local started, why = footprint.Start()
+if not started then
+    print("Storm's allocations are not counted: " .. why)
+end
+footprint.WatchPressure(THRESHOLD)
+```
+
+Only what is allocated after `Start` is followed: a block allocated before it is not counted, and
+neither is its release. `Stop` ends the counting and keeps the last numbers.
+
+`Snapshot()` takes a picture: the counts, what the big consumers outside Storm hold (the
+graphics device's textures and buffers, the sound engine, the client's own Lua, the archives, the
+databases), the heap of every Lua mod, and the address space. The lists read that picture, each
+answering an array of tables, or `nil` and why when the runtime cannot say:
+
+**`examples/memory-report/init.lua`**
+
+```lua
+local function list(name)
+    local rows = footprint[name]()
+    return rows or {}
+end
+```
+
+| List | Each entry |
+|---|---|
+| `Categories()` | `name`, `owner`, `bytes`, `count`, `peak`: one consumer, largest first |
+| `Sources()` | `file`, `bytes`, `count`, `peak`, `allocations`: Storm's allocations of one source file, largest first |
+| `Archives()` | `path`, `priority`, `hash_entries`, `block_entries`, `bytes`: one mounted archive |
+| `Tables()` | `name`, `records`, `record_size`, `bytes`: one loaded client database |
+| `Regions()` | `state`, `type`, `bytes`, `regions`, `largest`: one kind of the address space |
+
+Take the picture in a handler or a callback, on the client's thread, as every Lua mod runs. The
+categories overlap: the client's Lua, its databases and its archives' tables are allocated
+through Storm too, so they are also inside `storm`. The number to watch on the original client is
+the `largest` of the `free` region: an allocation larger than it fails.
+
+`Report(name, bytes, count)` adds a consumer of your own to the picture, shown as
+`<your mod id>/<name>`; a report of 0 and 0 takes it out. `WatchPressure(bytes)` asks for
+`OnMemoryPressure` when the largest free block falls under that many bytes:
+
+**`examples/memory-report/init.lua`**
+
+```lua
+function WorldScript:OnMemoryPressure(largest_free, free, committed, threshold)
+    print(string.format("address space low: the largest free block is %s, under %s; %s committed",
+                        mb(largest_free), mb(threshold), mb(committed)))
+    report("memory pressure")
+end
+```
+
+The runtime looks about once a second, raises the event when the block falls under the
+threshold, and again only once it has risen back above. `OnArchiveMounted` and
+`OnArchiveUnmounted` (`AssetScript`) tell each archive the client mounts or closes, with the size
+of its tables. These came with abi `0.1.11`, so the example's `mod.json` asks for it, and it
+requires `wxl.footprint`, without which it has nothing to report.
+
+The example writes into its own folder with `io.open`, which finds files there. A mod reloads only
+when a file of its code changes, so its reports do not reload it.
 
 ---
 
@@ -1170,6 +1248,11 @@ them in `include/wxl/services/<service>.def`.
 | `wxl.hook.Points()`, `.HasPoint(name)` | the points as `{ name, signature }`; whether one is named |
 | `wxl.patch.Apply(name, address, expected, bytes)` | a `Patch`, `patch:Restore()` to undo; the module needs `wxl.patch` in `mod.json` |
 | `wxl.patch.Matches(address, expected)`, `.Find(bytes, after)` | whether the bytes are there; where they are, after `after` or, left out, from the start |
+| `wxl.footprint.Start()`, `.Stop()`, `.Running()` | `true`: Storm's allocations are counted from now; counting ends; whether it runs (abi `0.1.11`) |
+| `wxl.footprint.Snapshot()` | `true`: the picture the lists read, Lua mods' heaps included |
+| `wxl.footprint.Categories()`, `.Sources()`, `.Archives()`, `.Tables()`, `.Regions()` | the lists of the last picture, as arrays of tables |
+| `wxl.footprint.Report(name, bytes, count)` | `true`: a consumer of the mod's own joins the picture as `<id>/<name>`; 0 and 0 take it out |
+| `wxl.footprint.WatchPressure(bytes)` | `true`: `OnMemoryPressure` when the largest free block falls under it; 0 stops |
 
 ### Object methods
 
@@ -1217,6 +1300,8 @@ A few to start from:
 | | `OnChatAddonMessage` | `type`, `sender`, `sender_guid`, `sender_name`, `prefix`, `text`, `channel`, `gm` | an addon message reached the interface as `CHAT_MSG_ADDON` (abi `0.1.7`) |
 | `GlueScript` | `OnGlueScreenChanged` | `screen`, `previous` | the login screens moved on: `"login"`, `"charselect"`... (abi `0.1.6`) |
 | `ObjectScript` | `OnObjectFieldChanged` | `object`, `type`, `field`, `count`, `old_value`, `new_value` | a descriptor field `wxl.object.Watch` asked for changed (abi `0.1.9`) |
+| `AssetScript` | `OnArchiveMounted`, `OnArchiveUnmounted` | `path`, `priority`, `hash_entries`, `block_entries`, `bytes` | the client mounted an archive, or is about to close one (abi `0.1.11`) |
+| `WorldScript` | `OnMemoryPressure` | `largest_free`, `free`, `committed`, `threshold` | the largest free block of the address space fell under the threshold `wxl.footprint.WatchPressure` set (abi `0.1.11`) |
 
 The families `PlayerScript`, `GlueScript` and `ChatScript`, and `WorldScript`'s `OnZoneChanged`,
 `OnMouseoverChanged` and `OnCVarChanged`, came with `0.1.6`: a mod that uses one asks for
@@ -1226,6 +1311,8 @@ and `OnChatMessage`'s last two parameters, came with `0.1.7`: a mod that uses th
 `"abi": "0.1.7"`. `ObjectScript`'s `OnObjectFieldChanged` and the descriptor fields came with
 `0.1.9`. `0.1.10` brought no event: its `wxl.object.Unwatch` and `wxl.storage.RemoveSearchPath`
 answer `nil, "unsupported"` on an older runtime, as any function the runtime lacks does.
+`AssetScript`'s `OnArchiveMounted` and `OnArchiveUnmounted`, `WorldScript`'s `OnMemoryPressure`
+and the `wxl.footprint` module came with `0.1.11`.
 
 Not every runtime raises every event. Subscribing to one that yours does not raise logs a warning
 naming it, and the handler never runs.
@@ -1268,6 +1355,8 @@ your mod's id first.
 - [`examples/lua-hello/`](../examples/lua-hello/), the example of section 3, to copy and change.
 - [`examples/lua-services/`](../examples/lua-services/), the example of section 6: files, a
   search path, the databases, the client's own Lua.
+- [`examples/memory-report/`](../examples/memory-report/), a mod to keep: where the client's
+  memory goes, written into a report every few minutes.
 - [`lua/types/wxl.d.lua`](../lua/types/wxl.d.lua), for every event, object method and service
   function.
 - [Your first mod](your-first-mod.md), the same platform from C++, for what only native code
