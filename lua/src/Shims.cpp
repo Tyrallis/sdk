@@ -14,12 +14,14 @@
 #include <system_error>
 #include <vector>
 
+#include "Runtime.hpp"
 #include "ScriptMod.hpp"
 #include "Services.hpp"
 #include "wxl/reflect.hpp"
 #include "wxl/sdk.hpp"
 #include "wxl/services/rows.hpp"
 #include "wxl/services/script.h"
+#include "wxl/services/footprint.h"
 #include "wxl/services/storage.h"
 
 namespace wxl::lua::shims
@@ -421,6 +423,136 @@ namespace wxl::lua::shims
             }
             return PushResultFailure(L, WXL_E_NOT_FOUND);
         }
+
+        // --- wxl.footprint: what each mod states about memory -------------------------------
+        //
+        // The host sees every report and threshold of a Lua mod as wxl.lua's. Each mod's are kept
+        // here, named after the mod, so that they go with it.
+
+        struct Reported
+        {
+            ScriptMod*  mod;
+            std::string name; ///< "<mod id>/<name>", as the runtime shows it
+        };
+
+        struct Threshold
+        {
+            ScriptMod* mod;
+            uint64_t   bytes;
+        };
+
+        std::vector<Reported>  g_reported;
+        std::vector<Threshold> g_thresholds;
+
+        const wxl_footprint_api* Footprint() { return wxl::api::Table<wxl_footprint_api>(); }
+
+        /// A whole number argument the script may not leave out, from 0 up.
+        uint64_t CheckCount(lua_State* L, int index, const char* function, const char* parameter)
+        {
+            if (lua_isnoneornil(L, index))
+                luaL_error(L, "wxl.footprint.%s: '%s' (argument %d) is missing; it takes a whole number", function,
+                           parameter, index);
+            const lua_Number value = luaL_checknumber(L, index);
+            if (std::floor(value) != value || value < 0 || value > 9007199254740992.0)
+                luaL_argerror(L, index, "a whole number from 0");
+            return static_cast<uint64_t>(value);
+        }
+
+        /// Reports one name for a mod, and keeps it while it holds anything.
+        wxl_result ReportAs(ScriptMod& mod, const std::string& name, uint64_t bytes, uint64_t count)
+        {
+            const wxl_footprint_api* api = Footprint();
+            if (!api || !wxl::detail::Carries(api, &wxl_footprint_api::report)) return WXL_E_UNSUPPORTED;
+            const wxl_result result = api->report(Str(name), bytes, count);
+            if (result != WXL_OK) return result;
+            const auto known = std::find_if(g_reported.begin(), g_reported.end(),
+                                            [&](const Reported& r) { return r.mod == &mod && r.name == name; });
+            if (bytes == 0 && count == 0)
+            {
+                if (known != g_reported.end()) g_reported.erase(known);
+            }
+            else if (known == g_reported.end())
+                g_reported.push_back(Reported{&mod, name});
+            return WXL_OK;
+        }
+
+        /// Hands the runtime the highest threshold any Lua mod holds, 0 when none does.
+        wxl_result WatchHighest()
+        {
+            const wxl_footprint_api* api = Footprint();
+            if (!api || !wxl::detail::Carries(api, &wxl_footprint_api::watch_pressure)) return WXL_E_UNSUPPORTED;
+            uint64_t highest = 0;
+            for (const Threshold& threshold : g_thresholds) highest = std::max(highest, threshold.bytes);
+            return api->watch_pressure(highest);
+        }
+
+        int L_Snapshot(lua_State* L)
+        {
+            const wxl_footprint_api* api = Footprint();
+            if (!api || !wxl::detail::Carries(api, &wxl_footprint_api::snapshot))
+                return PushResultFailure(L, WXL_E_UNSUPPORTED);
+            if (const Runtime* runtime = Runtime::Instance())
+                for (const std::unique_ptr<ScriptMod>& mod : runtime->Mods())
+                {
+                    lua_State* state = mod->State();
+                    if (!state || !mod->Runs()) continue;
+                    const uint64_t bytes = static_cast<uint64_t>(lua_gc(state, LUA_GCCOUNT, 0)) * 1024u +
+                                           static_cast<uint64_t>(lua_gc(state, LUA_GCCOUNTB, 0));
+                    ReportAs(*mod, mod->Id() + "/heap", bytes, 0);
+                }
+            const wxl_result result = api->snapshot();
+            if (result != WXL_OK) return PushResultFailure(L, result);
+            lua_pushboolean(L, 1);
+            return 1;
+        }
+
+        int L_Report(lua_State* L)
+        {
+            ScriptMod& mod = Self(L);
+            if (lua_isnoneornil(L, 1))
+                return luaL_error(L, "wxl.footprint.Report: 'name' (argument 1) is missing; it takes a string");
+            size_t            size  = 0;
+            const char*       text  = luaL_checklstring(L, 1, &size);
+            const uint64_t    bytes = CheckCount(L, 2, "Report", "bytes");
+            const uint64_t    count = CheckCount(L, 3, "Report", "count");
+            if (size == 0) return PushResultFailure(L, WXL_E_INVALID);
+            const wxl_result result = ReportAs(mod, mod.Id() + "/" + std::string(text, size), bytes, count);
+            if (result != WXL_OK) return PushResultFailure(L, result);
+            lua_pushboolean(L, 1);
+            return 1;
+        }
+
+        int L_WatchPressure(lua_State* L)
+        {
+            ScriptMod&     mod   = Self(L);
+            const uint64_t bytes = CheckCount(L, 1, "WatchPressure", "bytes");
+            g_thresholds.erase(std::remove_if(g_thresholds.begin(), g_thresholds.end(),
+                                              [&](const Threshold& t) { return t.mod == &mod; }),
+                               g_thresholds.end());
+            if (bytes) g_thresholds.push_back(Threshold{&mod, bytes});
+            const wxl_result result = WatchHighest();
+            if (result != WXL_OK) return PushResultFailure(L, result);
+            lua_pushboolean(L, 1);
+            return 1;
+        }
+
+        /// A mod's reports and threshold go with it.
+        void ReleaseFootprint(ScriptMod& mod)
+        {
+            const wxl_footprint_api* api = Footprint();
+            for (size_t i = g_reported.size(); i-- > 0;)
+            {
+                if (g_reported[i].mod != &mod) continue;
+                if (api && wxl::detail::Carries(api, &wxl_footprint_api::report))
+                    api->report(Str(g_reported[i].name), 0, 0);
+                g_reported.erase(g_reported.begin() + static_cast<std::ptrdiff_t>(i));
+            }
+            const size_t before = g_thresholds.size();
+            g_thresholds.erase(std::remove_if(g_thresholds.begin(), g_thresholds.end(),
+                                              [&](const Threshold& t) { return t.mod == &mod; }),
+                               g_thresholds.end());
+            if (g_thresholds.size() != before) WatchHighest();
+        }
     } // namespace
 
     lua_CFunction Find(std::string_view service, std::string_view name)
@@ -429,11 +561,15 @@ namespace wxl::lua::shims
         if (service == "script" && name == "RegisterEvent") return &L_RegisterEvent;
         if (service == "storage" && name == "AddSearchPath") return &L_AddSearchPath;
         if (service == "storage" && name == "RemoveSearchPath") return &L_RemoveSearchPath;
+        if (service == "footprint" && name == "Snapshot") return &L_Snapshot;
+        if (service == "footprint" && name == "Report") return &L_Report;
+        if (service == "footprint" && name == "WatchPressure") return &L_WatchPressure;
         return nullptr;
     }
 
-    void ReleaseFolders(ScriptMod& mod)
+    void ReleaseHeld(ScriptMod& mod)
     {
+        ReleaseFootprint(mod);
         for (size_t i = g_folders.size(); i-- > 0;)
             if (std::find(g_folders[i].holders.begin(), g_folders[i].holders.end(), &mod) != g_folders[i].holders.end())
                 LetGo(i, mod);
@@ -459,7 +595,7 @@ namespace wxl::lua::shims
 
     void Forget(ScriptMod& mod)
     {
-        ReleaseFolders(mod);
+        ReleaseHeld(mod);
         // The state closes right after: its references go with it, nothing to release here.
         for (Function& function : g_functions)
         {

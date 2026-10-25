@@ -181,6 +181,7 @@ namespace service_signatures
 #include "wxl/services/hook.def"
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
+#include "wxl/services/footprint.def"
 #undef WXL_API_CLOSE
 #undef WXL_API
 #undef WXL_API_FIELD
@@ -489,7 +490,7 @@ int main()
         uint32_t                     serviceCount = 0, rowCount = 0;
         const wxl::api::ServiceRow*  services     = wxl::api::Services(&serviceCount);
         const wxl::api::Row*         rows         = wxl::api::Rows(&rowCount);
-        Check(serviceCount == 6, "six service tables: script, storage, data, hook, hook.raw, patch");
+        Check(serviceCount == 7, "seven service tables: script, storage, data, hook, hook.raw, patch, footprint");
 
         // A service's rows follow each other, from the first member after struct_size to the
         // last, one function pointer apart: a member missing from its table, or one the table
@@ -545,8 +546,16 @@ int main()
 
         uint32_t                  fieldCount = 0;
         const wxl::api::FieldRow* fields     = wxl::api::Fields(&fieldCount);
-        Check(fieldCount == 2 && fields[0].of == &wxl::api::TypeTag<wxl_hook_point> &&
-                  fields[1].offset == offsetof(wxl_hook_point, signature),
+        uint32_t hookFields = 0;
+        uint32_t firstHook  = fieldCount;
+        for (uint32_t i = 0; i < fieldCount; ++i)
+            if (fields[i].of == &wxl::api::TypeTag<wxl_hook_point>)
+            {
+                if (firstHook == fieldCount) firstHook = i;
+                ++hookFields;
+            }
+        Check(hookFields == 2 && firstHook + 1 < fieldCount &&
+                  fields[firstHook + 1].offset == offsetof(wxl_hook_point, signature),
               "a struct's fields name it by type, for a list<struct> answer to find them");
     }
 

@@ -91,6 +91,7 @@ namespace wxl::lua
 #include "wxl/services/hook.def"
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
+#include "wxl/services/footprint.def"
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD
 #undef WXL_API_RESOURCE
@@ -113,6 +114,7 @@ namespace wxl::lua
 #include "wxl/services/hook.def"
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
+#include "wxl/services/footprint.def"
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD
 #undef WXL_API_RESOURCE
@@ -470,6 +472,18 @@ namespace wxl::lua
                     wxl_str text;
                     std::memcpy(&text, at, sizeof text);
                     PushText(L, text);
+                }
+                else if (std::strcmp(fields[i].kind, "u64") == 0)
+                {
+                    uint64_t number;
+                    std::memcpy(&number, at, sizeof number);
+                    lua_pushnumber(L, static_cast<lua_Number>(number));
+                }
+                else if (std::strcmp(fields[i].kind, "i32") == 0)
+                {
+                    int32_t number;
+                    std::memcpy(&number, at, sizeof number);
+                    lua_pushnumber(L, number);
                 }
                 else
                 {
@@ -857,6 +871,7 @@ namespace wxl::lua
 #include "wxl/services/hook.def"
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
+#include "wxl/services/footprint.def"
             };
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD
@@ -880,6 +895,7 @@ namespace wxl::lua
 #include "wxl/services/hook.def"
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
+#include "wxl/services/footprint.def"
             };
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD

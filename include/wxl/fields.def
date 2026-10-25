@@ -825,6 +825,35 @@ WXL_ARGS_VALUE(wxl_object_field_args, old_value, type, field)     ///< before th
 WXL_ARGS_VALUE(wxl_object_field_args, new_value, type, field)     ///< as the update left it
 WXL_ARGS_END(wxl_object_field_args)
 
+/**
+ * @brief An archive the client mounted or let go of.
+ *
+ * @ref path is the path it was opened by. The table sizes are its header's: how many entries its
+ * hash and block tables hold. @ref bytes is what its tables and listfile hold in memory when the
+ * event is raised: for a mount the tables just read, for an unmount all it held.
+ */
+WXL_ARGS(wxl_archive_args)
+WXL_ARGS_FIELD(wxl_archive_args, path, str)
+WXL_ARGS_FIELD(wxl_archive_args, priority, i32)        ///< higher wins a name
+WXL_ARGS_FIELD(wxl_archive_args, hash_entries, u32)
+WXL_ARGS_FIELD(wxl_archive_args, block_entries, u32)
+WXL_ARGS_FIELD(wxl_archive_args, bytes, u64)
+WXL_ARGS_END(wxl_archive_args)
+
+/**
+ * @brief The address space is running short.
+ *
+ * Raised when the largest free block falls under the highest threshold a mod asked
+ * wxl.footprint's watch_pressure for, and again only once it has risen back above. An
+ * allocation larger than @ref largest_free fails, however much is free in all.
+ */
+WXL_ARGS(wxl_memory_pressure_args)
+WXL_ARGS_FIELD(wxl_memory_pressure_args, largest_free, u64) ///< the largest free block, in bytes
+WXL_ARGS_FIELD(wxl_memory_pressure_args, free, u64)         ///< every free block together
+WXL_ARGS_FIELD(wxl_memory_pressure_args, committed, u64)    ///< what the process has committed
+WXL_ARGS_FIELD(wxl_memory_pressure_args, threshold, u64)    ///< the threshold it fell under
+WXL_ARGS_END(wxl_memory_pressure_args)
+
 #ifdef WXL_ARGS_ENUM_DEFAULTED
     #undef WXL_ARGS_ENUM
     #undef WXL_ARGS_ENUM_DEFAULTED

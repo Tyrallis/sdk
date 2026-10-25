@@ -75,6 +75,7 @@
 #include "wxl/services/data.h"
 #include "wxl/services/hook.h"
 #include "wxl/services/patch.h"
+#include "wxl/services/footprint.h"
 #include "wxl/services/script.h"
 #include "wxl/services/storage.h"
 
@@ -141,6 +142,7 @@ namespace wxl::api
 #include "wxl/services/hook.def"
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
+#include "wxl/services/footprint.def"
 #undef WXL_API_RESOURCE
 #undef WXL_API_FIELD
 #undef WXL_API_CLOSE
@@ -165,6 +167,8 @@ namespace wxl::api
     template <class K>
     struct Value;
     template <> struct Value<kind::u64> { using type = uint64_t; };
+    template <> struct Value<kind::u32> { using type = uint32_t; };
+    template <> struct Value<kind::i32> { using type = int32_t; };
     template <> struct Value<kind::f64> { using type = double; };
     template <> struct Value<kind::str> { using type = wxl_str; };
     template <> struct Value<kind::boolean> { using type = wxl_bool; };
@@ -314,6 +318,7 @@ namespace wxl::api
 #include "wxl/services/hook.def"
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
+#include "wxl/services/footprint.def"
 #undef WXL_API_FIELD
 #undef WXL_API_CLOSE
 #undef WXL_API_RESOURCE
@@ -399,18 +404,18 @@ namespace wxl::api
     /// One WXL_API_FIELD row.
     struct FieldRow
     {
-        void (*of)();       ///< the struct, as TypeTag<struct>: what a list<struct> answer looks up
+        const void* of;     ///< the struct, as &TypeTag<struct>: what a list<struct> answer looks up
         const char* type;   ///< the struct's name
         const char* member;
         const char* kind;   ///< as written: "str", "u32"
         uint32_t    offset;
     };
 
-    /// One address per type, which is how a field row names its struct.
+    /// One address per type, which is how a field row names its struct. A variable, and a
+    /// writable one: a linker folds identical functions and constants into one address, never
+    /// two writable variables.
     template <class T>
-    void TypeTag()
-    {
-    }
+    inline char TypeTag = 0;
 
     namespace detail
     {
@@ -427,6 +432,7 @@ namespace wxl::api
 #include "wxl/services/hook.def"
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
+#include "wxl/services/footprint.def"
         };
 #undef WXL_API_FIELD
 #undef WXL_API_CLOSE
@@ -450,6 +456,7 @@ namespace wxl::api
 #include "wxl/services/hook.def"
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
+#include "wxl/services/footprint.def"
         };
 #undef WXL_API_FIELD
 #undef WXL_API_CLOSE
@@ -469,6 +476,7 @@ namespace wxl::api
 #include "wxl/services/hook.def"
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
+#include "wxl/services/footprint.def"
         };
 #undef WXL_API_FIELD
 #undef WXL_API_CLOSE
@@ -489,6 +497,7 @@ namespace wxl::api
 #include "wxl/services/hook.def"
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
+#include "wxl/services/footprint.def"
         };
 #undef WXL_API_FIELD
 #undef WXL_API_CLOSE

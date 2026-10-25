@@ -325,6 +325,17 @@ WXL_EVENTS_SINCE(0, 1, 9, 74)
 /** A descriptor field watch_field asked for changed on an object, as an update of the server applied it. */
 WXL_EVENT(Object, ObjectFieldChanged, 74, wxl_object_field_args)
 
+// --- Asset and World, continued: where the memory goes ----------------------------------------
+
+WXL_EVENTS_SINCE(0, 1, 11, 75)
+
+/** The client mounted an archive, with its tables read. */
+WXL_EVENT(Asset, ArchiveMounted,   75, wxl_archive_args)
+/** The client is about to close an archive it mounted. */
+WXL_EVENT(Asset, ArchiveUnmounted, 76, wxl_archive_args)
+/** The largest free block of the address space fell under the threshold a mod watches (wxl.footprint). */
+WXL_EVENT(World, MemoryPressure,   77, wxl_memory_pressure_args)
+
 // Give back whatever was defaulted above, so the file can be included again right after with a
 // different selector. What the consumer defined itself is left alone: undefining it here would
 // break the consumer that includes the table twice on purpose.

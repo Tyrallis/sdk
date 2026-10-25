@@ -27,6 +27,7 @@
 #include "wxl/services/net.h"
 #include "wxl/services/object.h"
 #include "wxl/services/patch.h"
+#include "wxl/services/footprint.h"
 #include "wxl/services/script.h"
 #include "wxl/services/storage.h"
 #include "wxl/services/ui.h"
@@ -825,6 +826,136 @@ namespace wxltest
                 t.restore_table = &RestoreTable;
                 t.served_from   = &ServedFrom;
                 t.is_loaded     = &IsLoaded;
+                return t;
+            }();
+            return &api;
+        }
+    };
+
+    // --- wxl.footprint ----------------------------------------------------------------------
+    //
+    // A fixed picture of a client: two Storm sources, a few consumers, two archives, a database,
+    // the address space of a 32-bit process running short. What mods report joins the
+    // categories; the last threshold asked for is kept.
+
+    struct FakeFootprint
+    {
+        struct Reported
+        {
+            uint64_t bytes;
+            uint64_t count;
+        };
+
+        static bool&     Running() { static bool running = false; return running; }
+        static uint32_t& Snapshots() { static uint32_t snapshots = 0; return snapshots; }
+        static uint64_t& Threshold() { static uint64_t threshold = 0; return threshold; }
+        static std::map<std::string, Reported>& Reports()
+        {
+            static std::map<std::string, Reported> reports;
+            return reports;
+        }
+
+        static wxl_str S(const char* text) { return wxl_str{text, static_cast<uint32_t>(std::strlen(text))}; }
+
+        static wxl_result WXL_CALL Start() { Running() = true; return WXL_OK; }
+        static void WXL_CALL Stop() { Running() = false; }
+        static wxl_bool WXL_CALL IsRunning() { return Running() ? WXL_TRUE : WXL_FALSE; }
+        static wxl_result WXL_CALL Snapshot() { ++Snapshots(); return WXL_OK; }
+
+        static uint32_t WXL_CALL Categories(wxl_footprint_category* out, uint32_t capacity)
+        {
+            static const struct { const char* name; uint64_t bytes, count, peak; } kFixed[] = {
+                {"storm", 900u << 20, 1500000, 950u << 20},
+                {"textures.managed", 400u << 20, 6000, 400u << 20},
+                {"sound", 40u << 20, 0, 48u << 20},
+            };
+            const uint32_t fixed = 3;
+            const uint32_t total = fixed + static_cast<uint32_t>(Reports().size());
+            uint32_t       i     = 0;
+            for (; out && i < capacity && i < fixed; ++i)
+                out[i] = wxl_footprint_category{sizeof(wxl_footprint_category), S(kFixed[i].name), S("client"),
+                                                kFixed[i].bytes, kFixed[i].count, kFixed[i].peak};
+            for (const auto& [name, reported] : Reports())
+            {
+                if (!out || i >= capacity) break;
+                out[i++] = wxl_footprint_category{sizeof(wxl_footprint_category), S(name.c_str()), S("wxl.lua"),
+                                                  reported.bytes, reported.count, reported.bytes};
+            }
+            return total;
+        }
+
+        static uint32_t WXL_CALL Sources(wxl_footprint_source* out, uint32_t capacity)
+        {
+            static const wxl_footprint_source kRows[] = {
+                {sizeof(wxl_footprint_source), S("new"), 500u << 20, 1000000, 520u << 20, 9000000},
+                {sizeof(wxl_footprint_source), S(".\\WowClientDB.cpp"), 60u << 20, 900, 60u << 20, 900},
+            };
+            for (uint32_t i = 0; out && i < capacity && i < 2; ++i) out[i] = kRows[i];
+            return 2;
+        }
+
+        static uint32_t WXL_CALL Archives(wxl_footprint_archive* out, uint32_t capacity)
+        {
+            static const wxl_footprint_archive kRows[] = {
+                {sizeof(wxl_footprint_archive), S("Data\\common.MPQ"), 0, 65536, 40000, 3u << 20},
+                {sizeof(wxl_footprint_archive), S("Data\\patch-3.MPQ"), 30, 16384, 9000, 1u << 20},
+            };
+            for (uint32_t i = 0; out && i < capacity && i < 2; ++i) out[i] = kRows[i];
+            return 2;
+        }
+
+        static uint32_t WXL_CALL Tables(wxl_footprint_table* out, uint32_t capacity)
+        {
+            if (out && capacity)
+                out[0] = wxl_footprint_table{sizeof(wxl_footprint_table), S("DBFilesClient\\Spell.dbc"), 49839, 680,
+                                             40u << 20};
+            return 1;
+        }
+
+        static uint32_t WXL_CALL Regions(wxl_footprint_region* out, uint32_t capacity)
+        {
+            static const wxl_footprint_region kRows[] = {
+                {sizeof(wxl_footprint_region), S("committed"), S("private"), 2600ull << 20, 9000, 64u << 20},
+                {sizeof(wxl_footprint_region), S("committed"), S("image"), 120u << 20, 400, 16u << 20},
+                {sizeof(wxl_footprint_region), S("free"), S(""), 700u << 20, 3000, 90u << 20},
+            };
+            for (uint32_t i = 0; out && i < capacity && i < 3; ++i) out[i] = kRows[i];
+            return 3;
+        }
+
+        static wxl_result WXL_CALL Report(wxl_str name, uint64_t bytes, uint64_t count)
+        {
+            if (!name.size) return WXL_E_INVALID;
+            const std::string key(name.data, name.size);
+            if (bytes == 0 && count == 0)
+                Reports().erase(key);
+            else
+                Reports()[key] = Reported{bytes, count};
+            return WXL_OK;
+        }
+
+        static wxl_result WXL_CALL WatchPressure(uint64_t bytes)
+        {
+            Threshold() = bytes;
+            return WXL_OK;
+        }
+
+        static const wxl_footprint_api* Table()
+        {
+            static wxl_footprint_api api = [] {
+                wxl_footprint_api t{};
+                t.struct_size    = sizeof(wxl_footprint_api);
+                t.start          = &Start;
+                t.stop           = &Stop;
+                t.running        = &IsRunning;
+                t.snapshot       = &Snapshot;
+                t.categories     = &Categories;
+                t.sources        = &Sources;
+                t.archives       = &Archives;
+                t.tables         = &Tables;
+                t.regions        = &Regions;
+                t.report         = &Report;
+                t.watch_pressure = &WatchPressure;
                 return t;
             }();
             return &api;

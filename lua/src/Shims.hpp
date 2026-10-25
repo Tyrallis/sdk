@@ -20,6 +20,17 @@
 //
 // A mod's folders leave the search when it is disabled or its state closes; one that two mods
 // added stays until both have let it go.
+//
+// Three keep what a mod states about memory, also seen by the host as wxl.lua's:
+//
+//   wxl.footprint.Snapshot()                            reports the heap of every Lua mod as
+//                                                       "<id>/heap", then takes the picture
+//   wxl.footprint.Report(name, bytes, count)            a consumer of the mod's own, reported
+//                                                       as "<id>/<name>"
+//   wxl.footprint.WatchPressure(bytes)                  the mod's threshold; the highest of all
+//                                                       Lua mods' is wxl.lua's
+//
+// They are taken back when the mod is disabled or its state closes.
 
 #ifndef WXL_LUA_SHIMS_HPP
 #define WXL_LUA_SHIMS_HPP
@@ -47,8 +58,9 @@ namespace wxl::lua
         /// Everything a mod registered ends with its state: called before the state closes.
         void Forget(ScriptMod& mod);
 
-        /// The folders a mod added leave the search path: it is disabled, or its state closes.
-        void ReleaseFolders(ScriptMod& mod);
+        /// What a mod holds goes: the folders it added leave the search path, its footprint
+        /// reports and its pressure threshold are taken back. It is disabled, or its state closes.
+        void ReleaseHeld(ScriptMod& mod);
 
         /// Whether a registered function is running, inside the client's script: no mod's state
         /// may be closed then.

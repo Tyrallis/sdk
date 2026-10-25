@@ -310,6 +310,23 @@ namespace
                    "---it did not add.\n"
                    "---@param directory string\n---@return true|nil ok\n---@return string|nil reason\n"
                    "function " + owner + ".RemoveSearchPath(directory) end\n\n";
+        if (name == "Snapshot")
+            return "---Takes the picture the lists read: Storm's counts, the client's consumers, the address space,\n"
+                   "---and the heap of every Lua mod, each shown as its own category. On the main thread.\n"
+                   "---@return true|nil ok\n---@return string|nil reason\n"
+                   "function " + owner + ".Snapshot() end\n\n";
+        if (name == "Report")
+            return "---States one consumer of this mod's own, shown in Categories() as \"<mod id>/<name>\" until the\n"
+                   "---mod reports it again or goes; 0 bytes and 0 count remove it.\n"
+                   "---@param name string\n---@param bytes integer\n---@param count integer\n"
+                   "---@return true|nil ok\n---@return string|nil reason\n"
+                   "function " + owner + ".Report(name, bytes, count) end\n\n";
+        if (name == "WatchPressure")
+            return "---Raises MemoryPressure when the largest free block of the address space falls under this\n"
+                   "---many bytes, and again only once it has risen back above; 0 stops. Kept for this mod until it\n"
+                   "---goes; the highest threshold any mod holds is the one the runtime watches.\n"
+                   "---@param bytes integer\n---@return true|nil ok\n---@return string|nil reason\n"
+                   "function " + owner + ".WatchPressure(bytes) end\n\n";
         return std::string();
     }
 

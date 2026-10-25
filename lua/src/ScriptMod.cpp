@@ -254,7 +254,7 @@ namespace wxl::lua
     {
         disabled_ = true;
         fieldWatches_.Release();
-        shims::ReleaseFolders(*this);
+        shims::ReleaseHeld(*this);
     }
 
     // --- calling in ------------------------------------------------------------------------

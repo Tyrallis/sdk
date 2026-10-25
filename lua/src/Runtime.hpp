@@ -88,6 +88,8 @@ namespace wxl::lua
         // --- the service ------------------------------------------------------------------
 
         uint32_t   Count() const { return static_cast<uint32_t>(mods_.size()); }
+        /// Every script mod, running or not, in load order.
+        const std::vector<std::unique_ptr<ScriptMod>>& Mods() const { return mods_; }
         uint32_t   Poll();
         wxl_result Reload(const char* id);
 

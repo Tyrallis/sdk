@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
+//
+// wxl.footprint as data: one row per member of wxl_footprint_api, in member order. The shapes
+// and their columns are described in wxl/services/rows.hpp.
+
+#ifndef WXL_API
+#error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including footprint.def"
+#endif
+
+WXL_API_SERVICE(footprint, WXL_FOOTPRINT_SERVICE, WXL_FOOTPRINT_SERVICE_VERSION, safe,
+                "Where the client's memory goes: Storm's allocations by source file, the big consumers, the address space.")
+
+WXL_API_FIELD(wxl_footprint_category, name, str)
+WXL_API_FIELD(wxl_footprint_category, owner, str)
+WXL_API_FIELD(wxl_footprint_category, bytes, u64)
+WXL_API_FIELD(wxl_footprint_category, count, u64)
+WXL_API_FIELD(wxl_footprint_category, peak, u64)
+
+WXL_API_FIELD(wxl_footprint_source, file, str)
+WXL_API_FIELD(wxl_footprint_source, bytes, u64)
+WXL_API_FIELD(wxl_footprint_source, count, u64)
+WXL_API_FIELD(wxl_footprint_source, peak, u64)
+WXL_API_FIELD(wxl_footprint_source, allocations, u64)
+
+WXL_API_FIELD(wxl_footprint_archive, path, str)
+WXL_API_FIELD(wxl_footprint_archive, priority, i32)
+WXL_API_FIELD(wxl_footprint_archive, hash_entries, u32)
+WXL_API_FIELD(wxl_footprint_archive, block_entries, u32)
+WXL_API_FIELD(wxl_footprint_archive, bytes, u64)
+
+WXL_API_FIELD(wxl_footprint_table, name, str)
+WXL_API_FIELD(wxl_footprint_table, records, u32)
+WXL_API_FIELD(wxl_footprint_table, record_size, u32)
+WXL_API_FIELD(wxl_footprint_table, bytes, u64)
+
+WXL_API_FIELD(wxl_footprint_region, state, str)
+WXL_API_FIELD(wxl_footprint_region, type, str)
+WXL_API_FIELD(wxl_footprint_region, bytes, u64)
+WXL_API_FIELD(wxl_footprint_region, regions, u32)
+WXL_API_FIELD(wxl_footprint_region, largest, u64)
+
+WXL_API(footprint, start, Start, result, (), generated, generated,
+        "Starts counting Storm's allocations from zero: only what is allocated from now on is followed.")
+WXL_API(footprint, stop, Stop, none, (), generated, by_hand,
+        "Stops counting; the last counts stay in the next snapshot.")
+WXL_API(footprint, running, Running, boolean, (), generated, generated,
+        "Whether accounting runs.")
+WXL_API(footprint, snapshot, Snapshot, result, (), shim, generated,
+        "Takes the picture the lists read: counts, the client's consumers, the address space. On the main thread.")
+WXL_API(footprint, categories, Categories, list<wxl_footprint_category>, (), generated, by_hand,
+        "The consumers of the last snapshot, largest first: name, owner, bytes, count, peak.")
+WXL_API(footprint, sources, Sources, list<wxl_footprint_source>, (), generated, by_hand,
+        "Storm's allocations of the last snapshot by source file, largest first: file, bytes, count, peak, allocations.")
+WXL_API(footprint, archives, Archives, list<wxl_footprint_archive>, (), generated, by_hand,
+        "The mounted archives of the last snapshot: path, priority, hash_entries, block_entries, bytes.")
+WXL_API(footprint, tables, Tables, list<wxl_footprint_table>, (), generated, by_hand,
+        "The client databases of the last snapshot, by name: name, records, record_size, bytes.")
+WXL_API(footprint, regions, Regions, list<wxl_footprint_region>, (), generated, by_hand,
+        "The address space of the last snapshot: state, type, bytes, regions, largest.")
+WXL_API(footprint, report, Report, result, (str name, u64 bytes, u64 count), shim, generated,
+        "States one consumer of the mod's own, shown under its id until it reports it again or goes; 0 and 0 remove it.")
+WXL_API(footprint, watch_pressure, WatchPressure, result, (u64 bytes), shim, generated,
+        "Raises MemoryPressure when the largest free block of the address space falls under this many bytes; 0 stops.")

@@ -1219,6 +1219,7 @@
 ---@field OnZoneChanged fun(self: WorldScript, area_id: integer, subzone_id: integer, wmo_group_id: integer, zone_text: string, subzone_text: string, real_zone_text: string, indoors: boolean, new_area: boolean)
 ---@field OnMouseoverChanged fun(self: WorldScript, previous: wxl.Object|nil, previous_guid: wxl.Guid, current: wxl.Object|nil, current_guid: wxl.Guid)
 ---@field OnCVarChanged fun(self: WorldScript, name: string, previous: string, value: string)
+---@field OnMemoryPressure fun(self: WorldScript, largest_free: integer, free: integer, committed: integer, threshold: integer)
 WorldScript = {}
 
 ---@class RenderScript
@@ -1265,6 +1266,8 @@ ObjectScript = {}
 ---@field OnFileOpen fun(self: AssetScript, path: string, redirect: string|nil): string|nil answers through redirect
 ---@field OnFileOpened fun(self: AssetScript, path: string, found: boolean, size: integer)
 ---@field OnClientDbLoaded fun(self: AssetScript, name: string, records: lightuserdata|nil, record_count: integer, record_size: integer)
+---@field OnArchiveMounted fun(self: AssetScript, path: string, priority: integer, hash_entries: integer, block_entries: integer, bytes: integer)
+---@field OnArchiveUnmounted fun(self: AssetScript, path: string, priority: integer, hash_entries: integer, block_entries: integer, bytes: integer)
 AssetScript = {}
 
 ---@class NetScript
@@ -1393,6 +1396,9 @@ ChatScript = {}
 ---@overload fun(family: "CombatScript", method: "OnCombatEnergize", handler: fun(source: wxl.Object|nil, source_guid: wxl.Guid, target: wxl.Object|nil, target_guid: wxl.Guid, spell_id: integer, power_type: integer, amount: integer, periodic: boolean, drain: boolean, multiplier: number)): integer
 ---@overload fun(family: "ChatScript", method: "OnChatAddonMessage", handler: fun(type: integer, sender: wxl.Object|nil, sender_guid: wxl.Guid, sender_name: string, prefix: string, text: string, channel: string, gm: boolean)): integer
 ---@overload fun(family: "ObjectScript", method: "OnObjectFieldChanged", handler: fun(object: wxl.Object|nil, type: wxl.ObjectType|integer, field: integer, count: integer, old_value: wxl.FieldValue, new_value: wxl.FieldValue)): integer
+---@overload fun(family: "AssetScript", method: "OnArchiveMounted", handler: fun(path: string, priority: integer, hash_entries: integer, block_entries: integer, bytes: integer)): integer
+---@overload fun(family: "AssetScript", method: "OnArchiveUnmounted", handler: fun(path: string, priority: integer, hash_entries: integer, block_entries: integer, bytes: integer)): integer
+---@overload fun(family: "WorldScript", method: "OnMemoryPressure", handler: fun(largest_free: integer, free: integer, committed: integer, threshold: integer)): integer
 ---@param family wxl.Family
 ---@param method string
 ---@param handler function
@@ -1716,6 +1722,40 @@ function Object:Guild() end
 ---@field name string
 ---@field signature string
 
+---@class wxl.FootprintCategory
+---@field name string
+---@field owner string
+---@field bytes integer
+---@field count integer
+---@field peak integer
+
+---@class wxl.FootprintSource
+---@field file string
+---@field bytes integer
+---@field count integer
+---@field peak integer
+---@field allocations integer
+
+---@class wxl.FootprintArchive
+---@field path string
+---@field priority integer
+---@field hash_entries integer
+---@field block_entries integer
+---@field bytes integer
+
+---@class wxl.FootprintTable
+---@field name string
+---@field records integer
+---@field record_size integer
+---@field bytes integer
+
+---@class wxl.FootprintRegion
+---@field state string
+---@field type string
+---@field bytes integer
+---@field regions integer
+---@field largest integer
+
 ---A File of wxl.storage.
 ---@class wxl.File
 local File = {}
@@ -1909,6 +1949,71 @@ function patch.Matches(address, expected) end
 ---@return string|nil reason
 function patch.Find(pattern, after) end
 
+---wxl.footprint. Where the client's memory goes: Storm's allocations by source file, the big consumers, the address space.
+---@class wxl.footprint
+local footprint = {}
+
+---Starts counting Storm's allocations from zero: only what is allocated from now on is followed.
+---@return true|nil ok
+---@return string|nil reason
+function footprint.Start() end
+
+---Stops counting; the last counts stay in the next snapshot.
+function footprint.Stop() end
+
+---Whether accounting runs.
+---@return boolean|nil
+---@return string|nil reason
+function footprint.Running() end
+
+---Takes the picture the lists read: Storm's counts, the client's consumers, the address space,
+---and the heap of every Lua mod, each shown as its own category. On the main thread.
+---@return true|nil ok
+---@return string|nil reason
+function footprint.Snapshot() end
+
+---The consumers of the last snapshot, largest first: name, owner, bytes, count, peak.
+---@return wxl.FootprintCategory[]|nil
+---@return string|nil reason
+function footprint.Categories() end
+
+---Storm's allocations of the last snapshot by source file, largest first: file, bytes, count, peak, allocations.
+---@return wxl.FootprintSource[]|nil
+---@return string|nil reason
+function footprint.Sources() end
+
+---The mounted archives of the last snapshot: path, priority, hash_entries, block_entries, bytes.
+---@return wxl.FootprintArchive[]|nil
+---@return string|nil reason
+function footprint.Archives() end
+
+---The client databases of the last snapshot, by name: name, records, record_size, bytes.
+---@return wxl.FootprintTable[]|nil
+---@return string|nil reason
+function footprint.Tables() end
+
+---The address space of the last snapshot: state, type, bytes, regions, largest.
+---@return wxl.FootprintRegion[]|nil
+---@return string|nil reason
+function footprint.Regions() end
+
+---States one consumer of this mod's own, shown in Categories() as "<mod id>/<name>" until the
+---mod reports it again or goes; 0 bytes and 0 count remove it.
+---@param name string
+---@param bytes integer
+---@param count integer
+---@return true|nil ok
+---@return string|nil reason
+function footprint.Report(name, bytes, count) end
+
+---Raises MemoryPressure when the largest free block of the address space falls under this
+---many bytes, and again only once it has risen back above; 0 stops. Kept for this mod until it
+---goes; the highest threshold any mod holds is the one the runtime watches.
+---@param bytes integer
+---@return true|nil ok
+---@return string|nil reason
+function footprint.WatchPressure(bytes) end
+
 ---@class wxl.ModInfo
 ---@field id string
 ---@field name string
@@ -1973,6 +2078,7 @@ function object.Unwatch(type, name) end
 ---@field data wxl.data
 ---@field hook wxl.hook
 ---@field patch wxl.patch
+---@field footprint wxl.footprint
 ---@field events table<wxl.Family, string[]> every family's events, as On<Event>
 wxl = {}
 
