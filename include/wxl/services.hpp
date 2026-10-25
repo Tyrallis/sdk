@@ -8,6 +8,7 @@
 
 #include "wxl/objects.hpp"
 #include "wxl/sdk.hpp"
+#include "wxl/services/action.hpp"
 #include "wxl/services/data.hpp"
 #include "wxl/services/footprint.hpp"
 #include "wxl/services/hook.hpp"

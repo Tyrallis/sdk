@@ -2,123 +2,366 @@
 // Copyright (c) 2026 WarcraftXL
 //
 // The reads behind wxl.object: one row per getter of wxl_object_api that reads one value of an
-// object. The getters that resolve handles or walk the table (valid, guid, type, from_guid,
-// local_player, name, unit_target, enumerate, positions) are written by hand in
-// object_service.cpp.
+// object, in member order. The getters that resolve handles or walk the table (valid, guid,
+// type, from_guid, local_player, name, unit_target, enumerate, positions, the descriptor fields)
+// are written by hand in object_service.cpp.
 //
-//   WXL_OBJECT_FIELD(kinds, member, Method, type)    a field of the object, read as is
-//   WXL_OBJECT_READ(kinds, member, Method, type)     a value the runtime works out
-//   WXL_OBJECT_READ_AT(kinds, member, Method, type)  the same, with an index
+// Every runtime and every facade is made from these rows: the ObjectBinding virtual a runtime
+// writes, the service's member with its kind check, the C++ method of the facade class
+// (wxl/objects/generated/, written by wxl-object-members), the Lua method of the object
+// userdata, the editor definitions and the guides' tables of members.
+//
+//   WXL_OBJECT_SINCE(major, minor, feature)
+//       right above the first row appended with that version of the contract: that row and
+//       the ones below it came with it, until the next such row. A Lua mod whose mod.json asks
+//       for an older abi cannot use them. The rows above the first came with 0.1.5.
+//
+//   WXL_OBJECT_READ(kinds, member, Method, type, source, Cxx, cxx, doc)
+//   WXL_OBJECT_READ_AT(kinds, member, Method, type, source, Cxx, cxx, Arg, arg, doc)
 //
 //   kinds   the objects the getter accepts: Any, Units, Players, Items, Containers,
-//           GameObjects, Dynamics or Corpses. Any other live handle answers WXL_E_INVALID.
+//           GameObjects, Dynamics or Corpses; Active is the player the client controls, whose
+//           own fields (money, experience, inventory, skills) the client keeps for no other.
+//           Any other live handle answers WXL_E_INVALID.
 //   member  the wxl_object_api member the getter is published as.
-//   Method  the ObjectBinding read behind it: bool Method(void* object, type& out) const, or
-//           bool Method(void* object, uint32_t index, type& out) const for READ_AT.
-//   type    what the getter writes.
+//   Method  the read behind it: bool Method(void* object, type& out) const, or
+//           bool Method(void* object, Arg arg, type& out) const for READ_AT.
+//   type    what the getter writes: uint32_t, int32_t, float, wxl_guid, wxl_vec3, wxl_bool, a
+//           wxl_handle (an object, resolved in view), or a struct of object.h.
+//   source  who answers it:
+//             field   the runtime's binding fact of the same name as `member`, read as is (core
+//                     needs nothing more);
+//             client  a runtime's ObjectBinding virtual, written for each client;
+//             cache   the same, from one of the client's caches: false means the client has not
+//                     received the record yet, which the getter answers as WXL_E_FAILED;
+//             shared  the shared runtime itself (object_reads.cpp), from the descriptor block
+//                     and the other reads: the same code on every runtime.
+//   Cxx     the C++ facade's method.
+//   cxx     what it answers: `type` itself, bool for a wxl_bool, an enumeration of enums.def
+//           (Lua sees its name), a C++ enumeration of the facade (Lua sees the number), or a
+//           facade class for a wxl_handle.
+//   Arg     the C type of the argument: uint32_t, wxl_handle or wxl_vec3.
+//   arg     its C++ type: the same, an enumeration (Lua takes its name or its number), or
+//           `const Object&` for a wxl_handle.
+//   doc     what it answers, in a line, for the facade, the editor definitions and the guides.
 //
-// A runtime implements each Method. The FIELD shape tells it the value needs no work: the core
-// answers it from the binding fact of the same name as `member`.
-//
-// Include with WXL_OBJECT_READ_AT and WXL_OBJECT_READ defined; WXL_OBJECT_FIELD defaults to
-// WXL_OBJECT_READ.
+// Include with WXL_OBJECT_READ_AT and WXL_OBJECT_READ defined; WXL_OBJECT_SINCE defaults to
+// nothing.
 
 #ifndef WXL_OBJECT_READ
-#error "define WXL_OBJECT_READ(kinds, member, Method, type) before including object_reads.def"
+#error "define WXL_OBJECT_READ(kinds, member, Method, type, source, Cxx, cxx, doc) before including object_reads.def"
 #endif
 #ifndef WXL_OBJECT_READ_AT
-#error "define WXL_OBJECT_READ_AT(kinds, member, Method, type) before including object_reads.def"
+#error "define WXL_OBJECT_READ_AT(kinds, member, Method, type, source, Cxx, cxx, Arg, arg, doc) before including object_reads.def"
 #endif
-#ifndef WXL_OBJECT_FIELD
-    #define WXL_OBJECT_FIELD(kinds, member, Method, type) WXL_OBJECT_READ(kinds, member, Method, type)
-    #define WXL_OBJECT_FIELD_DEFAULTED
+#ifndef WXL_OBJECT_SINCE
+    #define WXL_OBJECT_SINCE(major, minor, feature)
+    #define WXL_OBJECT_SINCE_DEFAULTED
 #endif
 
 // --- Any object ----------------------------------------------------------------------------
 
-WXL_OBJECT_READ(Any, position, Position, wxl_vec3)
-WXL_OBJECT_READ(Any, facing,   Facing,   float)
-WXL_OBJECT_READ(Any, entry,    Entry,    uint32_t)
-WXL_OBJECT_READ(Any, scale,    Scale,    float)
+WXL_OBJECT_READ(Any, position, Position, wxl_vec3, client, Position, wxl_vec3,
+                "Where it stands in the world, in yards; an item has no place.")
+WXL_OBJECT_READ(Any, facing, Facing, float, client, Facing, float,
+                "The way it faces, in radians.")
+WXL_OBJECT_READ(Any, entry, Entry, uint32_t, client, Entry, uint32_t,
+                "The server's template id: a creature, item or game-object entry; 0 for a player.")
+WXL_OBJECT_READ(Any, scale, Scale, float, client, Scale, float,
+                "Its size, 1 being the model's own.")
 
 // --- Units and players ---------------------------------------------------------------------
 
-WXL_OBJECT_FIELD(Units, unit_health,            UnitHealth,          int32_t)
-WXL_OBJECT_FIELD(Units, unit_max_health,        UnitMaxHealth,       uint32_t)
-WXL_OBJECT_FIELD(Units, unit_level,             UnitLevel,           uint32_t)
-WXL_OBJECT_READ_AT(Units, unit_power,           UnitPower,           uint32_t)
-WXL_OBJECT_READ_AT(Units, unit_max_power,       UnitMaxPower,        uint32_t)
-WXL_OBJECT_READ(Units, unit_power_type,         UnitPowerType,       uint32_t)
-WXL_OBJECT_READ(Units, unit_race,               UnitRace,            uint32_t)
-WXL_OBJECT_READ(Units, unit_class,              UnitClass,           uint32_t)
-WXL_OBJECT_READ(Units, unit_sex,                UnitSex,             uint32_t)
-WXL_OBJECT_FIELD(Units, unit_display_id,        UnitDisplayId,       uint32_t)
-WXL_OBJECT_FIELD(Units, unit_native_display_id, UnitNativeDisplayId, uint32_t)
-WXL_OBJECT_FIELD(Units, unit_mount_display_id,  UnitMountDisplayId,  uint32_t)
-WXL_OBJECT_FIELD(Units, unit_faction_template,  UnitFactionTemplate, uint32_t)
-WXL_OBJECT_FIELD(Units, unit_flags,             UnitFlags,           uint32_t)
-WXL_OBJECT_FIELD(Units, unit_flags2,            UnitFlags2,          uint32_t)
-WXL_OBJECT_FIELD(Units, unit_dynamic_flags,     UnitDynamicFlags,    uint32_t)
-WXL_OBJECT_FIELD(Units, unit_npc_flags,         UnitNpcFlags,        uint32_t)
-WXL_OBJECT_FIELD(Units, unit_bounding_radius,   UnitBoundingRadius,  float)
-WXL_OBJECT_FIELD(Units, unit_combat_reach,      UnitCombatReach,     float)
-WXL_OBJECT_FIELD(Units, unit_charm,             UnitCharm,           wxl_guid)
-WXL_OBJECT_FIELD(Units, unit_summon,            UnitSummon,          wxl_guid)
-WXL_OBJECT_FIELD(Units, unit_charmed_by,        UnitCharmedBy,       wxl_guid)
-WXL_OBJECT_FIELD(Units, unit_summoned_by,       UnitSummonedBy,      wxl_guid)
-WXL_OBJECT_FIELD(Units, unit_created_by,        UnitCreatedBy,       wxl_guid)
+WXL_OBJECT_READ(Units, unit_health, UnitHealth, int32_t, field, Health, int32_t,
+                "Its health; 0 or less is a dead unit, as the client reads it.")
+WXL_OBJECT_READ(Units, unit_max_health, UnitMaxHealth, uint32_t, field, MaxHealth, uint32_t,
+                "Its maximum health.")
+WXL_OBJECT_READ(Units, unit_level, UnitLevel, uint32_t, field, Level, uint32_t,
+                "Its level.")
+WXL_OBJECT_READ_AT(Units, unit_power, UnitPower, uint32_t, client, PowerValue, uint32_t, uint32_t, Power,
+                   "Its power of a type (0 mana, 1 rage, 2 focus, 3 energy, 4 happiness, 5 runes, 6 runic power).")
+WXL_OBJECT_READ_AT(Units, unit_max_power, UnitMaxPower, uint32_t, client, MaxPowerValue, uint32_t, uint32_t, Power,
+                   "Its maximum power of a type.")
+WXL_OBJECT_READ(Units, unit_power_type, UnitPowerType, uint32_t, client, PowerType, Power,
+                "The type of power it runs on, as PowerValue takes it.")
+WXL_OBJECT_READ(Units, unit_race, UnitRace, uint32_t, client, Race, uint32_t,
+                "Its race, as ChrRaces.dbc numbers it.")
+WXL_OBJECT_READ(Units, unit_class, UnitClass, uint32_t, client, Class, uint32_t,
+                "Its class, as ChrClasses.dbc numbers it.")
+WXL_OBJECT_READ(Units, unit_sex, UnitSex, uint32_t, client, Sex, uint32_t,
+                "0 male, 1 female, 2 none.")
+WXL_OBJECT_READ(Units, unit_display_id, UnitDisplayId, uint32_t, field, DisplayId, uint32_t,
+                "The model it shows now, a CreatureDisplayInfo.dbc id.")
+WXL_OBJECT_READ(Units, unit_native_display_id, UnitNativeDisplayId, uint32_t, field, NativeDisplayId, uint32_t,
+                "The model it shows when nothing changes its shape.")
+WXL_OBJECT_READ(Units, unit_mount_display_id, UnitMountDisplayId, uint32_t, field, MountDisplayId, uint32_t,
+                "The model of its mount; 0 while not mounted.")
+WXL_OBJECT_READ(Units, unit_faction_template, UnitFactionTemplate, uint32_t, field, FactionTemplate, uint32_t,
+                "Its FactionTemplate.dbc id.")
+WXL_OBJECT_READ(Units, unit_flags, UnitFlags, uint32_t, field, Flags, uint32_t,
+                "UNIT_FIELD_FLAGS as the server sends it.")
+WXL_OBJECT_READ(Units, unit_flags2, UnitFlags2, uint32_t, field, Flags2, uint32_t,
+                "UNIT_FIELD_FLAGS_2 as the server sends it.")
+WXL_OBJECT_READ(Units, unit_dynamic_flags, UnitDynamicFlags, uint32_t, field, DynamicFlags, uint32_t,
+                "UNIT_DYNAMIC_FLAGS as the server sends it to this client.")
+WXL_OBJECT_READ(Units, unit_npc_flags, UnitNpcFlags, uint32_t, field, NpcFlags, uint32_t,
+                "What it offers to talk about: vendor, trainer, quest giver, ... as UNIT_NPC_FLAGS.")
+WXL_OBJECT_READ(Units, unit_bounding_radius, UnitBoundingRadius, float, field, BoundingRadius, float,
+                "The radius of its body, in yards.")
+WXL_OBJECT_READ(Units, unit_combat_reach, UnitCombatReach, float, field, CombatReach, float,
+                "How far it reaches in melee, in yards.")
+WXL_OBJECT_READ(Units, unit_charm, UnitCharm, wxl_guid, field, CharmGuid, wxl_guid,
+                "The unit it charms, or 0.")
+WXL_OBJECT_READ(Units, unit_summon, UnitSummon, wxl_guid, field, SummonGuid, wxl_guid,
+                "The unit it summoned, its pet among them, or 0.")
+WXL_OBJECT_READ(Units, unit_charmed_by, UnitCharmedBy, wxl_guid, field, CharmedByGuid, wxl_guid,
+                "Who charms it, or 0.")
+WXL_OBJECT_READ(Units, unit_summoned_by, UnitSummonedBy, wxl_guid, field, SummonedByGuid, wxl_guid,
+                "Who summoned it: a pet's owner, or 0.")
+WXL_OBJECT_READ(Units, unit_created_by, UnitCreatedBy, wxl_guid, field, CreatedByGuid, wxl_guid,
+                "Who created it: a totem's shaman, or 0.")
 
 // --- Players -------------------------------------------------------------------------------
 
-WXL_OBJECT_FIELD(Players, player_flags,          PlayerFlags,       uint32_t)
-WXL_OBJECT_FIELD(Players, player_guild_id,       PlayerGuildId,     uint32_t)
-WXL_OBJECT_FIELD(Players, player_guild_rank,     PlayerGuildRank,   uint32_t)
-WXL_OBJECT_FIELD(Players, player_chosen_title,   PlayerChosenTitle, uint32_t)
-WXL_OBJECT_READ_AT(Players, player_visible_item, PlayerVisibleItem, uint32_t)
+WXL_OBJECT_READ(Players, player_flags, PlayerFlags, uint32_t, field, Flags, uint32_t,
+                "PLAYER_FLAGS as the server sends it.")
+WXL_OBJECT_READ(Players, player_guild_id, PlayerGuildId, uint32_t, field, GuildId, uint32_t,
+                "Its guild's id; 0 while unguilded.")
+WXL_OBJECT_READ(Players, player_guild_rank, PlayerGuildRank, uint32_t, field, GuildRank, uint32_t,
+                "Its rank in the guild, 0 for the guild master.")
+WXL_OBJECT_READ(Players, player_chosen_title, PlayerChosenTitle, uint32_t, field, ChosenTitle, uint32_t,
+                "The title it shows, a CharTitles.dbc bit index; 0 for none.")
+WXL_OBJECT_READ_AT(Players, player_visible_item, PlayerVisibleItem, uint32_t, client, VisibleItem, uint32_t, uint32_t, EquipSlot,
+                   "The item id an equipment slot shows (0 head .. 18 tabard); 0 when the slot is empty.")
 
 // --- Items and containers ------------------------------------------------------------------
 
-WXL_OBJECT_FIELD(Items, item_owner,          ItemOwner,         wxl_guid)
-WXL_OBJECT_FIELD(Items, item_contained_in,   ItemContainedIn,   wxl_guid)
-WXL_OBJECT_FIELD(Items, item_creator,        ItemCreator,       wxl_guid)
-WXL_OBJECT_FIELD(Items, item_stack_count,    ItemStackCount,    int32_t)
-WXL_OBJECT_FIELD(Items, item_duration,       ItemDuration,      uint32_t)
-WXL_OBJECT_FIELD(Items, item_flags,          ItemFlags,         uint32_t)
-WXL_OBJECT_FIELD(Items, item_durability,     ItemDurability,    uint32_t)
-WXL_OBJECT_FIELD(Items, item_max_durability, ItemMaxDurability, uint32_t)
+WXL_OBJECT_READ(Items, item_owner, ItemOwner, wxl_guid, field, OwnerGuid, wxl_guid,
+                "The player who owns it.")
+WXL_OBJECT_READ(Items, item_contained_in, ItemContainedIn, wxl_guid, field, ContainedInGuid, wxl_guid,
+                "The bag holding it, or 0 in the backpack or when equipped.")
+WXL_OBJECT_READ(Items, item_creator, ItemCreator, wxl_guid, field, CreatorGuid, wxl_guid,
+                "Who crafted it, or 0.")
+WXL_OBJECT_READ(Items, item_stack_count, ItemStackCount, int32_t, field, StackCount, int32_t,
+                "How many the stack holds.")
+WXL_OBJECT_READ(Items, item_duration, ItemDuration, uint32_t, field, Duration, uint32_t,
+                "Seconds left before it expires; 0 when it does not.")
+WXL_OBJECT_READ(Items, item_flags, ItemFlags, uint32_t, field, Flags, uint32_t,
+                "ITEM_FIELD_FLAGS as the server sends it: soulbound 0x1, ...")
+WXL_OBJECT_READ(Items, item_durability, ItemDurability, uint32_t, field, Durability, uint32_t,
+                "Its durability now.")
+WXL_OBJECT_READ(Items, item_max_durability, ItemMaxDurability, uint32_t, field, MaxDurability, uint32_t,
+                "Its durability when repaired; 0 for an item that does not wear.")
 
-WXL_OBJECT_FIELD(Containers, container_num_slots, ContainerNumSlots, uint32_t)
-WXL_OBJECT_READ_AT(Containers, container_slot,    ContainerSlot,     wxl_guid)
+WXL_OBJECT_READ(Containers, container_num_slots, ContainerNumSlots, uint32_t, field, NumSlots, uint32_t,
+                "How many slots the bag has.")
+WXL_OBJECT_READ_AT(Containers, container_slot, ContainerSlot, wxl_guid, client, SlotGuid, wxl_guid, uint32_t, uint32_t,
+                   "The item in a slot, as a guid; 0 for an empty one, invalid past NumSlots.")
 
 // --- Game objects --------------------------------------------------------------------------
 
-WXL_OBJECT_FIELD(GameObjects, gameobject_created_by,    GameObjectCreatedBy,    wxl_guid)
-WXL_OBJECT_FIELD(GameObjects, gameobject_display_id,    GameObjectDisplayId,    uint32_t)
-WXL_OBJECT_FIELD(GameObjects, gameobject_flags,         GameObjectFlags,        uint32_t)
-WXL_OBJECT_FIELD(GameObjects, gameobject_dynamic_flags, GameObjectDynamicFlags, uint32_t)
-WXL_OBJECT_FIELD(GameObjects, gameobject_faction,       GameObjectFaction,      uint32_t)
-WXL_OBJECT_FIELD(GameObjects, gameobject_level,         GameObjectLevel,        uint32_t)
-WXL_OBJECT_READ(GameObjects, gameobject_state,          GameObjectState,        uint32_t)
-WXL_OBJECT_READ(GameObjects, gameobject_type,           GameObjectType,         uint32_t)
-WXL_OBJECT_READ(GameObjects, gameobject_art_kit,        GameObjectArtKit,       uint32_t)
+WXL_OBJECT_READ(GameObjects, gameobject_created_by, GameObjectCreatedBy, wxl_guid, field, CreatedByGuid, wxl_guid,
+                "Who summoned or spawned it, or 0 for one placed in the world.")
+WXL_OBJECT_READ(GameObjects, gameobject_display_id, GameObjectDisplayId, uint32_t, field, DisplayId, uint32_t,
+                "Its model, a GameObjectDisplayInfo.dbc id.")
+WXL_OBJECT_READ(GameObjects, gameobject_flags, GameObjectFlags, uint32_t, field, Flags, uint32_t,
+                "GAMEOBJECT_FLAGS: in use 0x1, locked 0x2, ...")
+WXL_OBJECT_READ(GameObjects, gameobject_dynamic_flags, GameObjectDynamicFlags, uint32_t, field, DynamicFlags, uint32_t,
+                "GAMEOBJECT_DYNAMIC's flags, as the server sends them to this client.")
+WXL_OBJECT_READ(GameObjects, gameobject_faction, GameObjectFaction, uint32_t, field, Faction, uint32_t,
+                "Its FactionTemplate.dbc id.")
+WXL_OBJECT_READ(GameObjects, gameobject_level, GameObjectLevel, uint32_t, field, Level, uint32_t,
+                "Its level.")
+WXL_OBJECT_READ(GameObjects, gameobject_state, GameObjectState, uint32_t, client, State, uint32_t,
+                "0 active, 1 ready, 2 destroyed.")
+WXL_OBJECT_READ(GameObjects, gameobject_type, GameObjectType, uint32_t, client, GoType, uint32_t,
+                "The game-object type, in the server's numbering (door 0, button 1, chest 3, ...).")
+WXL_OBJECT_READ(GameObjects, gameobject_art_kit, GameObjectArtKit, uint32_t, client, ArtKit, uint32_t,
+                "The art kit it shows.")
 
 // --- Dynamic objects -----------------------------------------------------------------------
 
-WXL_OBJECT_FIELD(Dynamics, dynamic_caster,    DynamicCaster,   wxl_guid)
-WXL_OBJECT_FIELD(Dynamics, dynamic_spell_id,  DynamicSpellId,  uint32_t)
-WXL_OBJECT_FIELD(Dynamics, dynamic_radius,    DynamicRadius,   float)
-WXL_OBJECT_FIELD(Dynamics, dynamic_cast_time, DynamicCastTime, uint32_t)
+WXL_OBJECT_READ(Dynamics, dynamic_caster, DynamicCaster, wxl_guid, field, CasterGuid, wxl_guid,
+                "The unit that cast it.")
+WXL_OBJECT_READ(Dynamics, dynamic_spell_id, DynamicSpellId, uint32_t, field, SpellId, uint32_t,
+                "The spell it is the area of.")
+WXL_OBJECT_READ(Dynamics, dynamic_radius, DynamicRadius, float, field, Radius, float,
+                "Its radius, in yards.")
+WXL_OBJECT_READ(Dynamics, dynamic_cast_time, DynamicCastTime, uint32_t, field, CastTime, uint32_t,
+                "The client time it was cast at, in milliseconds.")
 
 // --- Corpses -------------------------------------------------------------------------------
 
-WXL_OBJECT_FIELD(Corpses, corpse_owner,         CorpseOwner,        wxl_guid)
-WXL_OBJECT_FIELD(Corpses, corpse_party,         CorpseParty,        wxl_guid)
-WXL_OBJECT_FIELD(Corpses, corpse_display_id,    CorpseDisplayId,    uint32_t)
-WXL_OBJECT_FIELD(Corpses, corpse_guild,         CorpseGuild,        uint32_t)
-WXL_OBJECT_FIELD(Corpses, corpse_flags,         CorpseFlags,        uint32_t)
-WXL_OBJECT_FIELD(Corpses, corpse_dynamic_flags, CorpseDynamicFlags, uint32_t)
+WXL_OBJECT_READ(Corpses, corpse_owner, CorpseOwner, wxl_guid, field, OwnerGuid, wxl_guid,
+                "The player it belongs to.")
+WXL_OBJECT_READ(Corpses, corpse_party, CorpseParty, wxl_guid, field, PartyGuid, wxl_guid,
+                "The party the owner was in when they died, or 0.")
+WXL_OBJECT_READ(Corpses, corpse_display_id, CorpseDisplayId, uint32_t, field, DisplayId, uint32_t,
+                "Its model.")
+WXL_OBJECT_READ(Corpses, corpse_guild, CorpseGuild, uint32_t, field, Guild, uint32_t,
+                "The owner's guild id.")
+WXL_OBJECT_READ(Corpses, corpse_flags, CorpseFlags, uint32_t, field, Flags, uint32_t,
+                "CORPSE_FIELD_FLAGS: bones 0x1, ...")
+WXL_OBJECT_READ(Corpses, corpse_dynamic_flags, CorpseDynamicFlags, uint32_t, field, DynamicFlags, uint32_t,
+                "CORPSE_FIELD_DYNAMIC_FLAGS: lootable 0x1.")
 
-#ifdef WXL_OBJECT_FIELD_DEFAULTED
-    #undef WXL_OBJECT_FIELD
-    #undef WXL_OBJECT_FIELD_DEFAULTED
+// --- the typed API ---------------------------------------------------------------------------
+
+WXL_OBJECT_SINCE(0, 1, 18)
+
+// Any object.
+WXL_OBJECT_READ(Any, is_active_player, IsActivePlayer, wxl_bool, shared, IsActivePlayer, bool,
+                "Whether it is the unit the client controls.")
+WXL_OBJECT_READ_AT(Any, distance, Distance, float, shared, Distance, float, wxl_handle, const Object&,
+                   "Yards from it to another object, centre to centre; invalid when either has no place in the world.")
+WXL_OBJECT_READ_AT(Any, distance_to, DistanceTo, float, shared, DistanceTo, float, wxl_vec3, wxl_vec3,
+                   "Yards from it to a point; invalid for an object with no place in the world.")
+
+// Units: who they face, what they do.
+WXL_OBJECT_READ(Units, unit_target_guid, UnitTargetGuid, wxl_guid, client, TargetGuid, wxl_guid,
+                "What it targets, as a guid, whether that is in view or not; 0 for nothing.")
+WXL_OBJECT_READ(Units, unit_reaction, UnitReaction, uint32_t, client, Reaction, wxl_reaction,
+                "How it stands towards the active player, by the client's own reckoning: the colour of its name.")
+WXL_OBJECT_READ_AT(Units, unit_reaction_to, UnitReactionTo, uint32_t, client, ReactionTo, wxl_reaction, wxl_handle, const Object&,
+                   "How it stands towards another unit, by the client's own reckoning.")
+WXL_OBJECT_READ(Units, unit_is_dead, UnitIsDead, wxl_bool, shared, IsDead, bool,
+                "Whether it is dead: no health left, or marked dead by the server.")
+WXL_OBJECT_READ(Units, unit_in_combat, UnitInCombat, wxl_bool, shared, InCombat, bool,
+                "Whether it is in combat, as the client's UnitAffectingCombat reads it.")
+WXL_OBJECT_READ(Units, unit_is_pvp, UnitIsPvp, wxl_bool, shared, IsPvp, bool,
+                "Whether it is flagged for player-versus-player combat.")
+WXL_OBJECT_READ(Units, unit_is_tapped, UnitIsTapped, wxl_bool, shared, IsTapped, bool,
+                "Whether someone has tapped it: its kill and loot are theirs.")
+WXL_OBJECT_READ(Units, unit_is_tapped_by_player, UnitIsTappedByPlayer, wxl_bool, shared, IsTappedByPlayer, bool,
+                "Whether the active player, or their group, has tapped it.")
+WXL_OBJECT_READ(Units, unit_is_lootable, UnitIsLootable, wxl_bool, shared, IsLootable, bool,
+                "Whether it has loot for the active player.")
+WXL_OBJECT_READ(Units, unit_is_skinnable, UnitIsSkinnable, wxl_bool, shared, IsSkinnable, bool,
+                "Whether its corpse can be skinned.")
+WXL_OBJECT_READ(Units, unit_stand_state, UnitStandState, uint32_t, shared, StandState, wxl_stand_state,
+                "How it stands: standing, sitting, sleeping, kneeling, ...")
+WXL_OBJECT_READ(Units, unit_is_sitting, UnitIsSitting, wxl_bool, shared, IsSitting, bool,
+                "Whether it sits, on the ground or in a chair.")
+WXL_OBJECT_READ(Units, unit_is_stealthed, UnitIsStealthed, wxl_bool, shared, IsStealthed, bool,
+                "Whether it is stealthed, as the client's IsStealthed reads it.")
+WXL_OBJECT_READ(Units, unit_is_mounted, UnitIsMounted, wxl_bool, client, IsMounted, bool,
+                "Whether it rides a mount, as the client's IsMounted reads it.")
+
+// Units: the cast and the channel the client shows.
+WXL_OBJECT_READ(Units, unit_casting_spell_id, UnitCastingSpellId, uint32_t, field, CastingSpellId, uint32_t,
+                "The spell it casts now; 0 for none.")
+WXL_OBJECT_READ(Units, unit_cast_start, UnitCastStart, uint32_t, field, CastStart, uint32_t,
+                "When the cast began, in milliseconds on the client's clock (the client's GetTime() * 1000).")
+WXL_OBJECT_READ(Units, unit_cast_end, UnitCastEnd, uint32_t, field, CastEnd, uint32_t,
+                "When the cast ends, on the same clock.")
+WXL_OBJECT_READ(Units, unit_is_casting, UnitIsCasting, wxl_bool, client, IsCasting, bool,
+                "Whether it is casting, its cast not yet over, as the client's UnitCastingInfo reads it.")
+WXL_OBJECT_READ(Units, unit_channel_spell_id, UnitChannelSpellId, uint32_t, field, ChannelSpellId, uint32_t,
+                "The spell it channels now; 0 for none.")
+WXL_OBJECT_READ(Units, unit_channel_start, UnitChannelStart, uint32_t, field, ChannelStart, uint32_t,
+                "When the channel began, on the client's clock.")
+WXL_OBJECT_READ(Units, unit_channel_end, UnitChannelEnd, uint32_t, field, ChannelEnd, uint32_t,
+                "When the channel ends, on the client's clock.")
+WXL_OBJECT_READ(Units, unit_is_channeling, UnitIsChanneling, wxl_bool, client, IsChanneling, bool,
+                "Whether it is channeling, its channel not yet over.")
+
+// Units: auras.
+WXL_OBJECT_READ(Units, unit_aura_count, UnitAuraCount, uint32_t, client, AuraCount, uint32_t,
+                "How many auras the client holds on it, buffs and debuffs alike.")
+WXL_OBJECT_READ_AT(Units, unit_aura, UnitAura, wxl_aura, client, Aura, wxl_aura, uint32_t, uint32_t,
+                   "The aura in a slot, 0 to AuraCount - 1: its spell, caster, stacks, duration, expiration and flags.")
+WXL_OBJECT_READ_AT(Units, unit_has_aura, UnitHasAura, wxl_bool, shared, HasAura, bool, uint32_t, uint32_t,
+                   "Whether an aura of a spell is on it.")
+
+// Units: what they are.
+WXL_OBJECT_READ(Units, unit_creature_type, UnitCreatureType, uint32_t, client, CreatureType, wxl_creature_type,
+                "What kind of creature it is, as the client works it out: beast, humanoid, undead, ...")
+WXL_OBJECT_READ(Units, unit_creature_family, UnitCreatureFamily, uint32_t, client, CreatureFamily, uint32_t,
+                "Its beast family, a CreatureFamily.dbc id; 0 for none.")
+WXL_OBJECT_READ(Units, unit_classification, UnitClassification, uint32_t, client, Classification, wxl_classification,
+                "Its rank: normal, elite, rare, rare elite, world boss.")
+WXL_OBJECT_READ_AT(Units, unit_knows_spell, UnitKnowsSpell, wxl_bool, client, KnowsSpell, bool, uint32_t, uint32_t,
+                   "Whether it knows a spell: the active player's spell book or its pet's; false for any other unit.")
+
+// Units: movement.
+WXL_OBJECT_READ(Units, unit_movement_flags, UnitMovementFlags, uint32_t, field, MovementFlags, uint32_t,
+                "The flags of its movement: forward 0x1, backward 0x2, ..., falling 0x1000, flying 0x2000000.")
+WXL_OBJECT_READ_AT(Units, unit_speed, UnitSpeed, float, client, Speed, float, uint32_t, wxl_move_type,
+                   "One of its speeds, in yards a second: walk, run, swim, flight, ...; the turn and pitch rates in radians a second.")
+WXL_OBJECT_READ(Units, unit_is_swimming, UnitIsSwimming, wxl_bool, client, IsSwimming, bool,
+                "Whether it swims, as the client's IsSwimming reads it.")
+WXL_OBJECT_READ(Units, unit_is_flying, UnitIsFlying, wxl_bool, shared, IsFlying, bool,
+                "Whether it flies, as the client's IsFlying reads it.")
+WXL_OBJECT_READ(Units, unit_is_falling, UnitIsFalling, wxl_bool, shared, IsFalling, bool,
+                "Whether it is falling, as the client's IsFalling reads it.")
+
+// Players: their state.
+WXL_OBJECT_READ(Players, player_is_ghost, PlayerIsGhost, wxl_bool, shared, IsGhost, bool,
+                "Whether it is a ghost, released from its corpse.")
+WXL_OBJECT_READ(Players, player_is_afk, PlayerIsAfk, wxl_bool, shared, IsAfk, bool,
+                "Whether it is away from the keyboard.")
+WXL_OBJECT_READ(Players, player_is_dnd, PlayerIsDnd, wxl_bool, shared, IsDnd, bool,
+                "Whether it asked not to be disturbed.")
+WXL_OBJECT_READ(Players, player_is_resting, PlayerIsResting, wxl_bool, shared, IsResting, bool,
+                "Whether it rests in an inn or a city, gaining rested experience.")
+
+// The active player's own fields.
+WXL_OBJECT_READ(Active, player_money, PlayerMoney, uint32_t, field, Money, uint32_t,
+                "Its money, in copper.")
+WXL_OBJECT_READ(Active, player_xp, PlayerXp, uint32_t, shared, Xp, uint32_t,
+                "Its experience in this level.")
+WXL_OBJECT_READ(Active, player_next_level_xp, PlayerNextLevelXp, uint32_t, shared, NextLevelXp, uint32_t,
+                "The experience this level takes.")
+WXL_OBJECT_READ(Active, player_rested_xp, PlayerRestedXp, uint32_t, shared, RestedXp, uint32_t,
+                "Its rested experience: kills give twice as much until it is spent.")
+WXL_OBJECT_READ(Active, player_honor_points, PlayerHonorPoints, uint32_t, shared, HonorPoints, uint32_t,
+                "Its honor points.")
+WXL_OBJECT_READ(Active, player_arena_points, PlayerArenaPoints, uint32_t, shared, ArenaPoints, uint32_t,
+                "Its arena points.")
+WXL_OBJECT_READ_AT(Active, player_inventory_item, PlayerInventoryItem, wxl_handle, shared, InventoryItem, Item, uint32_t, wxl_inventory_slot,
+                   "The item in an equipment slot, or the bag in a bag slot (19 to 22); none for an empty slot.")
+WXL_OBJECT_READ_AT(Active, player_backpack_item, PlayerBackpackItem, wxl_handle, shared, BackpackItem, Item, uint32_t, uint32_t,
+                   "The item in a slot of the backpack, 0 to 15; none for an empty slot.")
+WXL_OBJECT_READ_AT(Active, player_skill, PlayerSkill, wxl_skill, shared, Skill, wxl_skill, uint32_t, uint32_t,
+                   "The skill on a line of the skill list, 0 to 127: its id, value and maximum; an id of 0 for an empty line.")
+WXL_OBJECT_READ_AT(Active, player_skill_of, PlayerSkillOf, wxl_skill, shared, SkillOf, wxl_skill, uint32_t, uint32_t,
+                   "A skill by its SkillLine.dbc id; invalid for a skill the player does not have.")
+
+// The active player's group.
+WXL_OBJECT_READ(Active, player_party_size, PlayerPartySize, uint32_t, client, PartySize, uint32_t,
+                "How many others are in its party, 0 to 4.")
+WXL_OBJECT_READ_AT(Active, player_party_member_guid, PlayerPartyMemberGuid, wxl_guid, client, PartyMemberGuid, wxl_guid, uint32_t, uint32_t,
+                   "The other party member in a party slot, 0 to 3, whether in view or not; 0 for an empty slot.")
+WXL_OBJECT_READ(Active, player_raid_size, PlayerRaidSize, uint32_t, client, RaidSize, uint32_t,
+                "How many are in its raid, itself included; 0 outside a raid.")
+WXL_OBJECT_READ_AT(Active, player_raid_member_guid, PlayerRaidMemberGuid, wxl_guid, client, RaidMemberGuid, wxl_guid, uint32_t, uint32_t,
+                   "The raid member in a raid slot, 0 to 39, whether in view or not; 0 for an empty slot.")
+
+// Items.
+WXL_OBJECT_READ_AT(Items, item_enchant, ItemEnchant, uint32_t, shared, Enchant, uint32_t, uint32_t, uint32_t,
+                   "The enchantment in a slot, 0 to 11 (0 permanent, 1 temporary, 2 to 4 sockets, ...), a SpellItemEnchantment.dbc id; 0 for none.")
+WXL_OBJECT_READ(Items, item_quality, ItemQuality, uint32_t, cache, Quality, wxl_item_quality,
+                "Its quality: poor, common, uncommon, rare, epic, legendary, artifact, heirloom.")
+WXL_OBJECT_READ(Items, item_level, ItemLevel, uint32_t, cache, Level, uint32_t,
+                "Its item level.")
+WXL_OBJECT_READ(Items, item_required_level, ItemRequiredLevel, uint32_t, cache, RequiredLevel, uint32_t,
+                "The level it takes to use.")
+WXL_OBJECT_READ(Items, item_class, ItemClass, uint32_t, cache, Class, uint32_t,
+                "Its class, an ItemClass.dbc id: weapon 2, armor 4, ...")
+WXL_OBJECT_READ(Items, item_subclass, ItemSubclass, uint32_t, cache, Subclass, uint32_t,
+                "Its subclass within the class: a sword, a cloth robe, ...")
+WXL_OBJECT_READ(Items, item_inventory_type, ItemInventoryType, uint32_t, cache, InventoryType, uint32_t,
+                "Where it is worn: head 1, neck 2, ...; 0 for an item that is not worn.")
+WXL_OBJECT_READ(Items, item_max_stack, ItemMaxStack, uint32_t, cache, MaxStack, uint32_t,
+                "How many a stack of it holds at most.")
+WXL_OBJECT_READ(Items, item_sell_price, ItemSellPrice, uint32_t, cache, SellPrice, uint32_t,
+                "What a vendor pays for one, in copper.")
+
+// Containers.
+WXL_OBJECT_READ_AT(Containers, container_slot_item, ContainerSlotItem, wxl_handle, shared, SlotItem, Item, uint32_t, uint32_t,
+                   "The item in a slot of the bag; none for an empty one, invalid past NumSlots.")
+
+#ifdef WXL_OBJECT_SINCE_DEFAULTED
+    #undef WXL_OBJECT_SINCE
+    #undef WXL_OBJECT_SINCE_DEFAULTED
 #endif

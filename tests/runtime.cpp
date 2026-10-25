@@ -3,6 +3,7 @@
 //
 // The shared runtime scaffolding, checked against a binding backed by plain structs.
 
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -83,24 +84,23 @@ namespace
         uint32_t        spellId = 0;
         wxl_guid        owner   = 0;
         std::vector<uint32_t> block; ///< the descriptor block; empty for none
+        uint32_t        unitFlags     = 0;
+        uint32_t        dynamicFlags  = 0;
+        uint32_t        playerFlags   = 0;
+        uint32_t        movementFlags = 0;
+        std::vector<wxl_aura> auras;
+        uint32_t        quality = 0;
+        bool            cached  = false; ///< the item cache holds its record
     };
 
     /// Every read of the table answering zero, so a row added to it needs nothing here.
     class ZeroBinding : public wxl::runtime::ObjectBinding
     {
     public:
-#define WXL_OBJECT_READ(kinds, member, Method, type) \
-    bool Method(void*, type& out) const override       \
-    {                                                  \
-        out = type{};                                  \
-        return true;                                   \
-    }
-#define WXL_OBJECT_READ_AT(kinds, member, Method, type)    \
-    bool Method(void*, uint32_t, type& out) const override \
-    {                                                      \
-        out = type{};                                      \
-        return true;                                       \
-    }
+#define WXL_OBJECT_READ(kinds, member, Method, type, source, Cxx, cxx, doc) \
+    WXL_OBJECT_BINDS(source, bool Method(void*, type& out) const override { out = type{}; return true; })
+#define WXL_OBJECT_READ_AT(kinds, member, Method, type, source, Cxx, cxx, Arg, arg, doc) \
+    WXL_OBJECT_BINDS(source, bool Method(void*, Arg, type& out) const override { out = type{}; return true; })
 #include "wxl/runtime/object_reads.def"
 #undef WXL_OBJECT_READ
 #undef WXL_OBJECT_READ_AT
@@ -147,7 +147,12 @@ namespace
         }
 
         bool Entry(void* o, uint32_t& out) const override { return Give(out, As(o)->entry); }
-        bool Position(void* o, wxl_vec3& out) const override { return Give(out, As(o)->position); }
+        bool Position(void* o, wxl_vec3& out) const override
+        {
+            // An item has no place in the world, as the client's own reads say.
+            const wxl_object_type type = As(o)->type;
+            return type != WXL_OBJECT_ITEM && type != WXL_OBJECT_CONTAINER && Give(out, As(o)->position);
+        }
         bool Facing(void* o, float& out) const override { return Give(out, As(o)->facing); }
 
         bool UnitHealth(void* o, int32_t& out) const override { return Give(out, As(o)->health); }
@@ -222,6 +227,23 @@ namespace
         }
 
         bool GameObjectType(void* o, uint32_t& out) const override { return Give(out, As(o)->goType); }
+
+        bool UnitFlags(void* o, uint32_t& out) const override { return Give(out, As(o)->unitFlags); }
+        bool UnitDynamicFlags(void* o, uint32_t& out) const override { return Give(out, As(o)->dynamicFlags); }
+        bool PlayerFlags(void* o, uint32_t& out) const override { return Give(out, As(o)->playerFlags); }
+        bool UnitMovementFlags(void* o, uint32_t& out) const override { return Give(out, As(o)->movementFlags); }
+        bool UnitAuraCount(void* o, uint32_t& out) const override
+        {
+            return Give(out, static_cast<uint32_t>(As(o)->auras.size()));
+        }
+        bool UnitAura(void* o, uint32_t slot, wxl_aura& out) const override
+        {
+            return slot < As(o)->auras.size() && Give(out, As(o)->auras[slot]);
+        }
+        bool ItemQuality(void* o, uint32_t& out) const override
+        {
+            return As(o)->cached && Give(out, As(o)->quality);
+        }
         bool DynamicCaster(void* o, wxl_guid& out) const override { return Give(out, As(o)->owner); }
         bool DynamicSpellId(void* o, uint32_t& out) const override { return Give(out, As(o)->spellId); }
     };
@@ -642,6 +664,151 @@ int main()
                   binding.Reported("watch_field: this runtime cannot watch fields"),
               "a runtime that cannot watch says so");
         binding.held.clear();
+    }
+
+    Section("the typed reads (abi 0.1.18)");
+    {
+        // The shared reads work on what the binding reads: flags, the descriptor block, auras.
+        boar.health       = 0;
+        boar.dynamicFlags = 0x04 | 0x01; // tapped, lootable
+        boar.unitFlags    = 0x00080000u | 0x04000000u; // in combat, skinnable
+        boar.movementFlags = 0x00001000u;
+        boar.block.assign(0x94, 0u);
+        boar.block[0x4A] = 0x00020001u; // stand state 1 (sitting), vis flag 2 (stealthed)
+        wxl_aura frost{};
+        frost.spell_id = 116;
+        frost.stacks   = 2;
+        frost.caster   = 0x100;
+        boar.auras     = {frost};
+
+        // Earlier sections let these go: tracked again, under new handles.
+        binding.localPlayer = &player;
+        const wxl_handle playerHandle = service.Track(&player);
+        const wxl_handle boarHandle   = service.Track(&boar);
+        const wxl_handle bagHandle    = service.Track(&bag);
+
+        wxl_bool yes = WXL_FALSE;
+        Check(api->is_active_player(playerHandle, &yes) == WXL_OK && yes == WXL_TRUE &&
+                  api->is_active_player(boarHandle, &yes) == WXL_OK && yes == WXL_FALSE,
+              "IsActivePlayer tells the active player from the others");
+        float yards = 0.0f;
+        Check(api->distance(playerHandle, boarHandle, &yards) == WXL_OK && yards > 1.73f && yards < 1.74f,
+              "Distance is centre to centre, in the world's three axes");
+        Check(api->distance(playerHandle, bagHandle, &yards) == WXL_E_INVALID,
+              "an object with no place in the world has no distance");
+        Check(api->distance_to(boarHandle, wxl_vec3{11.0f, 21.0f, 34.0f}, &yards) == WXL_OK && yards == 3.0f,
+              "DistanceTo measures to a point");
+        Check(api->unit_is_dead(boarHandle, &yes) == WXL_OK && yes == WXL_TRUE, "no health left is dead");
+        Check(api->unit_is_dead(playerHandle, &yes) == WXL_OK && yes == WXL_FALSE, "health left is alive");
+        boar.health = 90;
+        boar.dynamicFlags |= 0x20;
+        Check(api->unit_is_dead(boarHandle, &yes) == WXL_OK && yes == WXL_TRUE, "and so is the server's dead flag");
+        Check(api->unit_in_combat(boarHandle, &yes) == WXL_OK && yes == WXL_TRUE &&
+                  api->unit_is_skinnable(boarHandle, &yes) == WXL_OK && yes == WXL_TRUE &&
+                  api->unit_is_pvp(boarHandle, &yes) == WXL_OK && yes == WXL_FALSE,
+              "combat, skinnable and PvP are the unit flags' bits");
+        Check(api->unit_is_tapped(boarHandle, &yes) == WXL_OK && yes == WXL_TRUE &&
+                  api->unit_is_lootable(boarHandle, &yes) == WXL_OK && yes == WXL_TRUE &&
+                  api->unit_is_tapped_by_player(boarHandle, &yes) == WXL_OK && yes == WXL_FALSE,
+              "tapped and lootable are the dynamic flags' bits");
+        uint32_t state = 99;
+        Check(api->unit_stand_state(boarHandle, &state) == WXL_OK && state == WXL_STAND_SITTING &&
+                  api->unit_is_sitting(boarHandle, &yes) == WXL_OK && yes == WXL_TRUE,
+              "the stand state is UNIT_FIELD_BYTES_1's first byte");
+        Check(api->unit_is_stealthed(boarHandle, &yes) == WXL_OK && yes == WXL_TRUE,
+              "stealth is its third byte's creep flag");
+        Check(api->unit_is_falling(boarHandle, &yes) == WXL_OK && yes == WXL_TRUE &&
+                  api->unit_is_flying(boarHandle, &yes) == WXL_OK && yes == WXL_FALSE,
+              "falling and flying are the movement flags'");
+        Check(api->unit_has_aura(boarHandle, 116, &yes) == WXL_OK && yes == WXL_TRUE &&
+                  api->unit_has_aura(boarHandle, 117, &yes) == WXL_OK && yes == WXL_FALSE,
+              "HasAura looks through the auras the binding reads");
+
+        // A struct answer: as much as the caller knows of it.
+        wxl_aura aura{};
+        aura.struct_size = sizeof aura;
+        Check(api->unit_aura(boarHandle, 0, &aura) == WXL_OK && aura.spell_id == 116 && aura.stacks == 2 &&
+                  aura.caster == 0x100 && aura.struct_size == sizeof aura,
+              "an aura arrives whole");
+        wxl_aura older{};
+        older.struct_size = offsetof(wxl_aura, caster);
+        older.stacks      = 77;
+        Check(api->unit_aura(boarHandle, 0, &older) == WXL_OK && older.spell_id == 116 && older.stacks == 77 &&
+                  older.struct_size == offsetof(wxl_aura, caster),
+              "a caller with an older, shorter struct gets no more than it knows");
+        Check(api->unit_aura(boarHandle, 1, &aura) == WXL_E_INVALID, "a slot past the auras is invalid");
+
+        // The active player's own fields, from its whole block.
+        player.block.assign(0x52E, 0u);
+        player.block[0x27A] = 1234; // PLAYER_XP
+        player.block[0x27B] = 5000; // PLAYER_NEXT_LEVEL_XP
+        player.block[0x491] = 600;  // PLAYER_REST_STATE_EXPERIENCE
+        player.block[0x4FD] = 75;   // PLAYER_FIELD_HONOR_CURRENCY
+        player.block[0x4FE] = 12;   // PLAYER_FIELD_ARENA_CURRENCY
+        player.block[0x27C] = 0x00010000u | 129; // skill 129 (first aid), step 1
+        player.block[0x27D] = (225u << 16) | 150; // 150 of 225
+        player.block[0x27E] = 0xFFFF0005u;      // +5 temporary, -1 permanent
+        player.block[0x144 + 2 * 15] = 0x200;   // the main hand slot holds the boar's guid, as a test
+        player.block[0x172 + 2 * 3]  = 0x400;   // the fourth backpack slot holds the bag
+        uint32_t value = 0;
+        Check(api->player_xp(playerHandle, &value) == WXL_OK && value == 1234 &&
+                  api->player_next_level_xp(playerHandle, &value) == WXL_OK && value == 5000 &&
+                  api->player_rested_xp(playerHandle, &value) == WXL_OK && value == 600 &&
+                  api->player_honor_points(playerHandle, &value) == WXL_OK && value == 75 &&
+                  api->player_arena_points(playerHandle, &value) == WXL_OK && value == 12,
+              "experience, rest and points are the player's local fields");
+        wxl_skill skill{};
+        skill.struct_size = sizeof skill;
+        Check(api->player_skill(playerHandle, 0, &skill) == WXL_OK && skill.id == 129 && skill.step == 1 &&
+                  skill.value == 150 && skill.max == 225 && skill.temporary_bonus == 5 && skill.permanent_bonus == -1,
+              "a skill line is its three dwords' halves");
+        Check(api->player_skill_of(playerHandle, 129, &skill) == WXL_OK && skill.value == 150 &&
+                  api->player_skill_of(playerHandle, 185, &skill) == WXL_E_INVALID,
+              "SkillOf finds a skill by id and refuses one the player lacks");
+        wxl_handle item = WXL_HANDLE_NONE;
+        Check(api->player_inventory_item(playerHandle, WXL_INVENTORY_MAIN_HAND, &item) == WXL_OK && item == boarHandle &&
+                  api->player_inventory_item(playerHandle, WXL_INVENTORY_HEAD, &item) == WXL_OK && item == WXL_HANDLE_NONE &&
+                  api->player_inventory_item(playerHandle, 23, &item) == WXL_E_INVALID,
+              "an inventory slot answers what it holds, none when empty, invalid past the bags");
+        Check(api->player_backpack_item(playerHandle, 3, &item) == WXL_OK && item == bagHandle,
+              "a backpack slot too");
+
+        // Another player: the client keeps none of that for it.
+        FakeObject other;
+        other.guid = 0x110;
+        other.type = WXL_OBJECT_PLAYER;
+        other.block.assign(0x52E, 7u);
+        const wxl_handle otherHandle = service.Track(&other);
+        Check(api->player_xp(otherHandle, &value) == WXL_E_INVALID &&
+                  api->player_skill(otherHandle, 0, &skill) == WXL_E_INVALID,
+              "another player's own fields are refused as invalid");
+        other.playerFlags = 0x02 | 0x10; // AFK, ghost
+        Check(api->player_is_afk(otherHandle, &yes) == WXL_OK && yes == WXL_TRUE &&
+                  api->player_is_ghost(otherHandle, &yes) == WXL_OK && yes == WXL_TRUE &&
+                  api->player_is_dnd(otherHandle, &yes) == WXL_OK && yes == WXL_FALSE,
+              "but its flags read on any player");
+        service.Untrack(&other);
+
+        // Items: the enchantments from the block, the cache's reads answer failed until cached.
+        bag.block.assign(0x48, 0u);
+        bag.block[0x16 + 3 * 2] = 3879; // the first socket's enchantment
+        Check(api->item_enchant(bagHandle, 2, &value) == WXL_OK && value == 3879 &&
+                  api->item_enchant(bagHandle, 12, &value) == WXL_E_INVALID,
+              "an enchantment slot is ITEM_FIELD_ENCHANTMENT_n_1");
+        Check(api->item_quality(bagHandle, &value) == WXL_E_FAILED, "an item the cache lacks answers failed");
+        bag.cached  = true;
+        bag.quality = WXL_QUALITY_EPIC;
+        Check(api->item_quality(bagHandle, &value) == WXL_OK && value == WXL_QUALITY_EPIC, "and its value once cached");
+        Check(api->item_quality(boarHandle, &value) == WXL_E_INVALID, "a unit has no item quality");
+
+        boar.guid = 0x401; // the bag's second slot names it
+        binding.held.push_back(&boar);
+        Check(api->container_slot_item(bagHandle, 1, &item) == WXL_OK &&
+                  api->container_slot_item(bagHandle, 0, &item) == WXL_OK && item == WXL_HANDLE_NONE &&
+                  api->container_slot_item(bagHandle, 2, &item) == WXL_E_INVALID,
+              "a bag's slot answers its item, none when empty, invalid past its slots");
+        binding.held.clear();
+        boar.guid = 0x200;
     }
 
     if (g_failures == 0)

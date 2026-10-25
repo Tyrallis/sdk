@@ -9,6 +9,8 @@
 #define WXL_LUA_OBJECTS_HPP
 
 #include <cstdint>
+#include <functional>
+#include <string>
 #include <vector>
 
 #include "Lua.hpp"
@@ -17,8 +19,14 @@
 
 namespace wxl::lua
 {
-    /// Registers the object metatable, the methods of each kind and the per-state tables.
-    void OpenObjects(lua_State* L);
+    /**
+     * @brief Registers the object metatable, the methods of each kind and the per-state tables.
+     *
+     * @p tooNew answers, for the version of the contract a method came with, why the mod may
+     * not use it -- its mod.json asks for an older abi -- or nothing when it may; the method is
+     * then a function raising that.
+     */
+    void OpenObjects(lua_State* L, const std::function<std::string(const uint32_t* since)>& tooNew);
 
     /// Pushes the object userdata for a handle -- the same one at every push while the mod holds
     /// it -- or nil for WXL_HANDLE_NONE.

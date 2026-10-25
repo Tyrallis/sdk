@@ -28,6 +28,12 @@ namespace wxl::lua::names
     constexpr uint32_t kGameObjects = KindBit(WXL_OBJECT_GAMEOBJECT);
     constexpr uint32_t kDynamics    = KindBit(WXL_OBJECT_DYNAMIC);
     constexpr uint32_t kCorpses     = KindBit(WXL_OBJECT_CORPSE);
+    /// Not a kind: the row answers for the active player only (the kinds column's Active).
+    constexpr uint32_t kActiveOnly  = 0x100u;
+    constexpr uint32_t kActive      = kPlayers | kActiveOnly;
+
+    /// The object kinds of a kinds mask, without kActiveOnly.
+    constexpr uint32_t KindsOf(uint32_t kinds) { return kinds & 0xFFu; }
 
     /// The type names Lua sees, by wxl_object_type: enums.def's, as an event's type arrives.
     inline const char* TypeName(uint32_t type)
@@ -43,7 +49,8 @@ namespace wxl::lua::names
         switch (kinds)
         {
         case kUnits: return "unit_";
-        case kPlayers: return "player_";
+        case kPlayers:
+        case kActive: return "player_";
         case kItems: return "item_";
         case kContainers: return "container_";
         case kGameObjects: return "gameobject_";
@@ -59,7 +66,8 @@ namespace wxl::lua::names
         switch (kinds)
         {
         case kUnits: return "Unit";
-        case kPlayers: return "Player";
+        case kPlayers:
+        case kActive: return "Player";
         case kItems: return "Item";
         case kContainers: return "Container";
         case kGameObjects: return "GameObject";
@@ -70,9 +78,12 @@ namespace wxl::lua::names
     }
 
     /// The methods every object has, written by hand rather than generated from a row.
-    constexpr const char* kHandWritten[] = {"Valid", "Guid",     "Type",   "TypeId",   "Name",
-                                            "Target", "Handle", "Field", "Fields", "SetField",
-                                            "FieldCount"};
+    constexpr const char* kHandWritten[] = {"Valid",  "Guid",   "Type",   "TypeId",   "Name",
+                                            "Target", "Handle", "Field",  "Fields",   "SetField",
+                                            "FieldCount",
+                                            // lists and actions, on the kinds they apply to
+                                            "Auras",  "Skills", "PartyMembers", "RaidMembers",
+                                            "Select", "Interact", "CastAt", "Use", "Follow", "Assist"};
 
     inline bool IsHandWritten(const std::string& name)
     {
@@ -83,6 +94,7 @@ namespace wxl::lua::names
 
     inline uint32_t Bits(uint32_t mask)
     {
+        mask           = KindsOf(mask);
         uint32_t count = 0;
         for (; mask; mask >>= 1) count += mask & 1u;
         return count;
@@ -142,7 +154,7 @@ namespace wxl::lua::names
             if (IsHandWritten(names[i])) qualify[i] = true;
             for (size_t j = 0; j < rows.size(); ++j)
             {
-                if (i == j || names[i] != names[j] || !(rows[i].kinds & rows[j].kinds)) continue;
+                if (i == j || names[i] != names[j] || !(KindsOf(rows[i].kinds) & KindsOf(rows[j].kinds))) continue;
                 if (Bits(rows[i].kinds) <= Bits(rows[j].kinds)) qualify[i] = true;
             }
         }
@@ -160,7 +172,7 @@ namespace wxl::lua::names
             if (IsHandWritten(names[i]))
                 text += std::string(rows[i].member) + " is named " + names[i] + ", a hand-written method; ";
             for (size_t j = i + 1; j < rows.size(); ++j)
-                if (names[i] == names[j] && (rows[i].kinds & rows[j].kinds))
+                if (names[i] == names[j] && (KindsOf(rows[i].kinds) & KindsOf(rows[j].kinds)))
                     text += std::string(rows[i].member) + " and " + rows[j].member + " are both " +
                             names[i] + " on one object; ";
         }
@@ -171,6 +183,7 @@ namespace wxl::lua::names
     inline std::string KindsText(uint32_t kinds)
     {
         if (kinds == kAny) return "any object";
+        if (kinds == kActive) return "the active player";
         std::string text;
         for (uint32_t type = WXL_OBJECT_ITEM; type <= WXL_OBJECT_CORPSE; ++type)
         {
@@ -179,6 +192,69 @@ namespace wxl::lua::names
             text += TypeName(type);
         }
         return text;
+    }
+    // --- the rows, as text ------------------------------------------------------------------
+
+    /// One row of object_reads.def, every column as written, and the version it came with.
+    struct RowInfo
+    {
+        const char* kinds_name; ///< "Units", "Active"
+        uint32_t    kinds;      ///< as a mask of the k* constants
+        const char* member;
+        const char* type;       ///< the C type the getter writes
+        const char* source;     ///< field, client, cache or shared
+        const char* cxx_name;   ///< the C++ facade's method
+        const char* cxx;        ///< what it answers in C++
+        const char* arg_c;      ///< the C type of its argument; empty for none
+        const char* arg;        ///< the C++ type of its argument
+        const char* doc;
+        uint32_t    since[3];   ///< major, minor, feature
+    };
+
+    /// Every row, in table order.
+    inline const std::vector<RowInfo>& Rows()
+    {
+        static const std::vector<RowInfo> rows = [] {
+            // A SINCE row is an entry with no member, which dates the rows after it.
+            const RowInfo table[] = {
+#define WXL_OBJECT_SINCE(major, minor, feature) \
+    RowInfo{"", 0, nullptr, "", "", "", "", "", "", "", {major, minor, feature}},
+#define WXL_OBJECT_READ(kinds, member, Method, type, source, Cxx, cxx, doc) \
+    RowInfo{#kinds, k##kinds, #member, #type, #source, #Cxx, #cxx, "", "", doc, {0, 1, 5}},
+#define WXL_OBJECT_READ_AT(kinds, member, Method, type, source, Cxx, cxx, Arg, arg, doc) \
+    RowInfo{#kinds, k##kinds, #member, #type, #source, #Cxx, #cxx, #Arg, #arg, doc, {0, 1, 5}},
+#include "wxl/runtime/object_reads.def"
+#undef WXL_OBJECT_READ_AT
+#undef WXL_OBJECT_READ
+#undef WXL_OBJECT_SINCE
+            };
+            std::vector<RowInfo> out;
+            uint32_t             since[3] = {0, 1, 5};
+            for (const RowInfo& row : table)
+            {
+                if (!row.member)
+                {
+                    for (int i = 0; i < 3; ++i) since[i] = row.since[i];
+                    continue;
+                }
+                RowInfo dated = row;
+                for (int i = 0; i < 3; ++i) dated.since[i] = since[i];
+                out.push_back(dated);
+            }
+            return out;
+        }();
+        return rows;
+    }
+
+    /// The Lua method name of every row of Rows(), in order.
+    inline const std::vector<std::string>& RowNames()
+    {
+        static const std::vector<std::string> names = [] {
+            std::vector<Member> members;
+            for (const RowInfo& row : Rows()) members.push_back(Member{row.member, row.kinds});
+            return LuaNames(members);
+        }();
+        return names;
     }
 } // namespace wxl::lua::names
 

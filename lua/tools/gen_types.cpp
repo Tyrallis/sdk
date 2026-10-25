@@ -150,22 +150,35 @@ namespace
         return families;
     }
 
-    /// One row of object_reads.def, as the generator sees it.
-    struct Row
+    /// What an object method answers, by its row.
+    std::string ObjectAnswer(const wxl::lua::names::RowInfo& row)
     {
-        const char* member;
-        uint32_t    kinds;
-        const char* type;
-        bool        indexed;
-    };
+        if (const wxl::reflect::Enum* e = wxl::reflect::FindEnum(row.cxx)) return AliasOf(*e);
+        if (std::strcmp(row.type, "wxl_bool") == 0) return "boolean";
+        if (std::strcmp(row.type, "wxl_handle") == 0) return "wxl.Object";
+        if (std::strcmp(row.type, "wxl_guid") == 0) return "wxl.Guid";
+        if (std::strcmp(row.type, "wxl_vec3") == 0) return "wxl.Vec3";
+        if (std::strcmp(row.type, "wxl_aura") == 0) return "wxl.Aura";
+        if (std::strcmp(row.type, "wxl_skill") == 0) return "wxl.Skill";
+        if (std::strcmp(row.type, "float") == 0) return "number";
+        return "integer";
+    }
 
-    const char* ValueType(const char* type)
+    /// What an object method takes, by its row.
+    std::string ObjectArgType(const wxl::lua::names::RowInfo& row)
     {
-        if (std::strcmp(type, "uint32_t") == 0 || std::strcmp(type, "int32_t") == 0) return "integer";
-        if (std::strcmp(type, "float") == 0) return "number";
-        if (std::strcmp(type, "wxl_guid") == 0) return "string";
-        if (std::strcmp(type, "wxl_vec3") == 0) return "wxl.Vec3";
-        return "any";
+        if (const wxl::reflect::Enum* e = wxl::reflect::FindEnum(row.arg)) return AliasOf(*e) + "|integer";
+        if (std::strcmp(row.arg_c, "wxl_handle") == 0) return "wxl.Object";
+        if (std::strcmp(row.arg_c, "wxl_vec3") == 0) return "wxl.Vec3";
+        return "integer";
+    }
+
+    std::string ObjectArgName(const wxl::lua::names::RowInfo& row)
+    {
+        if (std::strcmp(row.arg_c, "wxl_handle") == 0) return "other";
+        if (std::strcmp(row.arg_c, "wxl_vec3") == 0) return "point";
+        if (wxl::reflect::FindEnum(row.arg)) return "which";
+        return "index";
     }
 
     // --- the service modules (wxl/services/*.def) --------------------------------------------
@@ -250,6 +263,9 @@ namespace
             return "---@param " + name + " integer" + (optional.empty() ? "" : " 0 when left out") + "\n";
         if (k == "f64") return "---@param " + name + " number\n";
         if (k == "boolean") return "---@param " + name + " boolean\n";
+        if (k == "object")
+            return "---@param " + name + " wxl.Object" + (optional.empty() ? "" : " none when left out") + "\n";
+        if (k == "vec3") return "---@param " + name + " wxl.Vec3\n";
         if (IsResourceKind(k)) return "---@param " + name + " wxl." + k + "\n";
         return "---@param " + name + " any\n";
     }
@@ -646,22 +662,18 @@ namespace
                "---@param name wxl.FieldName|string\n---@param value wxl.FieldValue\n---@param element? integer\n"
                "---@return boolean|nil written, string|nil reason\nfunction Object:SetField(name, value, element) end\n\n";
 
-        std::vector<Row> rows = {
-#define WXL_OBJECT_READ(kinds, member, Method, type) Row{#member, wxl::lua::names::k##kinds, #type, false},
-#define WXL_OBJECT_READ_AT(kinds, member, Method, type) Row{#member, wxl::lua::names::k##kinds, #type, true},
-#include "wxl/runtime/object_reads.def"
-#undef WXL_OBJECT_READ_AT
-#undef WXL_OBJECT_READ
-        };
+        // The generated methods, from the rows: rows sharing a Lua name (Flags, DisplayId, ...)
+        // become one method, its kinds joined.
+        const std::vector<wxl::lua::names::RowInfo>& rows     = wxl::lua::names::Rows();
+        const std::vector<std::string>&              luaNames = wxl::lua::names::RowNames();
+        {
+            std::vector<wxl::lua::names::Member> members;
+            for (const auto& row : rows) members.push_back(wxl::lua::names::Member{row.member, row.kinds});
+            g_clash = wxl::lua::names::Clash(members, luaNames);
+        }
 
-        // Rows sharing a Lua name (Flags, DisplayId, ...) become one method, its kinds joined.
-        std::vector<wxl::lua::names::Member> members;
-        for (const Row& row : rows) members.push_back(wxl::lua::names::Member{row.member, row.kinds});
-        const std::vector<std::string> luaNames = wxl::lua::names::LuaNames(members);
-        g_clash = wxl::lua::names::Clash(members, luaNames);
-
-        std::vector<std::string>                       order;
-        std::map<std::string, std::vector<const Row*>> byName;
+        std::vector<std::string>                                            order;
+        std::map<std::string, std::vector<const wxl::lua::names::RowInfo*>> byName;
         for (size_t i = 0; i < rows.size(); ++i)
         {
             if (!byName.count(luaNames[i])) order.push_back(luaNames[i]);
@@ -669,20 +681,52 @@ namespace
         }
         for (const std::string& name : order)
         {
-            const std::vector<const Row*>& group = byName[name];
-            std::string                    kinds;
-            for (const Row* row : group)
+            const std::vector<const wxl::lua::names::RowInfo*>& group = byName[name];
+            const wxl::lua::names::RowInfo&                     row   = *group[0];
+            std::string                                         kinds;
+            for (const auto* each : group)
             {
                 if (!kinds.empty()) kinds += "; ";
-                kinds += wxl::lua::names::KindsText(row->kinds);
+                kinds += wxl::lua::names::KindsText(each->kinds);
             }
-            out << "---For " << kinds << " (" << group[0]->member;
+            out << "---" << row.doc << "\n---For " << kinds << " (" << group[0]->member;
             for (size_t i = 1; i < group.size(); ++i) out << ", " << group[i]->member;
             out << ").\n";
-            if (group[0]->indexed) out << "---@param index integer\n";
-            out << "---@return " << ValueType(group[0]->type) << "|nil value, string|nil reason\n";
-            out << "function Object:" << name << "(" << (group[0]->indexed ? "index" : "") << ") end\n\n";
+            if (row.since[0] != 0 || row.since[1] != 1 || row.since[2] != 5)
+                out << "---Came with abi " << row.since[0] << "." << row.since[1] << "." << row.since[2]
+                    << ": a mod whose mod.json asks for an older abi cannot use it.\n";
+            const std::string arg = *row.arg_c ? ObjectArgName(row) : std::string();
+            if (*row.arg_c) out << "---@param " << arg << " " << ObjectArgType(row) << "\n";
+            out << "---@return " << ObjectAnswer(row) << "|nil value, string|nil reason\n";
+            out << "function Object:" << name << "(" << arg << ") end\n\n";
         }
+        out << "---Every aura on a unit, in slot order, as Aura(slot) answers each. Came with abi 0.1.18.\n"
+               "---@return wxl.Aura[]|nil auras, string|nil reason\nfunction Object:Auras() end\n\n"
+               "---The lines of the active player's skill list that hold a skill. Came with abi 0.1.18.\n"
+               "---@return wxl.Skill[]|nil skills, string|nil reason\nfunction Object:Skills() end\n\n"
+               "---The guids of the active player's other party members. Came with abi 0.1.18.\n"
+               "---@return wxl.Guid[]|nil members, string|nil reason\nfunction Object:PartyMembers() end\n\n"
+               "---The guids of the active player's raid, itself included. Came with abi 0.1.18.\n"
+               "---@return wxl.Guid[]|nil members, string|nil reason\nfunction Object:RaidMembers() end\n\n"
+               "---Targets the object, as a left click on it does (wxl.action). Came with abi 0.1.18.\n"
+               "---@return boolean|nil done, string|nil reason\nfunction Object:Select() end\n\n"
+               "---Right-clicks the object: talks, loots, opens, uses (wxl.action). Came with abi 0.1.18.\n"
+               "---@return boolean|nil done, string|nil reason\nfunction Object:Interact() end\n\n"
+               "---Casts a spell the player knows at this unit (wxl.action). Came with abi 0.1.18.\n"
+               "---@param spell_id integer\n---@return boolean|nil done, string|nil reason\nfunction Object:CastAt(spell_id) end\n\n"
+               "---Follows this unit, as /follow does (wxl.action). Came with abi 0.1.18.\n"
+               "---@return boolean|nil done, string|nil reason\nfunction Object:Follow() end\n\n"
+               "---Targets what this unit targets, as /assist does (wxl.action). Came with abi 0.1.18.\n"
+               "---@return boolean|nil done, string|nil reason\nfunction Object:Assist() end\n\n"
+               "---Uses this item, on a unit, or on what it picks itself (wxl.action). Came with abi 0.1.18.\n"
+               "---@param target? wxl.Object\n---@return boolean|nil done, string|nil reason\nfunction Object:Use(target) end\n\n"
+               "---An aura on a unit, as Aura(slot) answers it.\n---@class wxl.Aura\n---@field spell_id integer\n"
+               "---@field caster wxl.Guid\n---@field stacks integer\n---@field level integer\n"
+               "---@field flags integer 0x10 helpful, 0x20 with a duration, 0x80 harmful\n"
+               "---@field duration integer milliseconds\n---@field expiration integer when it ends, on the client's clock in milliseconds; 0 for never\n\n"
+               "---A line of the skill list, as Skill(line) answers it.\n---@class wxl.Skill\n---@field id integer\n"
+               "---@field value integer\n---@field max integer\n---@field step integer\n"
+               "---@field temporary_bonus integer\n---@field permanent_bonus integer\n\n";
 
         // --- the wxl table ------------------------------------------------------------------
         out << Services();

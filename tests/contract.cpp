@@ -954,6 +954,7 @@ int main()
         host.Table()->publish_service(WXL_HOOK_RAW_SERVICE, WXL_HOOK_RAW_SERVICE_VERSION, wxltest::FakeHooks::RawTable());
         host.Table()->publish_service(WXL_PATCH_SERVICE, WXL_PATCH_SERVICE_VERSION, wxltest::FakePatch::Table());
         host.Table()->publish_service(WXL_DATA_SERVICE, WXL_DATA_SERVICE_VERSION, wxltest::FakeData::Table());
+        host.Table()->publish_service(WXL_ACTION_SERVICE, WXL_ACTION_SERVICE_VERSION, wxltest::FakeActions::Table());
     }
 
     Section("reads that can fail");
@@ -1148,6 +1149,108 @@ int main()
                              void(wxl::Object, wxl_object_type, uint32_t, uint32_t, wxl::FieldValue, wxl::FieldValue)>,
               "its handler takes the object, its type, the field, its size and the two values");
         wxl::ScriptMgr::Remove(&changes);
+    }
+
+    Section("every object member: object_reads.def through the facades");
+    {
+        // Each row from 0.1.18 on is a method of its class, which reaches its member and answers
+        // the fake's seed for the row as the type the row says: a number, a bool, an
+        // enumeration, a facade class, a struct.
+        using namespace wxl;
+        using wxltest::FakeObjects;
+        uint32_t since = 0;
+#define WXL_OBJECT_SINCE(major, minor, feature) since = since ? since : __LINE__;
+#define WXL_OBJECT_READ(kinds, member, Method, type, source, Cxx, cxx, doc)
+#define WXL_OBJECT_READ_AT(kinds, member, Method, type, source, Cxx, cxx, Arg, arg, doc)
+#include "wxl/runtime/object_reads.def"
+#undef WXL_OBJECT_READ_AT
+#undef WXL_OBJECT_READ
+#undef WXL_OBJECT_SINCE
+
+        std::string wrong;
+        int         checked = 0;
+        const auto  row     = [&](const char* member, const char* kinds, uint32_t line, auto got, auto expected) {
+            ++checked;
+            const bool held = std::strcmp(kinds, "Containers") != 0 && std::strcmp(kinds, "Dynamics") != 0 &&
+                              std::strcmp(kinds, "Corpses") != 0;
+            if (!held)
+            {
+                if (got || got.Error() != WXL_E_INVALID) wrong += std::string(member) + " (no such object here); ";
+                return;
+            }
+            if (!got || !wxltest::SameSeed(*got, expected)) wrong += std::string(member) + "; ";
+            (void)line;
+        };
+#define WXL_CONTRACT_OF_Any         Object(FakeObjects::kBoar)
+#define WXL_CONTRACT_OF_Units       Unit(FakeObjects::kBoar)
+#define WXL_CONTRACT_OF_Players     Player(FakeObjects::kPlayer)
+#define WXL_CONTRACT_OF_Active      Player(FakeObjects::kPlayer)
+#define WXL_CONTRACT_OF_Items       Item(FakeObjects::kItem)
+#define WXL_CONTRACT_OF_Containers  Container(FakeObjects::kItem)
+#define WXL_CONTRACT_OF_GameObjects GameObject(FakeObjects::kChest)
+#define WXL_CONTRACT_OF_Dynamics    DynamicObject(FakeObjects::kChest)
+#define WXL_CONTRACT_OF_Corpses     Corpse(FakeObjects::kChest)
+#define WXL_CONTRACT_EXPECTED(type, cxx) wxltest::SeedAs<type, cxx>(__LINE__)
+#define WXL_OBJECT_READ(kinds, member, Method, type, source, Cxx, cxx, doc)                          \
+    if (__LINE__ > since)                                                                             \
+        row(#member, #kinds, __LINE__, WXL_CONTRACT_OF_##kinds.Cxx(), WXL_CONTRACT_EXPECTED(type, cxx));
+#define WXL_OBJECT_READ_AT(kinds, member, Method, type, source, Cxx, cxx, Arg, arg, doc)              \
+    if (__LINE__ > since)                                                                             \
+        row(#member, #kinds, __LINE__, WXL_CONTRACT_OF_##kinds.Cxx(std::decay_t<arg>{}),               \
+            WXL_CONTRACT_EXPECTED(type, cxx));
+#include "wxl/runtime/object_reads.def"
+#undef WXL_OBJECT_READ_AT
+#undef WXL_OBJECT_READ
+        Check(checked > 60 && wrong.empty(), "every 0.1.18 row answers its seed through its class's method");
+        if (!wrong.empty()) std::printf("        %s\n", wrong.c_str());
+
+        const Player me = Player::Local();
+        const Unit   boar(FakeObjects::kBoar);
+        Check(me.InventoryItem(WXL_INVENTORY_MAIN_HAND) && me.InventoryItem(WXL_INVENTORY_MAIN_HAND)->Handle() == FakeObjects::kBoar,
+              "a handle answer is the facade class over the object");
+        Check(boar.Reaction() && *boar.Reaction() == WXL_REACTION_HOSTILE, "an enumeration answer is the C enum");
+        Check(boar.IsDead() && *boar.IsDead() == true, "a wxl_bool answer is a bool");
+        Check(Player(FakeObjects::kBoar).Xp().Error() == WXL_E_INVALID,
+              "a unit viewed as a player, unchecked, answers no player read");
+        Check(Unit(FakeObjects::kItem).Health().Error() == WXL_E_INVALID, "an item viewed as a unit no unit read");
+        const auto auras = boar.Auras();
+        Check(auras && !auras->empty() && (*auras)[0].stacks == 3, "Auras reads AuraCount slots");
+        const auto skills = me.Skills();
+        Check(skills && skills->size() == 128, "Skills keeps the lines that hold a skill");
+        const auto party = me.PartyMembers();
+        Check(party && party->size() == 4, "PartyMembers keeps the slots that hold someone");
+        Check(!Unit(FakeObjects::kStale).IsDead() && Unit(FakeObjects::kStale).IsDead().Error() == WXL_E_NOT_FOUND,
+              "a stale object is gone");
+    }
+
+    Section("wxl.action, and the objects' own actions");
+    {
+        using wxltest::FakeActions;
+        using wxltest::FakeObjects;
+        FakeActions::Calls().clear();
+        const wxl::Unit boar(FakeObjects::kBoar);
+        const wxl::Item stone(FakeObjects::kItem);
+        Check(wxl::ActionService::Target(boar) == WXL_OK && wxl::ActionService::ClearTarget() == WXL_OK &&
+                  wxl::ActionService::Interact(wxl::Object(FakeObjects::kChest)) == WXL_OK &&
+                  wxl::ActionService::CastSpell(133) == WXL_OK && wxl::ActionService::CastSpell(133, boar) == WXL_OK &&
+                  wxl::ActionService::StopCasting() == WXL_OK && wxl::ActionService::UseItem(stone) == WXL_OK &&
+                  wxl::ActionService::Follow(boar) == WXL_OK && wxl::ActionService::Assist(boar) == WXL_OK &&
+                  wxl::ActionService::MoveTo(wxl_vec3{1.0f, 2.0f, 3.0f}) == WXL_OK,
+              "every action of the facade reaches its member");
+        const auto& calls = FakeActions::Calls();
+        Check(calls.size() == 10 && calls[0].name == "target" && calls[0].object == FakeObjects::kBoar &&
+                  calls[3].spell == 133 && calls[3].target == WXL_HANDLE_NONE && calls[4].target == FakeObjects::kBoar &&
+                  calls[6].object == FakeObjects::kItem && calls[9].point.z == 3.0f,
+              "with its arguments: no target for a cast at the current one");
+        Check(wxl::ActionService::CastSpell(0) == WXL_E_FAILED, "what the client refuses answers failed");
+        FakeActions::Calls().clear();
+        Check(boar.Select() == WXL_OK && boar.Interact() == WXL_OK && boar.CastAt(116) == WXL_OK &&
+                  boar.Follow() == WXL_OK && boar.Assist() == WXL_OK && stone.Use(boar) == WXL_OK,
+              "the objects' own actions are the same calls");
+        Check(calls.size() == 6 && calls[2].spell == 116 && calls[2].target == FakeObjects::kBoar &&
+                  calls[5].target == FakeObjects::kBoar,
+              "on the object they are called on");
+        Check(wxl::Unit(FakeObjects::kStale).Select() == WXL_E_NOT_FOUND, "a stale object's action is gone");
     }
 
     Section("objects in handlers, and data kept per object");

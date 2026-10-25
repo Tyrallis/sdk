@@ -1232,6 +1232,38 @@
 ---arrives as its number.
 ---@alias wxl.WindowKind "gossip"|"merchant"|"trainer"|"bank"|"auction"|"mail"|"taxi"|"trade"|"quest"|"guild_bank"|"stable"|"petition"|"tabard"
 
+---A wxl_power_type value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.PowerType "mana"|"rage"|"focus"|"energy"|"happiness"|"runes"|"runic_power"
+
+---A wxl_reaction value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.Reaction "hated"|"hostile"|"unfriendly"|"neutral"|"friendly"|"honored"|"revered"|"exalted"
+
+---A wxl_creature_type value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.CreatureType "none"|"beast"|"dragonkin"|"demon"|"elemental"|"giant"|"undead"|"humanoid"|"critter"|"mechanical"|"not_specified"|"totem"|"non_combat_pet"|"gas_cloud"
+
+---A wxl_classification value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.Classification "normal"|"elite"|"rareelite"|"worldboss"|"rare"
+
+---A wxl_stand_state value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.StandState "standing"|"sitting"|"sitting_chair"|"sleeping"|"sitting_low_chair"|"sitting_medium_chair"|"sitting_high_chair"|"dead"|"kneeling"|"submerged"
+
+---A wxl_move_type value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.MoveType "walk"|"run"|"run_back"|"swim"|"swim_back"|"flight"|"flight_back"|"turn_rate"|"pitch_rate"
+
+---A wxl_inventory_slot value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.InventorySlot "head"|"neck"|"shoulder"|"shirt"|"chest"|"waist"|"legs"|"feet"|"wrist"|"hands"|"finger1"|"finger2"|"trinket1"|"trinket2"|"back"|"main_hand"|"off_hand"|"ranged"|"tabard"|"bag1"|"bag2"|"bag3"|"bag4"
+
+---A wxl_item_quality value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.ItemQuality "poor"|"common"|"uncommon"|"rare"|"epic"|"legendary"|"artifact"|"heirloom"
+
 -- The script families. A function defined on one of these tables as On<Event> is
 -- subscribed when the entry file has run and called with the event's parameters;
 -- on an event that can be answered its return values are taken, as Override
@@ -1650,217 +1682,723 @@ function Object:Fields(name) end
 ---@return boolean|nil written, string|nil reason
 function Object:SetField(name, value, element) end
 
+---Where it stands in the world, in yards; an item has no place.
 ---For any object (position).
 ---@return wxl.Vec3|nil value, string|nil reason
 function Object:Position() end
 
+---The way it faces, in radians.
 ---For any object (facing).
 ---@return number|nil value, string|nil reason
 function Object:Facing() end
 
+---The server's template id: a creature, item or game-object entry; 0 for a player.
 ---For any object (entry).
 ---@return integer|nil value, string|nil reason
 function Object:Entry() end
 
+---Its size, 1 being the model's own.
 ---For any object (scale).
 ---@return number|nil value, string|nil reason
 function Object:Scale() end
 
+---Its health; 0 or less is a dead unit, as the client reads it.
 ---For Unit, Player (unit_health).
 ---@return integer|nil value, string|nil reason
 function Object:Health() end
 
+---Its maximum health.
 ---For Unit, Player (unit_max_health).
 ---@return integer|nil value, string|nil reason
 function Object:MaxHealth() end
 
----For Unit, Player; GameObject (unit_level, gameobject_level).
+---Its level.
+---For Unit, Player; GameObject; Item, Container (unit_level, gameobject_level, item_level).
 ---@return integer|nil value, string|nil reason
 function Object:Level() end
 
+---Its power of a type (0 mana, 1 rage, 2 focus, 3 energy, 4 happiness, 5 runes, 6 runic power).
 ---For Unit, Player (unit_power).
 ---@param index integer
 ---@return integer|nil value, string|nil reason
 function Object:Power(index) end
 
+---Its maximum power of a type.
 ---For Unit, Player (unit_max_power).
 ---@param index integer
 ---@return integer|nil value, string|nil reason
 function Object:MaxPower(index) end
 
+---The type of power it runs on, as PowerValue takes it.
 ---For Unit, Player (unit_power_type).
 ---@return integer|nil value, string|nil reason
 function Object:PowerType() end
 
+---Its race, as ChrRaces.dbc numbers it.
 ---For Unit, Player (unit_race).
 ---@return integer|nil value, string|nil reason
 function Object:Race() end
 
----For Unit, Player (unit_class).
+---Its class, as ChrClasses.dbc numbers it.
+---For Unit, Player; Item, Container (unit_class, item_class).
 ---@return integer|nil value, string|nil reason
 function Object:Class() end
 
+---0 male, 1 female, 2 none.
 ---For Unit, Player (unit_sex).
 ---@return integer|nil value, string|nil reason
 function Object:Sex() end
 
+---The model it shows now, a CreatureDisplayInfo.dbc id.
 ---For Unit, Player; GameObject; Corpse (unit_display_id, gameobject_display_id, corpse_display_id).
 ---@return integer|nil value, string|nil reason
 function Object:DisplayId() end
 
+---The model it shows when nothing changes its shape.
 ---For Unit, Player (unit_native_display_id).
 ---@return integer|nil value, string|nil reason
 function Object:NativeDisplayId() end
 
+---The model of its mount; 0 while not mounted.
 ---For Unit, Player (unit_mount_display_id).
 ---@return integer|nil value, string|nil reason
 function Object:MountDisplayId() end
 
+---Its FactionTemplate.dbc id.
 ---For Unit, Player (unit_faction_template).
 ---@return integer|nil value, string|nil reason
 function Object:FactionTemplate() end
 
+---UNIT_FIELD_FLAGS as the server sends it.
 ---For Unit, Player; Item, Container; GameObject; Corpse (unit_flags, item_flags, gameobject_flags, corpse_flags).
 ---@return integer|nil value, string|nil reason
 function Object:Flags() end
 
+---UNIT_FIELD_FLAGS_2 as the server sends it.
 ---For Unit, Player (unit_flags2).
 ---@return integer|nil value, string|nil reason
 function Object:Flags2() end
 
+---UNIT_DYNAMIC_FLAGS as the server sends it to this client.
 ---For Unit, Player; GameObject; Corpse (unit_dynamic_flags, gameobject_dynamic_flags, corpse_dynamic_flags).
 ---@return integer|nil value, string|nil reason
 function Object:DynamicFlags() end
 
+---What it offers to talk about: vendor, trainer, quest giver, ... as UNIT_NPC_FLAGS.
 ---For Unit, Player (unit_npc_flags).
 ---@return integer|nil value, string|nil reason
 function Object:NpcFlags() end
 
+---The radius of its body, in yards.
 ---For Unit, Player (unit_bounding_radius).
 ---@return number|nil value, string|nil reason
 function Object:BoundingRadius() end
 
+---How far it reaches in melee, in yards.
 ---For Unit, Player (unit_combat_reach).
 ---@return number|nil value, string|nil reason
 function Object:CombatReach() end
 
+---The unit it charms, or 0.
 ---For Unit, Player (unit_charm).
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:Charm() end
 
+---The unit it summoned, its pet among them, or 0.
 ---For Unit, Player (unit_summon).
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:Summon() end
 
+---Who charms it, or 0.
 ---For Unit, Player (unit_charmed_by).
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:CharmedBy() end
 
+---Who summoned it: a pet's owner, or 0.
 ---For Unit, Player (unit_summoned_by).
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:SummonedBy() end
 
+---Who created it: a totem's shaman, or 0.
 ---For Unit, Player; GameObject (unit_created_by, gameobject_created_by).
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:CreatedBy() end
 
+---PLAYER_FLAGS as the server sends it.
 ---For Player (player_flags).
 ---@return integer|nil value, string|nil reason
 function Object:PlayerFlags() end
 
+---Its guild's id; 0 while unguilded.
 ---For Player (player_guild_id).
 ---@return integer|nil value, string|nil reason
 function Object:GuildId() end
 
+---Its rank in the guild, 0 for the guild master.
 ---For Player (player_guild_rank).
 ---@return integer|nil value, string|nil reason
 function Object:GuildRank() end
 
+---The title it shows, a CharTitles.dbc bit index; 0 for none.
 ---For Player (player_chosen_title).
 ---@return integer|nil value, string|nil reason
 function Object:ChosenTitle() end
 
+---The item id an equipment slot shows (0 head .. 18 tabard); 0 when the slot is empty.
 ---For Player (player_visible_item).
 ---@param index integer
 ---@return integer|nil value, string|nil reason
 function Object:VisibleItem(index) end
 
+---The player who owns it.
 ---For Item, Container; Corpse (item_owner, corpse_owner).
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:Owner() end
 
+---The bag holding it, or 0 in the backpack or when equipped.
 ---For Item, Container (item_contained_in).
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:ContainedIn() end
 
+---Who crafted it, or 0.
 ---For Item, Container (item_creator).
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:Creator() end
 
+---How many the stack holds.
 ---For Item, Container (item_stack_count).
 ---@return integer|nil value, string|nil reason
 function Object:StackCount() end
 
+---Seconds left before it expires; 0 when it does not.
 ---For Item, Container (item_duration).
 ---@return integer|nil value, string|nil reason
 function Object:Duration() end
 
+---Its durability now.
 ---For Item, Container (item_durability).
 ---@return integer|nil value, string|nil reason
 function Object:Durability() end
 
+---Its durability when repaired; 0 for an item that does not wear.
 ---For Item, Container (item_max_durability).
 ---@return integer|nil value, string|nil reason
 function Object:MaxDurability() end
 
+---How many slots the bag has.
 ---For Container (container_num_slots).
 ---@return integer|nil value, string|nil reason
 function Object:NumSlots() end
 
+---The item in a slot, as a guid; 0 for an empty one, invalid past NumSlots.
 ---For Container (container_slot).
 ---@param index integer
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:Slot(index) end
 
+---Its FactionTemplate.dbc id.
 ---For GameObject (gameobject_faction).
 ---@return integer|nil value, string|nil reason
 function Object:Faction() end
 
+---0 active, 1 ready, 2 destroyed.
 ---For GameObject (gameobject_state).
 ---@return integer|nil value, string|nil reason
 function Object:State() end
 
+---The game-object type, in the server's numbering (door 0, button 1, chest 3, ...).
 ---For GameObject (gameobject_type).
 ---@return integer|nil value, string|nil reason
 function Object:GameObjectType() end
 
+---The art kit it shows.
 ---For GameObject (gameobject_art_kit).
 ---@return integer|nil value, string|nil reason
 function Object:ArtKit() end
 
+---The unit that cast it.
 ---For DynamicObject (dynamic_caster).
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:Caster() end
 
+---The spell it is the area of.
 ---For DynamicObject (dynamic_spell_id).
 ---@return integer|nil value, string|nil reason
 function Object:SpellId() end
 
+---Its radius, in yards.
 ---For DynamicObject (dynamic_radius).
 ---@return number|nil value, string|nil reason
 function Object:Radius() end
 
+---The client time it was cast at, in milliseconds.
 ---For DynamicObject (dynamic_cast_time).
 ---@return integer|nil value, string|nil reason
 function Object:CastTime() end
 
+---The party the owner was in when they died, or 0.
 ---For Corpse (corpse_party).
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:Party() end
 
+---The owner's guild id.
 ---For Corpse (corpse_guild).
 ---@return integer|nil value, string|nil reason
 function Object:Guild() end
+
+---Whether it is the unit the client controls.
+---For any object (is_active_player).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsActivePlayer() end
+
+---Yards from it to another object, centre to centre; invalid when either has no place in the world.
+---For any object (distance).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param other wxl.Object
+---@return number|nil value, string|nil reason
+function Object:Distance(other) end
+
+---Yards from it to a point; invalid for an object with no place in the world.
+---For any object (distance_to).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param point wxl.Vec3
+---@return number|nil value, string|nil reason
+function Object:DistanceTo(point) end
+
+---What it targets, as a guid, whether that is in view or not; 0 for nothing.
+---For Unit, Player (unit_target_guid).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return wxl.Guid|nil value, string|nil reason
+function Object:TargetGuid() end
+
+---How it stands towards the active player, by the client's own reckoning: the colour of its name.
+---For Unit, Player (unit_reaction).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return wxl.Reaction|nil value, string|nil reason
+function Object:Reaction() end
+
+---How it stands towards another unit, by the client's own reckoning.
+---For Unit, Player (unit_reaction_to).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param other wxl.Object
+---@return wxl.Reaction|nil value, string|nil reason
+function Object:ReactionTo(other) end
+
+---Whether it is dead: no health left, or marked dead by the server.
+---For Unit, Player (unit_is_dead).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsDead() end
+
+---Whether it is in combat, as the client's UnitAffectingCombat reads it.
+---For Unit, Player (unit_in_combat).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:InCombat() end
+
+---Whether it is flagged for player-versus-player combat.
+---For Unit, Player (unit_is_pvp).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsPvp() end
+
+---Whether someone has tapped it: its kill and loot are theirs.
+---For Unit, Player (unit_is_tapped).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsTapped() end
+
+---Whether the active player, or their group, has tapped it.
+---For Unit, Player (unit_is_tapped_by_player).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsTappedByPlayer() end
+
+---Whether it has loot for the active player.
+---For Unit, Player (unit_is_lootable).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsLootable() end
+
+---Whether its corpse can be skinned.
+---For Unit, Player (unit_is_skinnable).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsSkinnable() end
+
+---How it stands: standing, sitting, sleeping, kneeling, ...
+---For Unit, Player (unit_stand_state).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return wxl.StandState|nil value, string|nil reason
+function Object:StandState() end
+
+---Whether it sits, on the ground or in a chair.
+---For Unit, Player (unit_is_sitting).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsSitting() end
+
+---Whether it is stealthed, as the client's IsStealthed reads it.
+---For Unit, Player (unit_is_stealthed).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsStealthed() end
+
+---Whether it rides a mount, as the client's IsMounted reads it.
+---For Unit, Player (unit_is_mounted).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsMounted() end
+
+---The spell it casts now; 0 for none.
+---For Unit, Player (unit_casting_spell_id).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:CastingSpellId() end
+
+---When the cast began, in milliseconds on the client's clock (the client's GetTime() * 1000).
+---For Unit, Player (unit_cast_start).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:CastStart() end
+
+---When the cast ends, on the same clock.
+---For Unit, Player (unit_cast_end).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:CastEnd() end
+
+---Whether it is casting, its cast not yet over, as the client's UnitCastingInfo reads it.
+---For Unit, Player (unit_is_casting).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsCasting() end
+
+---The spell it channels now; 0 for none.
+---For Unit, Player (unit_channel_spell_id).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:ChannelSpellId() end
+
+---When the channel began, on the client's clock.
+---For Unit, Player (unit_channel_start).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:ChannelStart() end
+
+---When the channel ends, on the client's clock.
+---For Unit, Player (unit_channel_end).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:ChannelEnd() end
+
+---Whether it is channeling, its channel not yet over.
+---For Unit, Player (unit_is_channeling).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsChanneling() end
+
+---How many auras the client holds on it, buffs and debuffs alike.
+---For Unit, Player (unit_aura_count).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:AuraCount() end
+
+---The aura in a slot, 0 to AuraCount - 1: its spell, caster, stacks, duration, expiration and flags.
+---For Unit, Player (unit_aura).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param index integer
+---@return wxl.Aura|nil value, string|nil reason
+function Object:Aura(index) end
+
+---Whether an aura of a spell is on it.
+---For Unit, Player (unit_has_aura).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param index integer
+---@return boolean|nil value, string|nil reason
+function Object:HasAura(index) end
+
+---What kind of creature it is, as the client works it out: beast, humanoid, undead, ...
+---For Unit, Player (unit_creature_type).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return wxl.CreatureType|nil value, string|nil reason
+function Object:CreatureType() end
+
+---Its beast family, a CreatureFamily.dbc id; 0 for none.
+---For Unit, Player (unit_creature_family).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:CreatureFamily() end
+
+---Its rank: normal, elite, rare, rare elite, world boss.
+---For Unit, Player (unit_classification).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return wxl.Classification|nil value, string|nil reason
+function Object:Classification() end
+
+---Whether it knows a spell: the active player's spell book or its pet's; false for any other unit.
+---For Unit, Player (unit_knows_spell).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param index integer
+---@return boolean|nil value, string|nil reason
+function Object:KnowsSpell(index) end
+
+---The flags of its movement: forward 0x1, backward 0x2, ..., falling 0x1000, flying 0x2000000.
+---For Unit, Player (unit_movement_flags).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:MovementFlags() end
+
+---One of its speeds, in yards a second: walk, run, swim, flight, ...; the turn and pitch rates in radians a second.
+---For Unit, Player (unit_speed).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param which wxl.MoveType|integer
+---@return number|nil value, string|nil reason
+function Object:Speed(which) end
+
+---Whether it swims, as the client's IsSwimming reads it.
+---For Unit, Player (unit_is_swimming).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsSwimming() end
+
+---Whether it flies, as the client's IsFlying reads it.
+---For Unit, Player (unit_is_flying).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsFlying() end
+
+---Whether it is falling, as the client's IsFalling reads it.
+---For Unit, Player (unit_is_falling).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsFalling() end
+
+---Whether it is a ghost, released from its corpse.
+---For Player (player_is_ghost).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsGhost() end
+
+---Whether it is away from the keyboard.
+---For Player (player_is_afk).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsAfk() end
+
+---Whether it asked not to be disturbed.
+---For Player (player_is_dnd).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsDnd() end
+
+---Whether it rests in an inn or a city, gaining rested experience.
+---For Player (player_is_resting).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsResting() end
+
+---Its money, in copper.
+---For the active player (player_money).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:Money() end
+
+---Its experience in this level.
+---For the active player (player_xp).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:Xp() end
+
+---The experience this level takes.
+---For the active player (player_next_level_xp).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:NextLevelXp() end
+
+---Its rested experience: kills give twice as much until it is spent.
+---For the active player (player_rested_xp).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:RestedXp() end
+
+---Its honor points.
+---For the active player (player_honor_points).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:HonorPoints() end
+
+---Its arena points.
+---For the active player (player_arena_points).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:ArenaPoints() end
+
+---The item in an equipment slot, or the bag in a bag slot (19 to 22); none for an empty slot.
+---For the active player (player_inventory_item).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param which wxl.InventorySlot|integer
+---@return wxl.Object|nil value, string|nil reason
+function Object:InventoryItem(which) end
+
+---The item in a slot of the backpack, 0 to 15; none for an empty slot.
+---For the active player (player_backpack_item).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param index integer
+---@return wxl.Object|nil value, string|nil reason
+function Object:BackpackItem(index) end
+
+---The skill on a line of the skill list, 0 to 127: its id, value and maximum; an id of 0 for an empty line.
+---For the active player (player_skill).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param index integer
+---@return wxl.Skill|nil value, string|nil reason
+function Object:Skill(index) end
+
+---A skill by its SkillLine.dbc id; invalid for a skill the player does not have.
+---For the active player (player_skill_of).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param index integer
+---@return wxl.Skill|nil value, string|nil reason
+function Object:SkillOf(index) end
+
+---How many others are in its party, 0 to 4.
+---For the active player (player_party_size).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:PartySize() end
+
+---The other party member in a party slot, 0 to 3, whether in view or not; 0 for an empty slot.
+---For the active player (player_party_member_guid).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param index integer
+---@return wxl.Guid|nil value, string|nil reason
+function Object:PartyMemberGuid(index) end
+
+---How many are in its raid, itself included; 0 outside a raid.
+---For the active player (player_raid_size).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:RaidSize() end
+
+---The raid member in a raid slot, 0 to 39, whether in view or not; 0 for an empty slot.
+---For the active player (player_raid_member_guid).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param index integer
+---@return wxl.Guid|nil value, string|nil reason
+function Object:RaidMemberGuid(index) end
+
+---The enchantment in a slot, 0 to 11 (0 permanent, 1 temporary, 2 to 4 sockets, ...), a SpellItemEnchantment.dbc id; 0 for none.
+---For Item, Container (item_enchant).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param index integer
+---@return integer|nil value, string|nil reason
+function Object:Enchant(index) end
+
+---Its quality: poor, common, uncommon, rare, epic, legendary, artifact, heirloom.
+---For Item, Container (item_quality).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return wxl.ItemQuality|nil value, string|nil reason
+function Object:Quality() end
+
+---The level it takes to use.
+---For Item, Container (item_required_level).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:RequiredLevel() end
+
+---Its subclass within the class: a sword, a cloth robe, ...
+---For Item, Container (item_subclass).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:Subclass() end
+
+---Where it is worn: head 1, neck 2, ...; 0 for an item that is not worn.
+---For Item, Container (item_inventory_type).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:InventoryType() end
+
+---How many a stack of it holds at most.
+---For Item, Container (item_max_stack).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:MaxStack() end
+
+---What a vendor pays for one, in copper.
+---For Item, Container (item_sell_price).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:SellPrice() end
+
+---The item in a slot of the bag; none for an empty one, invalid past NumSlots.
+---For Container (container_slot_item).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param index integer
+---@return wxl.Object|nil value, string|nil reason
+function Object:SlotItem(index) end
+
+---Every aura on a unit, in slot order, as Aura(slot) answers each. Came with abi 0.1.18.
+---@return wxl.Aura[]|nil auras, string|nil reason
+function Object:Auras() end
+
+---The lines of the active player's skill list that hold a skill. Came with abi 0.1.18.
+---@return wxl.Skill[]|nil skills, string|nil reason
+function Object:Skills() end
+
+---The guids of the active player's other party members. Came with abi 0.1.18.
+---@return wxl.Guid[]|nil members, string|nil reason
+function Object:PartyMembers() end
+
+---The guids of the active player's raid, itself included. Came with abi 0.1.18.
+---@return wxl.Guid[]|nil members, string|nil reason
+function Object:RaidMembers() end
+
+---Targets the object, as a left click on it does (wxl.action). Came with abi 0.1.18.
+---@return boolean|nil done, string|nil reason
+function Object:Select() end
+
+---Right-clicks the object: talks, loots, opens, uses (wxl.action). Came with abi 0.1.18.
+---@return boolean|nil done, string|nil reason
+function Object:Interact() end
+
+---Casts a spell the player knows at this unit (wxl.action). Came with abi 0.1.18.
+---@param spell_id integer
+---@return boolean|nil done, string|nil reason
+function Object:CastAt(spell_id) end
+
+---Follows this unit, as /follow does (wxl.action). Came with abi 0.1.18.
+---@return boolean|nil done, string|nil reason
+function Object:Follow() end
+
+---Targets what this unit targets, as /assist does (wxl.action). Came with abi 0.1.18.
+---@return boolean|nil done, string|nil reason
+function Object:Assist() end
+
+---Uses this item, on a unit, or on what it picks itself (wxl.action). Came with abi 0.1.18.
+---@param target? wxl.Object
+---@return boolean|nil done, string|nil reason
+function Object:Use(target) end
+
+---An aura on a unit, as Aura(slot) answers it.
+---@class wxl.Aura
+---@field spell_id integer
+---@field caster wxl.Guid
+---@field stacks integer
+---@field level integer
+---@field flags integer 0x10 helpful, 0x20 with a duration, 0x80 harmful
+---@field duration integer milliseconds
+---@field expiration integer when it ends, on the client's clock in milliseconds; 0 for never
+
+---A line of the skill list, as Skill(line) answers it.
+---@class wxl.Skill
+---@field id integer
+---@field value integer
+---@field max integer
+---@field step integer
+---@field temporary_bonus integer
+---@field permanent_bonus integer
 
 -- The service modules. Each function answers its value, or nil and the reason: "unsupported"
 -- for a runtime without the service or the member, otherwise the result's name ("invalid",
@@ -2234,6 +2772,65 @@ function profile.Message(text) end
 ---@param name string
 function profile.FrameMark(name) end
 
+---wxl.action. What the player can do, through the client's own functions: target, interact, cast, use, follow, move. Main thread only.
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@class wxl.action
+local action = {}
+
+---Targets an object, as a left click on it does.
+---@param target wxl.Object
+---@return true|nil ok
+---@return string|nil reason
+function action.Target(target) end
+
+---Clears the target, as Escape does.
+---@return true|nil ok
+---@return string|nil reason
+function action.ClearTarget() end
+
+---Right-clicks an object: talks to an NPC, loots a corpse, opens a chest, uses a game object; it becomes the target.
+---@param target wxl.Object
+---@return true|nil ok
+---@return string|nil reason
+function action.Interact(target) end
+
+---Casts a spell the player knows at a unit, or at the current target when target is left out, as CastSpellByID does.
+---@param spell_id integer
+---@param target? wxl.Object none when left out
+---@return true|nil ok
+---@return string|nil reason
+function action.CastSpell(spell_id, target) end
+
+---Stops the cast, the channel or the repeating spell in progress, as SpellStopCasting does.
+---@return true|nil ok
+---@return string|nil reason
+function action.StopCasting() end
+
+---Uses an item the player holds, on a unit, or on what the item picks itself when target is left out.
+---@param item wxl.Object
+---@param target? wxl.Object none when left out
+---@return true|nil ok
+---@return string|nil reason
+function action.UseItem(item, target) end
+
+---Follows a unit, as /follow does.
+---@param unit wxl.Object
+---@return true|nil ok
+---@return string|nil reason
+function action.Follow(unit) end
+
+---Targets what a unit targets, as /assist does.
+---@param unit wxl.Object
+---@return true|nil ok
+---@return string|nil reason
+function action.Assist(unit) end
+
+---Walks the player to a point, as a click-to-move click on the ground does.
+---@param point wxl.Vec3
+---@return true|nil ok
+---@return string|nil reason
+function action.MoveTo(point) end
+
 ---wxl.point. Functions of the engine a mod runs code before, instead of or after.
 ---Came with abi 0.1.16: a mod whose mod.json asks for an older abi cannot use it.
 ---@class wxl.point
@@ -2319,6 +2916,7 @@ function object.Unwatch(type, name) end
 ---@field patch wxl.patch
 ---@field footprint wxl.footprint
 ---@field profile wxl.profile
+---@field action wxl.action
 ---@field point wxl.point
 ---@field events table<wxl.Family, string[]> every family's events, as On<Event>
 wxl = {}

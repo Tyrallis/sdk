@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
+//
+// wxl.action as data: one row per member of wxl_action_api, in member order. The shapes and
+// their columns are described in wxl/services/rows.hpp.
+
+#ifndef WXL_API
+#error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including action.def"
+#endif
+
+WXL_API_SERVICE(action, WXL_ACTION_SERVICE, WXL_ACTION_SERVICE_VERSION, (0, 1, 18), safe,
+                "What the player can do, through the client's own functions: target, interact, cast, use, follow, move. Main thread only.")
+
+WXL_API(action, target, Target, result, (object target), generated, generated,
+        "Targets an object, as a left click on it does.")
+WXL_API(action, clear_target, ClearTarget, result, (), generated, generated,
+        "Clears the target, as Escape does.")
+WXL_API(action, interact, Interact, result, (object target), generated, generated,
+        "Right-clicks an object: talks to an NPC, loots a corpse, opens a chest, uses a game object; it becomes the target.")
+WXL_API(action, cast_spell, CastSpell, result, (u32 spell_id, opt<object> target), generated, by_hand,
+        "Casts a spell the player knows at a unit, or at the current target when target is left out, as CastSpellByID does.")
+WXL_API(action, stop_casting, StopCasting, result, (), generated, generated,
+        "Stops the cast, the channel or the repeating spell in progress, as SpellStopCasting does.")
+WXL_API(action, use_item, UseItem, result, (object item, opt<object> target), generated, by_hand,
+        "Uses an item the player holds, on a unit, or on what the item picks itself when target is left out.")
+WXL_API(action, follow, Follow, result, (object unit), generated, generated,
+        "Follows a unit, as /follow does.")
+WXL_API(action, assist, Assist, result, (object unit), generated, generated,
+        "Targets what a unit targets, as /assist does.")
+WXL_API(action, move_to, MoveTo, result, (vec3 point), generated, generated,
+        "Walks the player to a point, as a click-to-move click on the ground does.")

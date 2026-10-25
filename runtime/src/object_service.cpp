@@ -10,6 +10,8 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <type_traits>
+#include <utility>
 
 #include "wxl/objects/fields.hpp"
 
@@ -44,10 +46,53 @@ namespace wxl::runtime
         uint32_t kind = 0;
         native        = Object(handle, &kind);
         if (!native) return WXL_E_NOT_FOUND;
-        return kind < 32u && (kinds & (1u << kind)) != 0 ? WXL_OK : WXL_E_INVALID;
+        if (kind >= 32u || (kinds & (1u << kind)) == 0) return WXL_E_INVALID;
+        // The active player's own fields: the client keeps them for no other player.
+        if ((kinds & kActiveOnly) && instance_->binding_.LocalPlayer() != native) return WXL_E_INVALID;
+        return WXL_OK;
     }
 
-    template <class V, auto Read, uint32_t Kinds>
+    namespace
+    {
+        /// Whether a getter's out is a struct that starts with struct_size.
+        template <class V, class = void>
+        struct Sized : std::false_type
+        {
+        };
+        template <class V>
+        struct Sized<V, std::void_t<decltype(V::struct_size)>> : std::true_type
+        {
+        };
+    } // namespace
+
+    template <class R, class... A>
+    bool ObjectService::Call(R read, A&&... args)
+    {
+        if constexpr (std::is_member_function_pointer_v<R> &&
+                      std::is_invocable_v<R, const ObjectBinding&, A...>)
+            return (instance_->binding_.*read)(std::forward<A>(args)...);
+        else
+            return (instance_->*read)(std::forward<A>(args)...);
+    }
+
+    template <class V>
+    void ObjectService::Give(V* out, const V& value)
+    {
+        if constexpr (Sized<V>::value)
+        {
+            // The caller's struct may be older and shorter than this one: no more than it knows.
+            const uint32_t asked = out->struct_size;
+            const uint32_t size  = asked && asked < sizeof(V) ? asked : uint32_t(sizeof(V));
+            std::memcpy(out, &value, size);
+            out->struct_size = size;
+        }
+        else
+        {
+            *out = value;
+        }
+    }
+
+    template <class V, auto Read, uint32_t Kinds, wxl_result Miss>
     wxl_result WXL_CALL ObjectService::Get(wxl_handle handle, V* out)
     {
         if (!out) return WXL_E_INVALID;
@@ -55,18 +100,26 @@ namespace wxl::runtime
         void*            native = nullptr;
         const wxl_result gated  = Gate(handle, Kinds, native);
         if (gated != WXL_OK) return gated;
-        return (instance_->binding_.*Read)(native, *out) ? WXL_OK : WXL_E_INVALID;
+        V value{};
+        if constexpr (Sized<V>::value) value.struct_size = uint32_t(sizeof(V));
+        if (!Call(Read, native, value)) return Miss;
+        Give(out, value);
+        return WXL_OK;
     }
 
-    template <class V, auto Read, uint32_t Kinds>
-    wxl_result WXL_CALL ObjectService::GetAt(wxl_handle handle, uint32_t index, V* out)
+    template <class V, class A, auto Read, uint32_t Kinds, wxl_result Miss>
+    wxl_result WXL_CALL ObjectService::GetAt(wxl_handle handle, A arg, V* out)
     {
         if (!out) return WXL_E_INVALID;
 
         void*            native = nullptr;
         const wxl_result gated  = Gate(handle, Kinds, native);
         if (gated != WXL_OK) return gated;
-        return (instance_->binding_.*Read)(native, index, *out) ? WXL_OK : WXL_E_INVALID;
+        V value{};
+        if constexpr (Sized<V>::value) value.struct_size = uint32_t(sizeof(V));
+        if (!Call(Read, native, arg, value)) return Miss;
+        Give(out, value);
+        return WXL_OK;
     }
 
     ObjectService::ObjectService(ObjectBinding& binding) : binding_(binding)
@@ -93,10 +146,16 @@ namespace wxl::runtime
         api_.watch_field     = &ObjectService::WatchFieldThunk;
         api_.unwatch_field   = &ObjectService::UnwatchFieldThunk;
 
-#define WXL_OBJECT_READ(kinds, member, Method, type) \
-    api_.member = &Get<type, &ObjectBinding::Method, k##kinds>;
-#define WXL_OBJECT_READ_AT(kinds, member, Method, type) \
-    api_.member = &GetAt<type, &ObjectBinding::Method, k##kinds>;
+#define WXL_OBJECT_READ(kinds, member, Method, type, source, Cxx, cxx, doc)                 \
+    WXL_OBJECT_BINDS(source, api_.member = &Get<type, &ObjectBinding::Method, k##kinds,      \
+                                                WXL_OBJECT_MISS(source)>;)                   \
+    WXL_OBJECT_SHARES(source, api_.member = &Get<type, &ObjectService::Method, k##kinds,     \
+                                                 WXL_OBJECT_MISS(source)>;)
+#define WXL_OBJECT_READ_AT(kinds, member, Method, type, source, Cxx, cxx, Arg, arg, doc)     \
+    WXL_OBJECT_BINDS(source, api_.member = &GetAt<type, Arg, &ObjectBinding::Method,         \
+                                                  k##kinds, WXL_OBJECT_MISS(source)>;)       \
+    WXL_OBJECT_SHARES(source, api_.member = &GetAt<type, Arg, &ObjectService::Method,        \
+                                                   k##kinds, WXL_OBJECT_MISS(source)>;)
 #include "wxl/runtime/object_reads.def"
 #undef WXL_OBJECT_READ
 #undef WXL_OBJECT_READ_AT

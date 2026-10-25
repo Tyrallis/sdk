@@ -51,6 +51,8 @@
 //   point_fn wxl_point_fn  point_call wxl_point_call*
 //   values (const wxl_value*, uint32_t count)  bytes const void*
 //   bytes_size uint32_t: the length of the bytes before it, which must all be as long
+//   object wxl_handle: a world object; a script passes the object, C++ a wxl::Object
+//   vec3 wxl_vec3: a point; a script passes a table with x, y and z
 //   a resource: its ctype
 //   opt<K> the C parameters of K, a parameter a script may leave out: it is then K's zero (0
 //       for a number), which the row's doc says. Every other parameter a script must give, and
@@ -86,6 +88,8 @@
 #include "wxl/services/point.h"
 #include "wxl/services/footprint.h"
 #include "wxl/services/profile.h"
+#include "wxl/services/action.h"
+#include "wxl/objects/object.hpp"
 #include "wxl/services/script.h"
 #include "wxl/services/storage.h"
 
@@ -117,6 +121,8 @@ namespace wxl::api
         struct values {};
         struct bytes {};
         struct bytes_size {};
+        struct object {};
+        struct vec3 {};
         template <class K>
         struct opt {};
 
@@ -157,6 +163,7 @@ namespace wxl::api
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
+#include "wxl/services/action.def"
 #include "wxl/services/point.def"
 #undef WXL_API_RESOURCE
 #undef WXL_API_FIELD
@@ -209,6 +216,8 @@ namespace wxl::api
     template <> struct Param<kind::values> { using C = List<const wxl_value*, uint32_t>; };
     template <> struct Param<kind::bytes> { using C = List<const void*>; };
     template <> struct Param<kind::bytes_size> { using C = List<uint32_t>; };
+    template <> struct Param<kind::object> { using C = List<wxl_handle>; };
+    template <> struct Param<kind::vec3> { using C = List<wxl_vec3>; };
     template <class R>
     struct Param<R, std::enable_if_t<IsResource<R>::value>>
     {
@@ -339,6 +348,7 @@ namespace wxl::api
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
+#include "wxl/services/action.def"
 #include "wxl/services/point.def"
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
@@ -485,6 +495,7 @@ namespace wxl::api
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
+#include "wxl/services/action.def"
 #include "wxl/services/point.def"
         };
 #undef WXL_API_FIELD
@@ -513,6 +524,7 @@ namespace wxl::api
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
+#include "wxl/services/action.def"
 #include "wxl/services/point.def"
         };
 #undef WXL_API_FIELD
@@ -537,6 +549,7 @@ namespace wxl::api
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
+#include "wxl/services/action.def"
 #include "wxl/services/point.def"
         };
 #undef WXL_API_FIELD
@@ -562,6 +575,7 @@ namespace wxl::api
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
+#include "wxl/services/action.def"
 #include "wxl/services/point.def"
         };
 #undef WXL_API_FIELD
@@ -589,6 +603,7 @@ namespace wxl::api
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
+#include "wxl/services/action.def"
 #include "wxl/services/point.def"
         };
 #undef WXL_API_SINCE
@@ -715,6 +730,18 @@ namespace wxl::api
     {
         using type = bool;
         static wxl_bool ToC(bool value) { return value ? WXL_TRUE : WXL_FALSE; }
+    };
+    template <>
+    struct CxxParam<kind::object>
+    {
+        using type = Object;
+        static wxl_handle ToC(Object value) { return value.Handle(); }
+    };
+    template <>
+    struct CxxParam<kind::vec3>
+    {
+        using type = wxl_vec3;
+        static wxl_vec3 ToC(wxl_vec3 value) { return value; }
     };
     /// A parameter a script may leave out is an ordinary one in C++.
     template <class K>

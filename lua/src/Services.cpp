@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "Objects.hpp"
 #include "ScriptMod.hpp"
 #include "Shims.hpp"
 #include "wxl/reflect.hpp"
@@ -94,6 +95,7 @@ namespace wxl::lua
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
+#include "wxl/services/action.def"
 #include "wxl/services/point.def"
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD
@@ -121,6 +123,7 @@ namespace wxl::lua
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
+#include "wxl/services/action.def"
 #include "wxl/services/point.def"
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD
@@ -402,6 +405,42 @@ namespace wxl::lua
                 return static_cast<Held>(box->value);
             }
             static std::tuple<Held> C(Held held) { return {held}; }
+        };
+
+        /// A world object: the mod's object, as a wxl.object method hands it.
+        template <>
+        struct Arg<kind::object>
+        {
+            using Held = wxl_handle;
+            static Held Read(Reader& r)
+            {
+                Require(r, "an object");
+                return CheckObject(r.L, r.next++);
+            }
+            static std::tuple<wxl_handle> C(Held held) { return {held}; }
+        };
+
+        /// A point: a table with x, y and z, as Position() answers one.
+        template <>
+        struct Arg<kind::vec3>
+        {
+            using Held = wxl_vec3;
+            static Held Read(Reader& r)
+            {
+                Require(r, "a point");
+                const int at = r.next++;
+                luaL_checktype(r.L, at, LUA_TTABLE);
+                lua_getfield(r.L, at, "x");
+                lua_getfield(r.L, at, "y");
+                lua_getfield(r.L, at, "z");
+                if (!lua_isnumber(r.L, -3) || !lua_isnumber(r.L, -2) || !lua_isnumber(r.L, -1))
+                    luaL_argerror(r.L, at, "a point: a table with numbers x, y and z");
+                const wxl_vec3 point{static_cast<float>(lua_tonumber(r.L, -3)), static_cast<float>(lua_tonumber(r.L, -2)),
+                                     static_cast<float>(lua_tonumber(r.L, -1))};
+                lua_pop(r.L, 3);
+                return point;
+            }
+            static std::tuple<wxl_vec3> C(Held held) { return {held}; }
         };
 
         /// A parameter a script may leave out: K's zero when it does, which the row's doc says.
@@ -886,6 +925,7 @@ namespace wxl::lua
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
+#include "wxl/services/action.def"
 #include "wxl/services/point.def"
             };
 #undef WXL_API_CLOSE
@@ -915,6 +955,7 @@ namespace wxl::lua
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
+#include "wxl/services/action.def"
 #include "wxl/services/point.def"
             };
 #undef WXL_API_CLOSE

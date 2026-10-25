@@ -19,13 +19,7 @@ namespace wxl
 
         using Item::Item;
 
-        Expected<uint32_t> NumSlots() const { return Read(&wxl_object_api::container_num_slots); }
-
-        /// The item in a slot as a guid, WXL_GUID_NONE for an empty one; invalid past NumSlots().
-        Expected<wxl_guid> SlotGuid(uint32_t index) const
-        {
-            return ReadAt(&wxl_object_api::container_slot, index);
-        }
+#include "wxl/objects/generated/container.inc"
     };
 } // namespace wxl
 

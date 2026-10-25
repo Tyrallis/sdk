@@ -151,7 +151,9 @@ namespace wxl::lua
 
         OpenSandbox(state_, candidate_.directory, Id(),
                     [this](const std::filesystem::path& file) { Watch(file); });
-        OpenObjects(state_);
+        OpenObjects(state_, [this](const uint32_t* since) {
+            return TooNew(host::AbiVersion{since[0], since[1], since[2]});
+        });
         Install();
 
         lua_State* L = state_;

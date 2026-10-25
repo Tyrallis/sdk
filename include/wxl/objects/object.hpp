@@ -15,9 +15,50 @@
 
 #include "wxl/objects/facade.hpp"
 #include "wxl/objects/fields.hpp"
+#include "wxl/services/action.h"
 
 namespace wxl
 {
+    class Object;
+
+    namespace detail
+    {
+        /// What a getter wrote, as the facade answers it: a wxl_bool as bool, a number as the
+        /// enumeration it holds, a handle as the facade class it names.
+        template <class T, class V>
+        T FromC(const V& value)
+        {
+            if constexpr (std::is_same_v<T, bool>) return value != 0;
+            else if constexpr (std::is_enum_v<T>) return static_cast<T>(value);
+            else if constexpr (std::is_class_v<T> && !std::is_same_v<T, V>) return T(value);
+            else return value;
+        }
+
+        /// Whether an out struct starts with struct_size, which the caller fills.
+        template <class V, class = void>
+        struct Sized : std::false_type
+        {
+        };
+        template <class V>
+        struct Sized<V, std::void_t<decltype(V::struct_size)>> : std::true_type
+        {
+        };
+
+        template <class T>
+        struct Identity
+        {
+            using type = T;
+        };
+
+        /// wxl.action, for the objects' own actions (wxl/services/action.hpp is its facade).
+        class ActionTable : public Facade<ActionTable, wxl_action_api>
+        {
+        public:
+            static constexpr const char* kName    = WXL_ACTION_SERVICE;
+            static constexpr uint32_t    kVersion = WXL_ACTION_SERVICE_VERSION;
+        };
+    } // namespace detail
+
     /**
      * @brief Anything the client holds in the world.
      *
@@ -99,11 +140,6 @@ namespace wxl
             return type;
         }
 
-        Expected<wxl_vec3> Position() const { return Read(&wxl_object_api::position); }
-
-        /// Facing in radians.
-        Expected<float> Facing() const { return Read(&wxl_object_api::facing); }
-
         /// The display name, copied out of the runtime's storage.
         Expected<std::string> Name() const
         {
@@ -112,10 +148,18 @@ namespace wxl
             return std::string(View(*name));
         }
 
-        /// The server's template id: a creature, item or game-object entry; 0 for a player.
-        Expected<uint32_t> Entry() const { return Read(&wxl_object_api::entry); }
+#include "wxl/objects/generated/object.inc"
 
-        Expected<float> Scale() const { return Read(&wxl_object_api::scale); }
+        // --- what the player can do with it (wxl.action) ------------------------------------
+        //
+        // Each answers as wxl::ActionService does: WXL_OK when the client took the action,
+        // WXL_E_FAILED when it refused it, WXL_E_UNSUPPORTED on a runtime older than abi 0.1.18.
+
+        /// Targets it, as a left click on it does.
+        wxl_result Select() const { return Act(&wxl_action_api::target); }
+
+        /// Right-clicks it: talks to an NPC, loots a corpse, opens a chest, uses a game object.
+        wxl_result Interact() const { return Act(&wxl_action_api::interact); }
 
         /**
          * @brief This object as a narrower class, when its server type allows it.
@@ -264,6 +308,41 @@ namespace wxl
             const wxl_result carried = CarriesKind(api, kind);
             if (carried != WXL_OK) return carried;
             return api->write_fields(handle_, first, count, in, WXL_FIELD_WRITE_PLAIN);
+        }
+
+        /// A getter with an argument of its own C type: a slot, a spell, another object, a point.
+        template <class V, class A>
+        using GetterWith = wxl_result(WXL_CALL*)(wxl_handle, A, V*);
+
+        /// One getter, answered as the facade's type T (detail::FromC).
+        template <class T, class V>
+        Expected<T> ReadAs(Getter<V> wxl_object_api::*getter) const
+        {
+            Expected<V> value = Read(getter);
+            if (!value) return Unexpected{value.Error()};
+            return detail::FromC<T>(*value);
+        }
+
+        template <class T, class V, class A>
+        Expected<T> ReadAtAs(GetterWith<V, A> wxl_object_api::*getter, typename detail::Identity<A>::type arg) const
+        {
+            const wxl_object_api* api = ObjectService::Raw();
+            if (!detail::Carries(api, getter)) return Unexpected{WXL_E_UNSUPPORTED};
+            if (!HasHandle()) return Unexpected{WXL_E_NOT_FOUND};
+            V out{};
+            if constexpr (detail::Sized<V>::value) out.struct_size = uint32_t(sizeof(V));
+            const wxl_result result = (api->*getter)(handle_, arg, &out);
+            if (result != WXL_OK) return Unexpected{result};
+            return detail::FromC<T>(out);
+        }
+
+        /// An action of wxl.action on this object.
+        wxl_result Act(wxl_result(WXL_CALL* wxl_action_api::*action)(wxl_handle)) const
+        {
+            const wxl_action_api* api = detail::ActionTable::Raw();
+            if (!detail::Carries(api, action)) return WXL_E_UNSUPPORTED;
+            if (!HasHandle()) return WXL_E_NOT_FOUND;
+            return (api->*action)(handle_);
         }
 
         template <class V>

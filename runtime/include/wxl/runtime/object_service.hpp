@@ -12,6 +12,7 @@
 #include "wxl/abi.h"
 #include "wxl/events.h"
 #include "wxl/runtime/handles.hpp"
+#include "wxl/runtime/object_rows.hpp"
 #include "wxl/services/object.h"
 
 namespace wxl::runtime
@@ -99,10 +100,12 @@ namespace wxl::runtime
         /// Why a field call was refused, one line for the runtime's log.
         virtual void Report(const char* line) const { (void)line; }
 
-#define WXL_OBJECT_READ(kinds, member, Method, type) \
-    virtual bool Method(void* object, type& out) const = 0;
-#define WXL_OBJECT_READ_AT(kinds, member, Method, type) \
-    virtual bool Method(void* object, uint32_t index, type& out) const = 0;
+        // One read per row a runtime answers (source field, client or cache): the shared rows
+        // are the service's own.
+#define WXL_OBJECT_READ(kinds, member, Method, type, source, Cxx, cxx, doc) \
+    WXL_OBJECT_BINDS(source, virtual bool Method(void* object, type& out) const = 0;)
+#define WXL_OBJECT_READ_AT(kinds, member, Method, type, source, Cxx, cxx, Arg, arg, doc) \
+    WXL_OBJECT_BINDS(source, virtual bool Method(void* object, Arg value, type& out) const = 0;)
 #include "wxl/runtime/object_reads.def"
 #undef WXL_OBJECT_READ
 #undef WXL_OBJECT_READ_AT
@@ -217,27 +220,60 @@ namespace wxl::runtime
         static constexpr uint32_t kGameObjects = detail::KindBit(WXL_OBJECT_GAMEOBJECT);
         static constexpr uint32_t kDynamics    = detail::KindBit(WXL_OBJECT_DYNAMIC);
         static constexpr uint32_t kCorpses     = detail::KindBit(WXL_OBJECT_CORPSE);
+        /// Not a kind: the getter answers for the active player only.
+        static constexpr uint32_t kActiveOnly  = 0x100u;
+        static constexpr uint32_t kActive      = kPlayers | kActiveOnly;
 
         /// Resolves a handle to its object, or nullptr; and, when asked, its kind.
         static void* Object(wxl_handle handle, uint32_t* kind = nullptr);
 
         /// Resolves a handle whose kind is in a mask. WXL_E_NOT_FOUND for a handle that does not
-        /// resolve, WXL_E_INVALID for one of another kind.
+        /// resolve, WXL_E_INVALID for one of another kind, or for a player other than the
+        /// active one when the mask says kActiveOnly.
         static wxl_result Gate(wxl_handle handle, uint32_t kinds, void*& native);
 
         /**
-         * @brief One getter of the table: resolves, gates on kind, reads through the binding.
+         * @brief One getter of the table: resolves, gates on kind, reads.
          *
          * @tparam V      the out type the getter writes.
-         * @tparam Read   the ObjectBinding member that supplies it, as bool (void*, V&) const.
+         * @tparam Read   what supplies it: an ObjectBinding member or one of the service's own
+         *                shared reads, as bool (void*, V&) const.
          * @tparam Kinds  the kinds the getter accepts.
+         * @tparam Miss   what the getter answers when the read says false.
          */
-        template <class V, auto Read, uint32_t Kinds>
+        template <class V, auto Read, uint32_t Kinds, wxl_result Miss>
         static wxl_result WXL_CALL Get(wxl_handle handle, V* out);
 
-        /// The same for an indexed read, as bool (void*, uint32_t, V&) const.
-        template <class V, auto Read, uint32_t Kinds>
-        static wxl_result WXL_CALL GetAt(wxl_handle handle, uint32_t index, V* out);
+        /// The same for a read with an argument, as bool (void*, A, V&) const.
+        template <class V, class A, auto Read, uint32_t Kinds, wxl_result Miss>
+        static wxl_result WXL_CALL GetAt(wxl_handle handle, A arg, V* out);
+
+        /// Calls a read on the binding or on the service, whichever owns it.
+        template <class R, class... A>
+        static bool Call(R read, A&&... args);
+
+        /// Writes what a read gave into a getter's out, as the struct the caller knows.
+        template <class V>
+        static void Give(V* out, const V& value);
+
+        // --- the shared reads: one per row whose source is `shared` ------------------------
+
+#define WXL_OBJECT_READ(kinds, member, Method, type, source, Cxx, cxx, doc) \
+    WXL_OBJECT_SHARES(source, bool Method(void* object, type& out) const;)
+#define WXL_OBJECT_READ_AT(kinds, member, Method, type, source, Cxx, cxx, Arg, arg, doc) \
+    WXL_OBJECT_SHARES(source, bool Method(void* object, Arg value, type& out) const;)
+#include "wxl/runtime/object_reads.def"
+#undef WXL_OBJECT_READ
+#undef WXL_OBJECT_READ_AT
+
+        /// Dword `index` of the object's descriptor block, as the client holds it, the object
+        /// read as a `kind` (the kind whose fields the dword is); false past that kind's block
+        /// or for a runtime that cannot reach the block.
+        bool Dword(void* object, wxl_object_type kind, uint32_t index, uint32_t& out) const;
+
+        /// The handle of the object a guid names, tracked; WXL_HANDLE_NONE for 0 or nothing in
+        /// view. What a shared read answers for a wxl_handle.
+        wxl_handle Named(wxl_guid guid) const;
 
         static wxl_bool   WXL_CALL ValidThunk(wxl_handle object);
         static wxl_guid   WXL_CALL GuidThunk(wxl_handle object);

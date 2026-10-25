@@ -407,6 +407,255 @@ wxl::ObjectMap<uint32_t> hits;                                // a member of the
 void OnUnitDeath(wxl::Object unit) override { ++hits[unit]; } // gone with the unit
 ```
 
+#### Reading what an object is and does
+
+Each kind's class has a method for what the client knows of that kind (abi `0.1.18`): a unit's
+level, health and power, whether it is dead, in combat, casting or mounted, its auras, how it
+stands towards you; a player's money, experience, skills, bags and group; an item's durability,
+enchantments and what the item cache says of it. Each answers an `Expected` of the type that fits:
+a number, a `bool`, an enumeration of `wxl/enums.def` (`wxl_reaction`, `wxl_creature_type`,
+`wxl_item_quality`...), another object (`wxl::Item`), or a struct (`wxl_aura`, `wxl_skill`).
+
+Say your mod should warn when the target is a rare elite that hates you. Start from the event that
+hands you the new target:
+
+```cpp
+void OnTargetChanged(wxl::Object, wxl::Object current) override
+{
+    const wxl::Unit unit(current);                 // the event says a target is a unit or nothing
+    if (!unit) return;                             // targets nothing in view
+
+    const wxl::Expected<wxl_classification> rank     = unit.Classification();
+    const wxl::Expected<wxl_reaction>       reaction = unit.Reaction();
+    if (rank && *rank == WXL_CLASSIFICATION_RARE_ELITE && reaction && *reaction <= WXL_REACTION_HOSTILE)
+        wxl::Log(WXL_LOG_INFO, "alert", "a rare elite, level {}", unit.Level().ValueOr(0));
+}
+```
+
+`Reaction()` asks the client's own function, the one that colours the name plate: you get the
+same answer the player sees. A read that has nothing to answer says why in its `Error()`:
+`WXL_E_NOT_FOUND` once the object has left, `WXL_E_INVALID` for a read its kind does not have,
+`WXL_E_UNSUPPORTED` on a runtime older than the read.
+
+Your own player has more: the client keeps money, experience, the inventory and the skills for the
+player it controls only, and those reads answer `WXL_E_INVALID` for any other player.
+
+```cpp
+const wxl::Player me = wxl::Player::Local();
+const uint32_t    gold = me.Money().ValueOr(0) / 10000;
+if (wxl::Expected<wxl::Item> weapon = me.InventoryItem(WXL_INVENTORY_MAIN_HAND); weapon && *weapon)
+{
+    const uint32_t durability = weapon->Durability().ValueOr(0);
+    const auto     quality    = weapon->Quality();    // WXL_E_FAILED until the item cache has it
+}
+for (const wxl_aura& aura : me.Auras().ValueOr(std::vector<wxl_aura>{}))
+    if (aura.spell_id == 1459) ...                     // Arcane Intellect is up
+```
+
+An empty slot answers a null `wxl::Item` (`*weapon` tests false), not an error. A read of the item
+cache -- `Quality()`, `Level()`, `Class()`, `SellPrice()` -- answers `WXL_E_FAILED` while the
+client has not received the item's record from the server; ask again later.
+
+#### What the player can do: `wxl.action`
+
+The same objects carry what the player could do with them, done through the function the client
+runs for a click, a key or a slash command, with the client's own checks: a spell out of range
+is refused as it would be for the player.
+
+```cpp
+unit.Select();                              // targets it, as a left click does
+unit.Interact();                            // a right click: talk, loot, open, use
+unit.CastAt(133);                           // casts a spell the player knows at it
+weapon->Use();                              // uses an item, on what it picks itself
+unit.Follow();                              // as /follow
+unit.Assist();                              // targets what it targets, as /assist
+wxl::ActionService::ClearTarget();          // as Escape
+wxl::ActionService::StopCasting();
+wxl::ActionService::MoveTo(wxl_vec3{-8913.0f, 554.0f, 93.0f}); // click-to-move to a point
+```
+
+Each answers a `wxl_result`: `WXL_OK` when the client took the action, `WXL_E_FAILED` when it
+refused it, `WXL_E_UNSUPPORTED` out of the world. An action runs on the thread that runs the game,
+where your handlers of world events run; from any other thread it is refused with `WXL_E_INVALID`
+and the log says why.
+
+#### Every member
+
+Each class reads what its kind holds, every method answering an `Expected`; a class has its
+parents' members too (a `Player` is a `Unit` is an `Object`). The tables are made from the same
+rows as the methods, by `wxl-object-members`.
+
+<!-- object-members:cxx (written by wxl-object-members) -->
+
+**`wxl::Object`**: Every object
+
+| Method | Answers | What |
+|---|---|---|
+| `Position()` | `wxl_vec3` | Where it stands in the world, in yards; an item has no place. |
+| `Facing()` | `float` | The way it faces, in radians. |
+| `Entry()` | `uint32_t` | The server's template id: a creature, item or game-object entry; 0 for a player. |
+| `Scale()` | `float` | Its size, 1 being the model's own. |
+| `IsActivePlayer()` | `bool` | Whether it is the unit the client controls. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Distance(const Object& other)` | `float` | Yards from it to another object, centre to centre; invalid when either has no place in the world. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `DistanceTo(wxl_vec3 point)` | `float` | Yards from it to a point; invalid for an object with no place in the world. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+
+**`wxl::Unit`**: Units, players included
+
+| Method | Answers | What |
+|---|---|---|
+| `Health()` | `int32_t` | Its health; 0 or less is a dead unit, as the client reads it. |
+| `MaxHealth()` | `uint32_t` | Its maximum health. |
+| `Level()` | `uint32_t` | Its level. |
+| `PowerValue(Power power)` | `uint32_t` | Its power of a type (0 mana, 1 rage, 2 focus, 3 energy, 4 happiness, 5 runes, 6 runic power). |
+| `MaxPowerValue(Power power)` | `uint32_t` | Its maximum power of a type. |
+| `PowerType()` | `Power` | The type of power it runs on, as PowerValue takes it. |
+| `Race()` | `uint32_t` | Its race, as ChrRaces.dbc numbers it. |
+| `Class()` | `uint32_t` | Its class, as ChrClasses.dbc numbers it. |
+| `Sex()` | `uint32_t` | 0 male, 1 female, 2 none. |
+| `DisplayId()` | `uint32_t` | The model it shows now, a CreatureDisplayInfo.dbc id. |
+| `NativeDisplayId()` | `uint32_t` | The model it shows when nothing changes its shape. |
+| `MountDisplayId()` | `uint32_t` | The model of its mount; 0 while not mounted. |
+| `FactionTemplate()` | `uint32_t` | Its FactionTemplate.dbc id. |
+| `Flags()` | `uint32_t` | UNIT_FIELD_FLAGS as the server sends it. |
+| `Flags2()` | `uint32_t` | UNIT_FIELD_FLAGS_2 as the server sends it. |
+| `DynamicFlags()` | `uint32_t` | UNIT_DYNAMIC_FLAGS as the server sends it to this client. |
+| `NpcFlags()` | `uint32_t` | What it offers to talk about: vendor, trainer, quest giver, ... as UNIT_NPC_FLAGS. |
+| `BoundingRadius()` | `float` | The radius of its body, in yards. |
+| `CombatReach()` | `float` | How far it reaches in melee, in yards. |
+| `CharmGuid()` | `wxl_guid` | The unit it charms, or 0. |
+| `SummonGuid()` | `wxl_guid` | The unit it summoned, its pet among them, or 0. |
+| `CharmedByGuid()` | `wxl_guid` | Who charms it, or 0. |
+| `SummonedByGuid()` | `wxl_guid` | Who summoned it: a pet's owner, or 0. |
+| `CreatedByGuid()` | `wxl_guid` | Who created it: a totem's shaman, or 0. |
+| `TargetGuid()` | `wxl_guid` | What it targets, as a guid, whether that is in view or not; 0 for nothing. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Reaction()` | `wxl_reaction` | How it stands towards the active player, by the client's own reckoning: the colour of its name. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `ReactionTo(const Object& other)` | `wxl_reaction` | How it stands towards another unit, by the client's own reckoning. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsDead()` | `bool` | Whether it is dead: no health left, or marked dead by the server. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `InCombat()` | `bool` | Whether it is in combat, as the client's UnitAffectingCombat reads it. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsPvp()` | `bool` | Whether it is flagged for player-versus-player combat. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsTapped()` | `bool` | Whether someone has tapped it: its kill and loot are theirs. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsTappedByPlayer()` | `bool` | Whether the active player, or their group, has tapped it. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsLootable()` | `bool` | Whether it has loot for the active player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsSkinnable()` | `bool` | Whether its corpse can be skinned. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `StandState()` | `wxl_stand_state` | How it stands: standing, sitting, sleeping, kneeling, ... Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsSitting()` | `bool` | Whether it sits, on the ground or in a chair. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsStealthed()` | `bool` | Whether it is stealthed, as the client's IsStealthed reads it. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsMounted()` | `bool` | Whether it rides a mount, as the client's IsMounted reads it. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `CastingSpellId()` | `uint32_t` | The spell it casts now; 0 for none. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `CastStart()` | `uint32_t` | When the cast began, in milliseconds on the client's clock (the client's GetTime() * 1000). Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `CastEnd()` | `uint32_t` | When the cast ends, on the same clock. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsCasting()` | `bool` | Whether it is casting, its cast not yet over, as the client's UnitCastingInfo reads it. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `ChannelSpellId()` | `uint32_t` | The spell it channels now; 0 for none. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `ChannelStart()` | `uint32_t` | When the channel began, on the client's clock. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `ChannelEnd()` | `uint32_t` | When the channel ends, on the client's clock. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsChanneling()` | `bool` | Whether it is channeling, its channel not yet over. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `AuraCount()` | `uint32_t` | How many auras the client holds on it, buffs and debuffs alike. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Aura(uint32_t slot)` | `wxl_aura` | The aura in a slot, 0 to AuraCount - 1: its spell, caster, stacks, duration, expiration and flags. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `HasAura(uint32_t spell_id)` | `bool` | Whether an aura of a spell is on it. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `CreatureType()` | `wxl_creature_type` | What kind of creature it is, as the client works it out: beast, humanoid, undead, ... Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `CreatureFamily()` | `uint32_t` | Its beast family, a CreatureFamily.dbc id; 0 for none. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Classification()` | `wxl_classification` | Its rank: normal, elite, rare, rare elite, world boss. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `KnowsSpell(uint32_t spell_id)` | `bool` | Whether it knows a spell: the active player's spell book or its pet's; false for any other unit. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `MovementFlags()` | `uint32_t` | The flags of its movement: forward 0x1, backward 0x2, ..., falling 0x1000, flying 0x2000000. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Speed(wxl_move_type type)` | `float` | One of its speeds, in yards a second: walk, run, swim, flight, ...; the turn and pitch rates in radians a second. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsSwimming()` | `bool` | Whether it swims, as the client's IsSwimming reads it. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsFlying()` | `bool` | Whether it flies, as the client's IsFlying reads it. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsFalling()` | `bool` | Whether it is falling, as the client's IsFalling reads it. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+
+**`wxl::Player`**: Players
+
+| Method | Answers | What |
+|---|---|---|
+| `Flags()` | `uint32_t` | PLAYER_FLAGS as the server sends it. |
+| `GuildId()` | `uint32_t` | Its guild's id; 0 while unguilded. |
+| `GuildRank()` | `uint32_t` | Its rank in the guild, 0 for the guild master. |
+| `ChosenTitle()` | `uint32_t` | The title it shows, a CharTitles.dbc bit index; 0 for none. |
+| `VisibleItem(EquipSlot slot)` | `uint32_t` | The item id an equipment slot shows (0 head .. 18 tabard); 0 when the slot is empty. |
+| `IsGhost()` | `bool` | Whether it is a ghost, released from its corpse. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsAfk()` | `bool` | Whether it is away from the keyboard. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsDnd()` | `bool` | Whether it asked not to be disturbed. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsResting()` | `bool` | Whether it rests in an inn or a city, gaining rested experience. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Money()` | `uint32_t` | Its money, in copper. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Xp()` | `uint32_t` | Its experience in this level. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `NextLevelXp()` | `uint32_t` | The experience this level takes. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `RestedXp()` | `uint32_t` | Its rested experience: kills give twice as much until it is spent. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `HonorPoints()` | `uint32_t` | Its honor points. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `ArenaPoints()` | `uint32_t` | Its arena points. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `InventoryItem(wxl_inventory_slot slot)` | `Item` | The item in an equipment slot, or the bag in a bag slot (19 to 22); none for an empty slot. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `BackpackItem(uint32_t slot)` | `Item` | The item in a slot of the backpack, 0 to 15; none for an empty slot. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Skill(uint32_t line)` | `wxl_skill` | The skill on a line of the skill list, 0 to 127: its id, value and maximum; an id of 0 for an empty line. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `SkillOf(uint32_t skill_id)` | `wxl_skill` | A skill by its SkillLine.dbc id; invalid for a skill the player does not have. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `PartySize()` | `uint32_t` | How many others are in its party, 0 to 4. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `PartyMemberGuid(uint32_t slot)` | `wxl_guid` | The other party member in a party slot, 0 to 3, whether in view or not; 0 for an empty slot. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `RaidSize()` | `uint32_t` | How many are in its raid, itself included; 0 outside a raid. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `RaidMemberGuid(uint32_t slot)` | `wxl_guid` | The raid member in a raid slot, 0 to 39, whether in view or not; 0 for an empty slot. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+
+**`wxl::Item`**: Items, containers included
+
+| Method | Answers | What |
+|---|---|---|
+| `OwnerGuid()` | `wxl_guid` | The player who owns it. |
+| `ContainedInGuid()` | `wxl_guid` | The bag holding it, or 0 in the backpack or when equipped. |
+| `CreatorGuid()` | `wxl_guid` | Who crafted it, or 0. |
+| `StackCount()` | `int32_t` | How many the stack holds. |
+| `Duration()` | `uint32_t` | Seconds left before it expires; 0 when it does not. |
+| `Flags()` | `uint32_t` | ITEM_FIELD_FLAGS as the server sends it: soulbound 0x1, ... |
+| `Durability()` | `uint32_t` | Its durability now. |
+| `MaxDurability()` | `uint32_t` | Its durability when repaired; 0 for an item that does not wear. |
+| `Enchant(uint32_t slot)` | `uint32_t` | The enchantment in a slot, 0 to 11 (0 permanent, 1 temporary, 2 to 4 sockets, ...), a SpellItemEnchantment.dbc id; 0 for none. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Quality()` | `wxl_item_quality` | Its quality: poor, common, uncommon, rare, epic, legendary, artifact, heirloom. WXL_E_FAILED until the client has the item's record from the server. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Level()` | `uint32_t` | Its item level. WXL_E_FAILED until the client has the item's record from the server. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `RequiredLevel()` | `uint32_t` | The level it takes to use. WXL_E_FAILED until the client has the item's record from the server. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Class()` | `uint32_t` | Its class, an ItemClass.dbc id: weapon 2, armor 4, ... WXL_E_FAILED until the client has the item's record from the server. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Subclass()` | `uint32_t` | Its subclass within the class: a sword, a cloth robe, ... WXL_E_FAILED until the client has the item's record from the server. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `InventoryType()` | `uint32_t` | Where it is worn: head 1, neck 2, ...; 0 for an item that is not worn. WXL_E_FAILED until the client has the item's record from the server. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `MaxStack()` | `uint32_t` | How many a stack of it holds at most. WXL_E_FAILED until the client has the item's record from the server. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `SellPrice()` | `uint32_t` | What a vendor pays for one, in copper. WXL_E_FAILED until the client has the item's record from the server. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+
+**`wxl::Container`**: Containers
+
+| Method | Answers | What |
+|---|---|---|
+| `NumSlots()` | `uint32_t` | How many slots the bag has. |
+| `SlotGuid(uint32_t slot)` | `wxl_guid` | The item in a slot, as a guid; 0 for an empty one, invalid past NumSlots. |
+| `SlotItem(uint32_t slot)` | `Item` | The item in a slot of the bag; none for an empty one, invalid past NumSlots. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+
+**`wxl::GameObject`**: Game objects
+
+| Method | Answers | What |
+|---|---|---|
+| `CreatedByGuid()` | `wxl_guid` | Who summoned or spawned it, or 0 for one placed in the world. |
+| `DisplayId()` | `uint32_t` | Its model, a GameObjectDisplayInfo.dbc id. |
+| `Flags()` | `uint32_t` | GAMEOBJECT_FLAGS: in use 0x1, locked 0x2, ... |
+| `DynamicFlags()` | `uint32_t` | GAMEOBJECT_DYNAMIC's flags, as the server sends them to this client. |
+| `Faction()` | `uint32_t` | Its FactionTemplate.dbc id. |
+| `Level()` | `uint32_t` | Its level. |
+| `State()` | `uint32_t` | 0 active, 1 ready, 2 destroyed. |
+| `GoType()` | `uint32_t` | The game-object type, in the server's numbering (door 0, button 1, chest 3, ...). |
+| `ArtKit()` | `uint32_t` | The art kit it shows. |
+
+**`wxl::DynamicObject`**: Dynamic objects
+
+| Method | Answers | What |
+|---|---|---|
+| `CasterGuid()` | `wxl_guid` | The unit that cast it. |
+| `SpellId()` | `uint32_t` | The spell it is the area of. |
+| `Radius()` | `float` | Its radius, in yards. |
+| `CastTime()` | `uint32_t` | The client time it was cast at, in milliseconds. |
+
+**`wxl::Corpse`**: Corpses
+
+| Method | Answers | What |
+|---|---|---|
+| `OwnerGuid()` | `wxl_guid` | The player it belongs to. |
+| `PartyGuid()` | `wxl_guid` | The party the owner was in when they died, or 0. |
+| `DisplayId()` | `uint32_t` | Its model. |
+| `Guild()` | `uint32_t` | The owner's guild id. |
+| `Flags()` | `uint32_t` | CORPSE_FIELD_FLAGS: bones 0x1, ... |
+| `DynamicFlags()` | `uint32_t` | CORPSE_FIELD_DYNAMIC_FLAGS: lootable 0x1. |
+
+<!-- /object-members:cxx -->
+
 ### Descriptor fields
 
 Every object carries a block of dwords the server fills: its descriptor fields, all of them in
@@ -483,7 +732,8 @@ same value, in the same type: health is an `int32_t` both ways, as the client ho
 
 Each service has a typed facade with its name and version sealed in: `wxl::ObjectService`,
 `wxl::ScriptService`, `wxl::StorageService`, `wxl::DataService`, `wxl::NetService`,
-`wxl::UiService`, `wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService`, `wxl::PointService`
+`wxl::UiService`, `wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService`, `wxl::PointService`,
+`wxl::ActionService`
 (`include/wxl/services/*.hpp`, or all of them through `include/wxl/services.hpp`). A facade is stateless -- construct one
 wherever it is needed -- and resolves its table on first use. It tests false while the runtime
 does not publish the service, and every call through it then answers `WXL_E_UNSUPPORTED` or the

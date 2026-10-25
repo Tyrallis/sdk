@@ -144,6 +144,69 @@ namespace
         return mods;
     }
 
+    /// A Lua mod that calls every generated object method from 0.1.18 on, on an object of a
+    /// kind it applies to, and prints "row <name> <Lua type of the answer>" or why not.
+    std::string EveryRowMod()
+    {
+        namespace names = wxl::lua::names;
+        std::string lua = "local objects = {}\n"
+                          "Observe('ObjectScript', 'OnObjectCreate', function(object, guid, type) objects[type] = object end)\n"
+                          "local function show(name, ok, value, why)\n"
+                          "    if not ok then print('row ' .. name .. ' error ' .. tostring(value))\n"
+                          "    elseif value == nil then print('row ' .. name .. ' nil ' .. tostring(why))\n"
+                          "    else print('row ' .. name .. ' ' .. type(value) .. ' ' .. tostring(type(value) == 'string' and value or '')) end\n"
+                          "end\n"
+                          "registerForEvent('onUpdate', function()\n"
+                          "    if not objects.Item or done then return end\n"
+                          "    done = true\n";
+        const std::vector<names::RowInfo>& rows  = names::Rows();
+        const std::vector<std::string>&    named = names::RowNames();
+        for (size_t i = 0; i < rows.size(); ++i)
+        {
+            const names::RowInfo& row = rows[i];
+            if (row.since[2] < 18) continue;
+            const std::string kinds = row.kinds_name;
+            std::string on = kinds == "Players" || kinds == "Active" ? "objects.Player"
+                           : kinds == "Items" || kinds == "Containers" ? "objects.Item"
+                           : kinds == "GameObjects" ? "objects.GameObject" : "objects.Unit";
+            std::string arg;
+            if (*row.arg_c)
+            {
+                const wxl::reflect::Enum* e = wxl::reflect::FindEnum(row.arg);
+                arg = std::strcmp(row.arg_c, "wxl_handle") == 0 ? "objects.Player"
+                    : std::strcmp(row.arg_c, "wxl_vec3") == 0   ? "{ x = 1, y = 2, z = 3 }"
+                    : e ? std::string("'") + e->values[1].name + "'" : "1";
+            }
+            lua += "    show('" + std::string(row.member) + "', pcall(function() return " + on + ":" + named[i] + "(" + arg + ") end))\n";
+        }
+        lua += "    show('Auras', pcall(function() return objects.Unit:Auras() end))\n"
+               "    show('Skills', pcall(function() return objects.Player:Skills() end))\n"
+               "    show('PartyMembers', pcall(function() return objects.Player:PartyMembers() end))\n"
+               "    show('Select', pcall(function() return objects.Unit:Select() end))\n"
+               "    show('CastAt', pcall(function() return objects.Unit:CastAt(116) end))\n"
+               "    show('Use', pcall(function() return objects.Item:Use(objects.Unit) end))\n"
+               "    show('UseOnUnit', pcall(function() return objects.Unit:Use() end))\n"
+               "    show('CastSpell', pcall(function() return wxl.action.CastSpell(133, objects.Unit) end))\n"
+               "    show('CastSpellBare', pcall(function() return wxl.action.CastSpell(133) end))\n"
+               "    show('MoveTo', pcall(function() return wxl.action.MoveTo({ x = 1, y = 2, z = 3 }) end))\n"
+               "    show('BadName', pcall(function() return objects.Unit:Speed('sprint') end))\n"
+               "end)\n";
+        return lua;
+    }
+
+    /// The Lua type a row's answer should arrive as.
+    std::string LuaTypeOf(const wxl::lua::names::RowInfo& row)
+    {
+        if (wxl::reflect::FindEnum(row.cxx)) return "string";
+        if (std::strcmp(row.type, "wxl_bool") == 0) return "boolean";
+        if (std::strcmp(row.type, "wxl_handle") == 0) return "userdata";
+        if (std::strcmp(row.type, "wxl_guid") == 0) return "string";
+        if (std::strcmp(row.type, "wxl_vec3") == 0 || std::strcmp(row.type, "wxl_aura") == 0 ||
+            std::strcmp(row.type, "wxl_skill") == 0)
+            return "table";
+        return "number";
+    }
+
     HostConfig Config(const fs::path& mods, CaptureSink& sink)
     {
         HostConfig config;
@@ -154,6 +217,8 @@ namespace
         config.events         = AllEvents();
         config.services.push_back(PublishedService{WXL_OBJECT_SERVICE, WXL_OBJECT_SERVICE_VERSION,
                                                    wxltest::FakeObjects::Table()});
+        config.services.push_back(PublishedService{WXL_ACTION_SERVICE, WXL_ACTION_SERVICE_VERSION,
+                                                   wxltest::FakeActions::Table()});
         return config;
     }
 
@@ -908,8 +973,9 @@ int main(int argc, char** argv)
     {
         namespace names = wxl::lua::names;
         std::vector<names::Member> rows = {
-#define WXL_OBJECT_READ(kinds, member, Method, type)    names::Member{#member, names::k##kinds},
-#define WXL_OBJECT_READ_AT(kinds, member, Method, type) names::Member{#member, names::k##kinds},
+#define WXL_OBJECT_READ(kinds, member, Method, type, source, Cxx, cxx, doc) names::Member{#member, names::k##kinds},
+#define WXL_OBJECT_READ_AT(kinds, member, Method, type, source, Cxx, cxx, Arg, arg, doc) \
+    names::Member{#member, names::k##kinds},
 #include "wxl/runtime/object_reads.def"
 #undef WXL_OBJECT_READ_AT
 #undef WXL_OBJECT_READ
@@ -976,6 +1042,80 @@ int main(int argc, char** argv)
         const std::vector<std::string>   both = names::LuaNames(tied);
         Check(both[0] == "UnitLevel" && both[1] == "UnitLevel" && !names::Clash(tied, both).empty(),
               "a clash no qualifier resolves is reported rather than shadowed");
+    }
+
+    Section("every object member in Lua");
+    {
+        using wxltest::FakeObjects;
+        namespace names = wxl::lua::names;
+        const fs::path mods = MakeTree(scratch, "rows", binary, fs::path());
+        WriteFile(mods / "rows" / "mod.json", LuaManifest("wxl.rows"));
+        WriteFile(mods / "rows" / "init.lua", EveryRowMod());
+        WriteFile(mods / "older" / "mod.json",
+                  "{\n  \"id\": \"wxl.older\",\n  \"name\": \"older\",\n  \"version\": \"1.0.0\",\n"
+                  "  \"abi\": \"0.1.16\",\n  \"lua\": \"init.lua\"\n}\n");
+        WriteFile(mods / "older" / "init.lua",
+                  "Observe('ObjectScript', 'OnObjectCreate', function(object, guid, type)\n"
+                  "    if type ~= 'Unit' then return end\n"
+                  "    local ok, err = pcall(function() return object:IsDead() end)\n"
+                  "    print('older ' .. tostring(ok) .. ' ' .. tostring(err))\n"
+                  "    print('older health ' .. tostring(object:Health()))\n"
+                  "end)\n");
+
+        CaptureSink sink;
+        ModHost     host(Config(mods, sink));
+        host.LoadAll();
+        host.Stage(WXL_STAGE_READY);
+        wxltest::FakeActions::Calls().clear();
+
+        const wxl_object_args created[] = {{FakeObjects::kPlayer, 0x100, WXL_OBJECT_PLAYER},
+                                           {FakeObjects::kBoar, 0x200, WXL_OBJECT_UNIT},
+                                           {FakeObjects::kChest, 0, WXL_OBJECT_GAMEOBJECT},
+                                           {FakeObjects::kItem, 0, WXL_OBJECT_ITEM}};
+        for (const wxl_object_args& args : created) host.Raise(WXL_EV_ObjectCreate, &args);
+        const wxl_update_args tick{0.1f};
+        host.Raise(WXL_EV_Update, &tick);
+
+        const std::vector<names::RowInfo>& rows = names::Rows();
+        std::string                        wrong;
+        int                                checked = 0;
+        for (const names::RowInfo& row : rows)
+        {
+            if (row.since[2] < 18) continue;
+            ++checked;
+            const bool held = std::strcmp(row.kinds_name, "Containers") != 0;
+            const std::string line = std::string("[wxl.rows] row ") + row.member + " " +
+                                     (held ? LuaTypeOf(row) : std::string("nil a Item has no"));
+            if (!sink.Has(line.c_str())) wrong += line + "; ";
+        }
+        Check(checked > 60 && wrong.empty(), "every 0.1.18 row answers in Lua as the type its row says");
+        if (!wrong.empty()) std::printf("        %s\n", wrong.c_str());
+        Check(sink.Has("[wxl.rows] row unit_reaction string hostile") &&
+                  sink.Has("[wxl.rows] row unit_stand_state string sitting") &&
+                  sink.Has("[wxl.rows] row item_quality string common"),
+              "an enumeration arrives as its name");
+        Check(sink.Has("[wxl.rows] row Auras table") && sink.Has("[wxl.rows] row Skills table") &&
+                  sink.Has("[wxl.rows] row PartyMembers table"),
+              "the lists are tables");
+        Check(sink.Has("[wxl.rows] row Select boolean") && sink.Has("[wxl.rows] row CastAt boolean") &&
+                  sink.Has("[wxl.rows] row Use boolean") && sink.Has("[wxl.rows] row CastSpell boolean") &&
+                  sink.Has("[wxl.rows] row CastSpellBare boolean") && sink.Has("[wxl.rows] row MoveTo boolean"),
+              "the actions answer true when the client takes them");
+        Check(sink.Has("[wxl.rows] row UseOnUnit nil a Unit has no Use"), "an action of another kind says why");
+        Check(sink.Has("[wxl.rows] row BadName error") && sink.Has("'sprint' is not one of walk, run"),
+              "an enumeration argument takes a name, and an unknown one is an error naming them");
+        const auto& calls = wxltest::FakeActions::Calls();
+        bool castAt = false, bare = false;
+        for (const auto& call : calls)
+        {
+            if (call.name == "cast_spell" && call.spell == 116 && call.target == FakeObjects::kBoar) castAt = true;
+            if (call.name == "cast_spell" && call.spell == 133 && call.target == WXL_HANDLE_NONE) bare = true;
+        }
+        Check(castAt && bare, "the calls reach wxl.action with their objects, none when left out");
+        Check(sink.Has("[wxl.older] older false") && sink.Has("came with abi 0.1.18") &&
+                  sink.Has("[wxl.older] older health 90"),
+              "a mod asking for an older abi cannot use a newer method, and keeps the older ones");
+        if (g_failures) sink.Dump();
     }
 
     Section("object identity");

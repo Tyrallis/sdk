@@ -589,6 +589,75 @@ The methods:
   `GameObjectType()` is a game object's own type (a chest, a door), `PlayerFlags()` a player's
   flags beside the `Flags()` every unit has.
 
+### What a unit, a player, an item can tell you
+
+Since abi `0.1.18` each kind has a method for what the client knows of it: whether a unit is dead,
+in combat, casting, mounted or stealthed, how it stands towards you, what kind of creature it is,
+its auras and speeds; your player's money, experience, skills, bags and group; an item's
+durability, enchantments, and what the item cache says of it. The [reference](#the-reads-by-kind)
+lists them all, kind by kind. A mod that uses them asks for `"abi": "0.1.18"`; one asking for less
+gets an error naming the version instead, as for an event.
+
+Here is a mod that warns you when you target a rare elite that would attack you:
+
+```lua
+Observe("ObjectScript", "OnTargetChanged", function(previous, current)
+    if not current or current:Type() ~= "Unit" then return end
+    if current:Classification() == "rareelite" and current:Reaction() == "hostile" then
+        print("a rare elite, level " .. current:Level() .. ": " .. current:Name())
+    end
+end)
+```
+
+A choice among names arrives as its name: `Classification()` answers `"normal"`, `"elite"`,
+`"rare"`, `"rareelite"` or `"worldboss"`, `Reaction()` one of `"hated"`, `"hostile"`,
+`"unfriendly"`, `"neutral"`, `"friendly"`, `"honored"`, `"revered"`, `"exalted"` -- the colour the
+client gives the name plate, worked out by the client's own function. The editor definitions
+list each set of names, so your editor completes them.
+
+Your own player has more, kept by the client for it alone:
+
+```lua
+local me = wxl.object.LocalPlayer()
+print(me:Money() .. " copper, " .. me:Xp() .. " of " .. me:NextLevelXp() .. " experience")
+local weapon = me:InventoryItem("main_hand")          -- a slot by name, or by number (15)
+if weapon then
+    print(weapon:Name() .. ", durability " .. weapon:Durability() .. "/" .. weapon:MaxDurability())
+    local quality, why = weapon:Quality()             -- "epic", or nil and "failed" until cached
+end
+for _, aura in ipairs(me:Auras()) do                  -- spell_id, caster, stacks, duration, expiration
+    if aura.spell_id == 1459 then print("Arcane Intellect is up") end
+end
+for _, skill in ipairs(me:Skills()) do print(skill.id, skill.value, skill.max) end
+```
+
+An empty slot answers `nil` alone; a read that could not answer says why in its second value. The
+item cache's reads (`Quality()`, `Level()`, `Class()`, `SellPrice()`...) answer `nil, "failed"`
+until the client has received the item's record from the server: ask again a moment later. Asked
+of another player, your player's own reads answer `nil, "invalid"`.
+
+### What your player can do with an object
+
+The same objects carry what the player could do with them. Each is done through the function the
+client runs for a click, a key or a slash command, with the client's own checks: a spell out of
+range is refused as it would be for you. Each answers `true`, or `nil` and why (`"failed"` when the
+client refused it):
+
+```lua
+unit:Select()          -- targets it, as a left click does
+unit:Interact()        -- a right click: talk to it, loot it, open it, use it
+unit:CastAt(133)       -- casts a spell you know at it
+unit:Follow()          -- as /follow
+unit:Assist()          -- targets what it targets, as /assist
+item:Use()             -- uses an item, on what it picks itself; item:Use(unit) on a unit
+```
+
+`wxl.action` has the same and what needs no object: `wxl.action.ClearTarget()`,
+`wxl.action.StopCasting()`, `wxl.action.CastSpell(id)` at your current target, and
+`wxl.action.MoveTo({ x = ..., y = ..., z = ... })`, which walks your player there as a
+click-to-move click does. An action runs on the thread that runs the game, where your handlers
+of world events run.
+
 ### One object, one value
 
 While an object stays in view, it is one Lua value: the object an event hands you, the one
@@ -1374,6 +1443,9 @@ them in `include/wxl/services/<service>.def`.
 | `wxl.footprint.WatchPressure(bytes)` | `true`: `OnMemoryPressure` when the largest free block falls under it; 0 stops |
 | `wxl.profile.Begin(name)`, `.End()`, `.Text(text)` | a zone on the profiler's timeline inside the running handler, closed by `End` or when the handler returns; a line of text on it (abi `0.1.12`, see [Profiling](profiling.md)) |
 | `wxl.profile.Plot(name, value)`, `.Message(text)`, `.FrameMark(name)`, `.Connected()` | a point on a graph; a line on the timeline; a frame of your own frame set; whether a viewer is connected |
+| `wxl.action.Target(object)`, `.ClearTarget()`, `.Interact(object)` | `true`: targets an object, clears the target, right-clicks an object; `nil, "failed"` when the client refused (abi `0.1.18`) |
+| `wxl.action.CastSpell(id, target)`, `.StopCasting()`, `.UseItem(item, target)` | casts a spell you know at a unit, or at the current target when `target` is left out; stops the cast in progress; uses an item, on a unit or what it picks |
+| `wxl.action.Follow(unit)`, `.Assist(unit)`, `.MoveTo(point)` | follows a unit; targets what it targets; walks to a point (`{ x, y, z }`) as click-to-move does |
 | `wxl.point.Points()`, `.Find(name)` | the engine functions a C++ mod can run code before, instead of or after (name, signature, thread, flags, and `absent`: why this runtime lacks one); the id of one this runtime has (abi `0.1.16`). Attaching from Lua is to come; see "Changing the engine: points" in [Building a mod](building-a-mod.md) |
 
 ### Object methods
@@ -1390,7 +1462,185 @@ them in `include/wxl/services/<service>.def`.
 | `Fields(name)` | every element of a field, as a list |
 | `SetField(name, value, element)` | writes a field in your client until the server's next update of it; `true`, or `nil` and why |
 | `FieldCount()` | how many numbers the object's block holds |
-| every other method | a read from the runtime's table: the value, or `nil` and why. The list, with the kinds each applies to, is in [`wxl.d.lua`](../lua/types/wxl.d.lua) |
+| `Auras()`, `Skills()`, `PartyMembers()`, `RaidMembers()` | a unit's auras; your player's skills, party and raid members' guids, as lists (abi `0.1.18`) |
+| `Select()`, `Interact()`, `CastAt(id)`, `Follow()`, `Assist()`, `Use(target)` | what your player can do with the object, through `wxl.action`: `true`, or `nil` and why |
+| every other method | a read from the runtime's table: the value, or `nil` and why; the tables below list them by kind |
+
+#### The reads, by kind
+
+An object has the methods of its kind and of the kinds above it: a player has every unit
+method, a container every item method. The tables are made from the runtime's table of reads.
+
+<!-- object-members:lua (written by wxl-object-members) -->
+
+**Every object**
+
+| Method | Answers | What |
+|---|---|---|
+| `Position()` | `wxl.Vec3` | Where it stands in the world, in yards; an item has no place. |
+| `Facing()` | `number` | The way it faces, in radians. |
+| `Entry()` | `integer` | The server's template id: a creature, item or game-object entry; 0 for a player. |
+| `Scale()` | `number` | Its size, 1 being the model's own. |
+| `IsActivePlayer()` | `boolean` | Whether it is the unit the client controls. Came with abi 0.1.18. |
+| `Distance(other)` | `number` | Yards from it to another object, centre to centre; invalid when either has no place in the world. Came with abi 0.1.18. |
+| `DistanceTo(point)` | `number` | Yards from it to a point; invalid for an object with no place in the world. Came with abi 0.1.18. |
+
+**Units, players included**
+
+| Method | Answers | What |
+|---|---|---|
+| `Health()` | `integer` | Its health; 0 or less is a dead unit, as the client reads it. |
+| `MaxHealth()` | `integer` | Its maximum health. |
+| `Level()` | `integer` | Its level. |
+| `Power(power)` | `integer` | Its power of a type (0 mana, 1 rage, 2 focus, 3 energy, 4 happiness, 5 runes, 6 runic power). |
+| `MaxPower(power)` | `integer` | Its maximum power of a type. |
+| `PowerType()` | `integer` | The type of power it runs on, as PowerValue takes it. |
+| `Race()` | `integer` | Its race, as ChrRaces.dbc numbers it. |
+| `Class()` | `integer` | Its class, as ChrClasses.dbc numbers it. |
+| `Sex()` | `integer` | 0 male, 1 female, 2 none. |
+| `DisplayId()` | `integer` | The model it shows now, a CreatureDisplayInfo.dbc id. |
+| `NativeDisplayId()` | `integer` | The model it shows when nothing changes its shape. |
+| `MountDisplayId()` | `integer` | The model of its mount; 0 while not mounted. |
+| `FactionTemplate()` | `integer` | Its FactionTemplate.dbc id. |
+| `Flags()` | `integer` | UNIT_FIELD_FLAGS as the server sends it. |
+| `Flags2()` | `integer` | UNIT_FIELD_FLAGS_2 as the server sends it. |
+| `DynamicFlags()` | `integer` | UNIT_DYNAMIC_FLAGS as the server sends it to this client. |
+| `NpcFlags()` | `integer` | What it offers to talk about: vendor, trainer, quest giver, ... as UNIT_NPC_FLAGS. |
+| `BoundingRadius()` | `number` | The radius of its body, in yards. |
+| `CombatReach()` | `number` | How far it reaches in melee, in yards. |
+| `Charm()` | `wxl.Guid` | The unit it charms, or 0. |
+| `Summon()` | `wxl.Guid` | The unit it summoned, its pet among them, or 0. |
+| `CharmedBy()` | `wxl.Guid` | Who charms it, or 0. |
+| `SummonedBy()` | `wxl.Guid` | Who summoned it: a pet's owner, or 0. |
+| `CreatedBy()` | `wxl.Guid` | Who created it: a totem's shaman, or 0. |
+| `TargetGuid()` | `wxl.Guid` | What it targets, as a guid, whether that is in view or not; 0 for nothing. Came with abi 0.1.18. |
+| `Reaction()` | `wxl.Reaction` | How it stands towards the active player, by the client's own reckoning: the colour of its name. Came with abi 0.1.18. |
+| `ReactionTo(other)` | `wxl.Reaction` | How it stands towards another unit, by the client's own reckoning. Came with abi 0.1.18. |
+| `IsDead()` | `boolean` | Whether it is dead: no health left, or marked dead by the server. Came with abi 0.1.18. |
+| `InCombat()` | `boolean` | Whether it is in combat, as the client's UnitAffectingCombat reads it. Came with abi 0.1.18. |
+| `IsPvp()` | `boolean` | Whether it is flagged for player-versus-player combat. Came with abi 0.1.18. |
+| `IsTapped()` | `boolean` | Whether someone has tapped it: its kill and loot are theirs. Came with abi 0.1.18. |
+| `IsTappedByPlayer()` | `boolean` | Whether the active player, or their group, has tapped it. Came with abi 0.1.18. |
+| `IsLootable()` | `boolean` | Whether it has loot for the active player. Came with abi 0.1.18. |
+| `IsSkinnable()` | `boolean` | Whether its corpse can be skinned. Came with abi 0.1.18. |
+| `StandState()` | `wxl.StandState` | How it stands: standing, sitting, sleeping, kneeling, ... Came with abi 0.1.18. |
+| `IsSitting()` | `boolean` | Whether it sits, on the ground or in a chair. Came with abi 0.1.18. |
+| `IsStealthed()` | `boolean` | Whether it is stealthed, as the client's IsStealthed reads it. Came with abi 0.1.18. |
+| `IsMounted()` | `boolean` | Whether it rides a mount, as the client's IsMounted reads it. Came with abi 0.1.18. |
+| `CastingSpellId()` | `integer` | The spell it casts now; 0 for none. Came with abi 0.1.18. |
+| `CastStart()` | `integer` | When the cast began, in milliseconds on the client's clock (the client's GetTime() * 1000). Came with abi 0.1.18. |
+| `CastEnd()` | `integer` | When the cast ends, on the same clock. Came with abi 0.1.18. |
+| `IsCasting()` | `boolean` | Whether it is casting, its cast not yet over, as the client's UnitCastingInfo reads it. Came with abi 0.1.18. |
+| `ChannelSpellId()` | `integer` | The spell it channels now; 0 for none. Came with abi 0.1.18. |
+| `ChannelStart()` | `integer` | When the channel began, on the client's clock. Came with abi 0.1.18. |
+| `ChannelEnd()` | `integer` | When the channel ends, on the client's clock. Came with abi 0.1.18. |
+| `IsChanneling()` | `boolean` | Whether it is channeling, its channel not yet over. Came with abi 0.1.18. |
+| `AuraCount()` | `integer` | How many auras the client holds on it, buffs and debuffs alike. Came with abi 0.1.18. |
+| `Aura(slot)` | `wxl.Aura` | The aura in a slot, 0 to AuraCount - 1: its spell, caster, stacks, duration, expiration and flags. Came with abi 0.1.18. |
+| `HasAura(spell_id)` | `boolean` | Whether an aura of a spell is on it. Came with abi 0.1.18. |
+| `CreatureType()` | `wxl.CreatureType` | What kind of creature it is, as the client works it out: beast, humanoid, undead, ... Came with abi 0.1.18. |
+| `CreatureFamily()` | `integer` | Its beast family, a CreatureFamily.dbc id; 0 for none. Came with abi 0.1.18. |
+| `Classification()` | `wxl.Classification` | Its rank: normal, elite, rare, rare elite, world boss. Came with abi 0.1.18. |
+| `KnowsSpell(spell_id)` | `boolean` | Whether it knows a spell: the active player's spell book or its pet's; false for any other unit. Came with abi 0.1.18. |
+| `MovementFlags()` | `integer` | The flags of its movement: forward 0x1, backward 0x2, ..., falling 0x1000, flying 0x2000000. Came with abi 0.1.18. |
+| `Speed(type)` | `number` | One of its speeds, in yards a second: walk, run, swim, flight, ...; the turn and pitch rates in radians a second. Came with abi 0.1.18. |
+| `IsSwimming()` | `boolean` | Whether it swims, as the client's IsSwimming reads it. Came with abi 0.1.18. |
+| `IsFlying()` | `boolean` | Whether it flies, as the client's IsFlying reads it. Came with abi 0.1.18. |
+| `IsFalling()` | `boolean` | Whether it is falling, as the client's IsFalling reads it. Came with abi 0.1.18. |
+
+**Players**
+
+| Method | Answers | What |
+|---|---|---|
+| `PlayerFlags()` | `integer` | PLAYER_FLAGS as the server sends it. |
+| `GuildId()` | `integer` | Its guild's id; 0 while unguilded. |
+| `GuildRank()` | `integer` | Its rank in the guild, 0 for the guild master. |
+| `ChosenTitle()` | `integer` | The title it shows, a CharTitles.dbc bit index; 0 for none. |
+| `VisibleItem(slot)` | `integer` | The item id an equipment slot shows (0 head .. 18 tabard); 0 when the slot is empty. |
+| `IsGhost()` | `boolean` | Whether it is a ghost, released from its corpse. Came with abi 0.1.18. |
+| `IsAfk()` | `boolean` | Whether it is away from the keyboard. Came with abi 0.1.18. |
+| `IsDnd()` | `boolean` | Whether it asked not to be disturbed. Came with abi 0.1.18. |
+| `IsResting()` | `boolean` | Whether it rests in an inn or a city, gaining rested experience. Came with abi 0.1.18. |
+| `Money()` | `integer` | Its money, in copper. Only the active player has it: "invalid" for another. Came with abi 0.1.18. |
+| `Xp()` | `integer` | Its experience in this level. Only the active player has it: "invalid" for another. Came with abi 0.1.18. |
+| `NextLevelXp()` | `integer` | The experience this level takes. Only the active player has it: "invalid" for another. Came with abi 0.1.18. |
+| `RestedXp()` | `integer` | Its rested experience: kills give twice as much until it is spent. Only the active player has it: "invalid" for another. Came with abi 0.1.18. |
+| `HonorPoints()` | `integer` | Its honor points. Only the active player has it: "invalid" for another. Came with abi 0.1.18. |
+| `ArenaPoints()` | `integer` | Its arena points. Only the active player has it: "invalid" for another. Came with abi 0.1.18. |
+| `InventoryItem(slot)` | `wxl.Object` | The item in an equipment slot, or the bag in a bag slot (19 to 22); none for an empty slot. Only the active player has it: "invalid" for another. Came with abi 0.1.18. |
+| `BackpackItem(slot)` | `wxl.Object` | The item in a slot of the backpack, 0 to 15; none for an empty slot. Only the active player has it: "invalid" for another. Came with abi 0.1.18. |
+| `Skill(line)` | `wxl.Skill` | The skill on a line of the skill list, 0 to 127: its id, value and maximum; an id of 0 for an empty line. Only the active player has it: "invalid" for another. Came with abi 0.1.18. |
+| `SkillOf(skill_id)` | `wxl.Skill` | A skill by its SkillLine.dbc id; invalid for a skill the player does not have. Only the active player has it: "invalid" for another. Came with abi 0.1.18. |
+| `PartySize()` | `integer` | How many others are in its party, 0 to 4. Only the active player has it: "invalid" for another. Came with abi 0.1.18. |
+| `PartyMemberGuid(slot)` | `wxl.Guid` | The other party member in a party slot, 0 to 3, whether in view or not; 0 for an empty slot. Only the active player has it: "invalid" for another. Came with abi 0.1.18. |
+| `RaidSize()` | `integer` | How many are in its raid, itself included; 0 outside a raid. Only the active player has it: "invalid" for another. Came with abi 0.1.18. |
+| `RaidMemberGuid(slot)` | `wxl.Guid` | The raid member in a raid slot, 0 to 39, whether in view or not; 0 for an empty slot. Only the active player has it: "invalid" for another. Came with abi 0.1.18. |
+
+**Items, containers included**
+
+| Method | Answers | What |
+|---|---|---|
+| `Owner()` | `wxl.Guid` | The player who owns it. |
+| `ContainedIn()` | `wxl.Guid` | The bag holding it, or 0 in the backpack or when equipped. |
+| `Creator()` | `wxl.Guid` | Who crafted it, or 0. |
+| `StackCount()` | `integer` | How many the stack holds. |
+| `Duration()` | `integer` | Seconds left before it expires; 0 when it does not. |
+| `Flags()` | `integer` | ITEM_FIELD_FLAGS as the server sends it: soulbound 0x1, ... |
+| `Durability()` | `integer` | Its durability now. |
+| `MaxDurability()` | `integer` | Its durability when repaired; 0 for an item that does not wear. |
+| `Enchant(slot)` | `integer` | The enchantment in a slot, 0 to 11 (0 permanent, 1 temporary, 2 to 4 sockets, ...), a SpellItemEnchantment.dbc id; 0 for none. Came with abi 0.1.18. |
+| `Quality()` | `wxl.ItemQuality` | Its quality: poor, common, uncommon, rare, epic, legendary, artifact, heirloom. "failed" until the client has the item's record from the server. Came with abi 0.1.18. |
+| `Level()` | `integer` | Its item level. "failed" until the client has the item's record from the server. Came with abi 0.1.18. |
+| `RequiredLevel()` | `integer` | The level it takes to use. "failed" until the client has the item's record from the server. Came with abi 0.1.18. |
+| `Class()` | `integer` | Its class, an ItemClass.dbc id: weapon 2, armor 4, ... "failed" until the client has the item's record from the server. Came with abi 0.1.18. |
+| `Subclass()` | `integer` | Its subclass within the class: a sword, a cloth robe, ... "failed" until the client has the item's record from the server. Came with abi 0.1.18. |
+| `InventoryType()` | `integer` | Where it is worn: head 1, neck 2, ...; 0 for an item that is not worn. "failed" until the client has the item's record from the server. Came with abi 0.1.18. |
+| `MaxStack()` | `integer` | How many a stack of it holds at most. "failed" until the client has the item's record from the server. Came with abi 0.1.18. |
+| `SellPrice()` | `integer` | What a vendor pays for one, in copper. "failed" until the client has the item's record from the server. Came with abi 0.1.18. |
+
+**Containers**
+
+| Method | Answers | What |
+|---|---|---|
+| `NumSlots()` | `integer` | How many slots the bag has. |
+| `Slot(slot)` | `wxl.Guid` | The item in a slot, as a guid; 0 for an empty one, invalid past NumSlots. |
+| `SlotItem(slot)` | `wxl.Object` | The item in a slot of the bag; none for an empty one, invalid past NumSlots. Came with abi 0.1.18. |
+
+**Game objects**
+
+| Method | Answers | What |
+|---|---|---|
+| `CreatedBy()` | `wxl.Guid` | Who summoned or spawned it, or 0 for one placed in the world. |
+| `DisplayId()` | `integer` | Its model, a GameObjectDisplayInfo.dbc id. |
+| `Flags()` | `integer` | GAMEOBJECT_FLAGS: in use 0x1, locked 0x2, ... |
+| `DynamicFlags()` | `integer` | GAMEOBJECT_DYNAMIC's flags, as the server sends them to this client. |
+| `Faction()` | `integer` | Its FactionTemplate.dbc id. |
+| `Level()` | `integer` | Its level. |
+| `State()` | `integer` | 0 active, 1 ready, 2 destroyed. |
+| `GameObjectType()` | `integer` | The game-object type, in the server's numbering (door 0, button 1, chest 3, ...). |
+| `ArtKit()` | `integer` | The art kit it shows. |
+
+**Dynamic objects**
+
+| Method | Answers | What |
+|---|---|---|
+| `Caster()` | `wxl.Guid` | The unit that cast it. |
+| `SpellId()` | `integer` | The spell it is the area of. |
+| `Radius()` | `number` | Its radius, in yards. |
+| `CastTime()` | `integer` | The client time it was cast at, in milliseconds. |
+
+**Corpses**
+
+| Method | Answers | What |
+|---|---|---|
+| `Owner()` | `wxl.Guid` | The player it belongs to. |
+| `Party()` | `wxl.Guid` | The party the owner was in when they died, or 0. |
+| `DisplayId()` | `integer` | Its model. |
+| `Guild()` | `integer` | The owner's guild id. |
+| `Flags()` | `integer` | CORPSE_FIELD_FLAGS: bones 0x1, ... |
+| `DynamicFlags()` | `integer` | CORPSE_FIELD_DYNAMIC_FLAGS: lootable 0x1. |
+
+<!-- /object-members:lua -->
 
 `tostring(object)` gives its kind and handle, `Unit(0x000000000000002B)`, `gone Unit(...)` once it
 has left. An object is one value while it is in view: `==` and table keys work on it, and any
@@ -1441,7 +1691,9 @@ a service module or function newer than the manifest's `abi` is refused as an ev
 using `wxl.footprint` asks for `0.1.11` and one using `wxl.profile` for `0.1.12`. `0.1.15` brought
 no event: `wxl.storage.Redirect`, `wxl.storage.Unredirect` and `wxl.script.Live` came with it.
 The [gameplay events](#gameplay-events), with the families `LootScript`, `ItemScript`,
-`QuestScript`, `GroupScript` and `SocialScript`, came with `0.1.17`.
+`QuestScript`, `GroupScript` and `SocialScript`, came with `0.1.17`. The object reads and actions of
+[What a unit, a player, an item can tell you](#what-a-unit-a-player-an-item-can-tell-you) and the
+`wxl.action` module came with `0.1.18`.
 
 ### Gameplay events
 

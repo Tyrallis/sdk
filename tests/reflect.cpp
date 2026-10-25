@@ -184,6 +184,7 @@ namespace service_signatures
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
+#include "wxl/services/action.def"
 #include "wxl/services/point.def"
 #undef WXL_API_CLOSE
 #undef WXL_API
@@ -218,6 +219,7 @@ namespace service_order
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
+#include "wxl/services/action.def"
 #include "wxl/services/point.def"
     };
 #undef WXL_API_CLOSE
@@ -529,7 +531,7 @@ int main()
         uint32_t                     serviceCount = 0, rowCount = 0;
         const wxl::api::ServiceRow*  services     = wxl::api::Services(&serviceCount);
         const wxl::api::Row*         rows         = wxl::api::Rows(&rowCount);
-        Check(serviceCount == 9, "nine service tables: script, storage, data, hook, hook.raw, patch, footprint, profile, point");
+        Check(serviceCount == 10, "ten service tables: script, storage, data, hook, hook.raw, patch, footprint, profile, point, action");
 
         // A service's rows follow each other, from the first member after struct_size to the
         // last, one function pointer apart: a member missing from its table, or one the table
