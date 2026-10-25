@@ -16,6 +16,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -1075,6 +1076,60 @@ int main(int argc, char** argv)
         EventBus all(AllEvents(), nullptr);
         Check(all.CanRaise(WXL_EV_MapObjectLoad) && !bus.CanRaise(WXL_EV_MapObjectLoad),
               "CanRaise reflects the configuration");
+    }
+
+    Section("event bus and a profiler");
+    {
+        // A profiler that records what it is asked: locations by name, zones as a trace.
+        struct Recorder
+        {
+            std::vector<std::string> names;
+            std::vector<std::string> trace;
+        };
+        static Recorder recorder;
+        Profiler        profiler;
+        profiler.user     = &recorder;
+        profiler.location = [](void* user, std::string_view name, std::string_view, uint32_t) -> const void* {
+            Recorder& r = *static_cast<Recorder*>(user);
+            r.names.emplace_back(name);
+            return reinterpret_cast<const void*>(r.names.size());
+        };
+        profiler.begin = [](void* user, const void* location) -> uint64_t {
+            Recorder& r = *static_cast<Recorder*>(user);
+            r.trace.push_back("+" + r.names[reinterpret_cast<uintptr_t>(location) - 1]);
+            return reinterpret_cast<uintptr_t>(location);
+        };
+        profiler.end = [](void* user, uint64_t zone) {
+            Recorder& r = *static_cast<Recorder*>(user);
+            r.trace.push_back("-" + r.names[static_cast<size_t>(zone) - 1]);
+        };
+
+        EventBus bus({WXL_EV_Update}, nullptr);
+        bus.SetProfiler(&profiler, [](void*, uint32_t owner) { return owner == 7 ? std::string("scout") : std::string(); },
+                        nullptr);
+        std::atomic<int> calls{0};
+        bus.Subscribe(WXL_EV_Update, &CountUp, &calls, 0, 7);
+        bus.Subscribe(WXL_EV_Update, &CountUp, &calls, 1, 0);
+        bus.Emit(WXL_EV_Update, nullptr);
+        Check(calls.load() == 2 && recorder.trace.empty(), "nothing is recorded while profiling is off");
+        bus.SetProfiling(true);
+        bus.Emit(WXL_EV_Update, nullptr);
+#if WXL_HOST_PROFILE
+        Check(recorder.trace.size() == 6 && recorder.trace[0] == "+OnUpdate" &&
+                  recorder.trace[1] == "+scout: OnUpdate" && recorder.trace[2] == "-scout: OnUpdate" &&
+                  recorder.trace[3] == "+runtime: OnUpdate" && recorder.trace[5] == "-OnUpdate",
+              "a dispatch is a zone named after its event, each handler one inside it named after its owner");
+        recorder.trace.clear();
+        bus.Subscribe(WXL_EV_Update, &CountUp, &calls, 2, 7);
+        const size_t named = recorder.names.size();
+        bus.Subscribe(WXL_EV_Update, &CountUp, &calls, 3, 7);
+        Check(recorder.names.size() == named, "one location per owner and event, however often it subscribes");
+        bus.SetProfiling(false);
+        bus.Emit(WXL_EV_Update, nullptr);
+        Check(recorder.trace.empty(), "and nothing once profiling is off again");
+#else
+        Check(recorder.trace.empty(), "a host built without WXL_HOST_PROFILE opens no zone");
+#endif
     }
 
     Section("event bus across threads");

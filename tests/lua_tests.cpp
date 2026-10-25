@@ -1387,6 +1387,60 @@ int main(int argc, char** argv)
                 fs::copy_file(folder / name, fs::path(keep) / name, fs::copy_options::overwrite_existing);
     }
 
+    Section("Lua mods on the profiler's timeline");
+    {
+        using wxltest::FakeProfile;
+
+        const fs::path mods = MakeTree(scratch, "profile", binary, fs::path());
+        WriteFile(mods / "zones" / "mod.json", LuaManifest("wxl.zones"));
+        WriteFile(mods / "zones" / "init.lua",
+                  "Observe(\"WorldScript\", \"OnUpdate\", function(delta)\n"
+                  "  wxl.profile.Begin(\"work\")\n"
+                  "  wxl.profile.Text(\"one\")\n"
+                  "  wxl.profile.End()\n"
+                  "  wxl.profile.Begin(\"left open\")\n"
+                  "  wxl.profile.Plot(\"delta\", delta * 1000)\n"
+                  "  wxl.profile.Message(\"tick\")\n"
+                  "  wxl.profile.FrameMark(\"zones\")\n"
+                  "end)\n"
+                  "Observe(\"WorldScript\", \"OnWorldEnter\", function()\n"
+                  "  wxl.profile.Begin(\"fails\")\n"
+                  "  error(\"on purpose\")\n"
+                  "end)\n");
+        FakeProfile::Connected() = false;
+        FakeProfile::Trace().clear();
+
+        CaptureSink sink;
+        HostConfig  config = Config(mods, sink);
+        config.services.push_back(PublishedService{WXL_PROFILE_SERVICE, WXL_PROFILE_SERVICE_VERSION, FakeProfile::Table()});
+        ModHost host(std::move(config));
+        host.LoadAll();
+        host.Stage(WXL_STAGE_READY);
+
+        const wxl_update_args tick{0.016f};
+        host.Raise(WXL_EV_Update, &tick);
+        Check(FakeProfile::Trace().empty(), "nothing reaches the profiler while no viewer is connected");
+
+        FakeProfile::Connected() = true;
+        host.Raise(WXL_EV_Update, &tick);
+        const std::vector<std::string> update = {"+wxl.zones: OnUpdate", "+work",       "text:one",     "-work",
+                                                 "+left open",           "plot:delta=16", "message:tick", "frame:zones",
+                                                 "-left open",           "-wxl.zones: OnUpdate"};
+        Check(FakeProfile::Trace() == update,
+              "a handler is a zone named after its mod; Begin, End and Text nest inside it, and what it left open "
+              "is closed when it returns");
+
+        FakeProfile::Trace().clear();
+        const wxl_world_args enter{};
+        host.Raise(WXL_EV_WorldEnter, &enter);
+        const std::vector<std::string> failed = {"+wxl.zones: OnWorldEnter", "+fails", "-fails",
+                                                 "-wxl.zones: OnWorldEnter"};
+        Check(FakeProfile::Trace() == failed, "and when it errors");
+        FakeProfile::Connected() = false;
+        host.Shutdown();
+        if (g_failures) sink.Dump();
+    }
+
     Section("handler order across reloads");
     {
         const fs::path mods = MakeTree(scratch, "order", binary, fs::path());

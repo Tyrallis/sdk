@@ -237,6 +237,17 @@ namespace wxl::host
         return static_cast<ModHost*>(user)->SwapCurrentMod(owner);
     }
 
+    void ModHost::SetProfiler(const Profiler& profiler)
+    {
+        profiler_ = profiler;
+        events_.SetProfiler(&profiler_, &ModHost::NameOwner, this);
+    }
+
+    std::string ModHost::NameOwner(void* user, uint32_t owner)
+    {
+        return owner ? static_cast<const ModHost*>(user)->IdOf(owner) : std::string("WarcraftXL");
+    }
+
     std::string ModHost::IdOf(ModToken token) const
     {
         if (const LoadedMod* mod = ModOf(token)) return mod->id;

@@ -4,6 +4,7 @@
 #include "Runtime.hpp"
 
 #include "Objects.hpp"
+#include "Profile.hpp"
 #include "Shims.hpp"
 
 #include "wxl/host/admission.hpp"
@@ -310,7 +311,8 @@ namespace wxl::lua
     {
         Slot& slot = slots_[event.id];
         EnsureNative(slot, &mod);
-        const Handler handler{&mod, ref, self, override, ++nextId_, true};
+        const Handler handler{&mod, ref, self, override, ++nextId_, true,
+                              profile::Location(mod, std::string("On") + event.name)};
         // A dispatch walks `handlers` by index: one subscribed meanwhile waits beside it.
         if (slot.depth == 0)
         {
@@ -481,7 +483,11 @@ namespace wxl::lua
                 nargs = 1;
             }
             nargs += PushParameters(L, *slot.event, args);
-            const int status = lua_pcall(L, nargs, LUA_MULTRET, base + 1);
+            int status = 0;
+            {
+                const profile::Call zone(handler.zone);
+                status = lua_pcall(L, nargs, LUA_MULTRET, base + 1);
+            }
 
             if (status != 0)
             {

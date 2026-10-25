@@ -327,6 +327,19 @@ namespace
                    "---goes; the highest threshold any mod holds is the one the runtime watches.\n"
                    "---@param bytes integer\n---@return true|nil ok\n---@return string|nil reason\n"
                    "function " + owner + ".WatchPressure(bytes) end\n\n";
+        if (name == "Begin")
+            return "---Opens a zone named `name` on the profiler's timeline, inside the handler or callback running\n"
+                   "---now; End closes it. Zones nest. Whatever this call left open is closed when it returns or\n"
+                   "---errors. Nothing is recorded while no viewer is connected.\n"
+                   "---@param name string\n"
+                   "function " + owner + ".Begin(name) end\n\n";
+        if (name == "End")
+            return "---Closes the innermost zone this mod opened in the call running now; nothing when none is open.\n"
+                   "function " + owner + ".End() end\n\n";
+        if (name == "Text")
+            return "---Adds a line of text to the innermost zone this mod opened: the item, the unit, the file.\n"
+                   "---@param text string\n"
+                   "function " + owner + ".Text(text) end\n\n";
         return std::string();
     }
 

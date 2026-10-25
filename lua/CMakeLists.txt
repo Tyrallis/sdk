@@ -19,6 +19,7 @@ wxl_add_mod(wxl-lua
         src/Args.cpp
         src/LuaMod.cpp
         src/Objects.cpp
+        src/Profile.cpp
         src/Runtime.cpp
         src/Sandbox.cpp
         src/ScriptMod.cpp

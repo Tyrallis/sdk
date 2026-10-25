@@ -76,6 +76,7 @@
 #include "wxl/services/hook.h"
 #include "wxl/services/patch.h"
 #include "wxl/services/footprint.h"
+#include "wxl/services/profile.h"
 #include "wxl/services/script.h"
 #include "wxl/services/storage.h"
 
@@ -143,6 +144,7 @@ namespace wxl::api
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
+#include "wxl/services/profile.def"
 #undef WXL_API_RESOURCE
 #undef WXL_API_FIELD
 #undef WXL_API_CLOSE
@@ -319,6 +321,7 @@ namespace wxl::api
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
+#include "wxl/services/profile.def"
 #undef WXL_API_FIELD
 #undef WXL_API_CLOSE
 #undef WXL_API_RESOURCE
@@ -433,6 +436,7 @@ namespace wxl::api
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
+#include "wxl/services/profile.def"
         };
 #undef WXL_API_FIELD
 #undef WXL_API_CLOSE
@@ -457,6 +461,7 @@ namespace wxl::api
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
+#include "wxl/services/profile.def"
         };
 #undef WXL_API_FIELD
 #undef WXL_API_CLOSE
@@ -477,6 +482,7 @@ namespace wxl::api
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
+#include "wxl/services/profile.def"
         };
 #undef WXL_API_FIELD
 #undef WXL_API_CLOSE
@@ -498,6 +504,7 @@ namespace wxl::api
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
+#include "wxl/services/profile.def"
         };
 #undef WXL_API_FIELD
 #undef WXL_API_CLOSE
@@ -576,6 +583,12 @@ namespace wxl::api
         static uint64_t ToC(uint64_t value) { return value; }
     };
     template <>
+    struct CxxParam<kind::f64>
+    {
+        using type = double;
+        static double ToC(double value) { return value; }
+    };
+    template <>
     struct CxxParam<kind::boolean>
     {
         using type = bool;
@@ -590,6 +603,17 @@ namespace wxl::api
     /// The C++ answer of a kind: what a missing member answers, and what a call does.
     template <class K>
     struct CxxAnswer;
+    template <>
+    struct CxxAnswer<kind::none>
+    {
+        using type = void;
+        static void Missing() {}
+        template <class F>
+        static void Call(F&& f)
+        {
+            f();
+        }
+    };
     template <>
     struct CxxAnswer<kind::result>
     {

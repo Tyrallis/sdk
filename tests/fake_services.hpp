@@ -28,6 +28,7 @@
 #include "wxl/services/object.h"
 #include "wxl/services/patch.h"
 #include "wxl/services/footprint.h"
+#include "wxl/services/profile.h"
 #include "wxl/services/script.h"
 #include "wxl/services/storage.h"
 #include "wxl/services/ui.h"
@@ -956,6 +957,74 @@ namespace wxltest
                 t.regions        = &Regions;
                 t.report         = &Report;
                 t.watch_pressure = &WatchPressure;
+                return t;
+            }();
+            return &api;
+        }
+    };
+
+    // --- wxl.profile -------------------------------------------------------------------------
+    //
+    // A viewer that is connected when the test says, and a trace of what was opened and closed:
+    // "+name", "-name", "text:..." in order.
+
+    struct FakeProfile
+    {
+        static bool& Connected() { static bool connected = false; return connected; }
+        static std::vector<std::string>& Names() { static std::vector<std::string> names; return names; }
+        static std::vector<std::string>& Trace() { static std::vector<std::string> trace; return trace; }
+
+        static std::string Text(wxl_str text) { return std::string(text.data ? text.data : "", text.size); }
+
+        static wxl_bool WXL_CALL IsConnected() { return Connected() ? WXL_TRUE : WXL_FALSE; }
+        static uintptr_t WXL_CALL Location(wxl_str name, wxl_str, wxl_str, uint32_t, uint32_t)
+        {
+            if (!name.size) return 0;
+            for (size_t i = 0; i < Names().size(); ++i)
+                if (Names()[i] == Text(name)) return i + 1;
+            Names().push_back(Text(name));
+            return Names().size();
+        }
+        static uintptr_t WXL_CALL Begin(uintptr_t location)
+        {
+            if (!Connected() || !location) return 0;
+            Trace().push_back("+" + Names()[location - 1]);
+            return location;
+        }
+        static void WXL_CALL End(uintptr_t zone)
+        {
+            if (zone) Trace().push_back("-" + Names()[zone - 1]);
+        }
+        static void WXL_CALL ZoneText(uintptr_t zone, wxl_str text)
+        {
+            if (zone) Trace().push_back("text:" + Text(text));
+        }
+        static void WXL_CALL Plot(wxl_str name, double value)
+        {
+            if (Connected()) Trace().push_back("plot:" + Text(name) + "=" + std::to_string(static_cast<int>(value)));
+        }
+        static void WXL_CALL Message(wxl_str text)
+        {
+            if (Connected()) Trace().push_back("message:" + Text(text));
+        }
+        static void WXL_CALL FrameMark(wxl_str name)
+        {
+            if (Connected()) Trace().push_back("frame:" + Text(name));
+        }
+
+        static const wxl_profile_api* Table()
+        {
+            static wxl_profile_api api = [] {
+                wxl_profile_api t{};
+                t.struct_size = sizeof(wxl_profile_api);
+                t.connected   = &IsConnected;
+                t.location    = &Location;
+                t.zone_begin  = &Begin;
+                t.zone_end    = &End;
+                t.zone_text   = &ZoneText;
+                t.plot        = &Plot;
+                t.message     = &Message;
+                t.frame_mark  = &FrameMark;
                 return t;
             }();
             return &api;

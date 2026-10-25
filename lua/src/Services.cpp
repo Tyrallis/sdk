@@ -92,6 +92,7 @@ namespace wxl::lua
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
+#include "wxl/services/profile.def"
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD
 #undef WXL_API_RESOURCE
@@ -115,6 +116,7 @@ namespace wxl::lua
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
+#include "wxl/services/profile.def"
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD
 #undef WXL_API_RESOURCE
@@ -872,6 +874,7 @@ namespace wxl::lua
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
+#include "wxl/services/profile.def"
             };
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD
@@ -896,6 +899,7 @@ namespace wxl::lua
 #include "wxl/services/hook_raw.def"
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
+#include "wxl/services/profile.def"
             };
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD

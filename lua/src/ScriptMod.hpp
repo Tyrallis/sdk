@@ -181,6 +181,7 @@ namespace wxl::lua
         uint32_t             errors_     = 0;
         int                  traceback_  = LUA_NOREF;
         std::vector<int>     callbacks_[static_cast<size_t>(Callback::Count)];
+        uintptr_t            zones_[static_cast<size_t>(Callback::Count)] = {}; ///< each callback's profiler location
         std::vector<Watched> watched_;
         FieldWatches         fieldWatches_;
     };

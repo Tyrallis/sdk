@@ -46,6 +46,12 @@ namespace
     {
         void operator()(float delta) const
         {
+            WXL_PROFILE_ZONE("Tick");
+            WXL_PROFILE_ZONE_NAMED(work, "Tick work");
+            work.Text("text");
+            if (wxl::ProfileService::Connected()) wxl::ProfileService::Plot("delta", static_cast<double>(delta));
+            wxl::ProfileService::Message("tick");
+            wxl::ProfileService::FrameMark("headers");
 #if defined(__cpp_lib_format) && __cpp_lib_format >= 202207L
             wxl::Log(WXL_LOG_TRACE, kTag, "tick {:.3f}", delta);
 #else

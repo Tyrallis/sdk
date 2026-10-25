@@ -13,12 +13,15 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "wxl/events.h"
 #include "wxl/host.h"
 #include "wxl/host/guard.hpp"
 #include "wxl/host/log.hpp"
+#include "wxl/host/profile.hpp"
 
 namespace wxl::host
 {
@@ -40,6 +43,10 @@ namespace wxl::host
      *
      * Every subscription carries an owner, an opaque token the host assigns to the mod that
      * made it (0 for nobody); @ref DropOwner drops them all at once, during a dispatch included.
+     *
+     * With a profiler set and profiling on, each dispatch is a zone named after its event, and
+     * each handler a zone inside it named after its owner and the event: "scout: OnUpdate".
+     * Profiling off costs a dispatch one load.
      *
      * Any thread may emit, subscribe and unsubscribe. A dispatch takes no lock: each event's list
      * is an immutable snapshot that a change replaces, and a replaced snapshot is freed once no
@@ -111,6 +118,19 @@ namespace wxl::host
             faultUser_ = user;
         }
 
+        /// Names an owner for the zones of its handlers: its mod's id. Called when it subscribes.
+        using OwnerNameFn = std::string (*)(void* user, uint32_t owner);
+
+        /**
+         * @brief Gives the bus a profiler, before the first subscription: the zones it opens
+         *        while @ref SetProfiling is on. Null removes it. A no-op in a host built without
+         *        WXL_HOST_PROFILE.
+         */
+        void SetProfiler(const Profiler* profiler, OwnerNameFn name, void* nameUser);
+
+        /// Whether a viewer is watching: dispatches open zones only while this is on. Any thread.
+        void SetProfiling(bool on) { profiling_.store(on && profiler_ != nullptr, std::memory_order_relaxed); }
+
         /// @return WXL_SUBSCRIPTION_NONE for a null handler, an unknown event, or one the
         ///         runtime does not raise.
         wxl_subscription Subscribe(wxl_event event, wxl_event_fn handler, void* user,
@@ -156,6 +176,7 @@ namespace wxl::host
             int32_t           priority;
             uint32_t          owner;
             std::atomic<bool> live{true};
+            const void*       zone = nullptr; ///< the profiler's location for its handler
         };
 
         /// One event's subscriptions, sorted by priority then by id. Never changed once published.
@@ -185,6 +206,16 @@ namespace wxl::host
         wxl_subscription                       next_ = WXL_SUBSCRIPTION_NONE;
 
         mutable std::atomic<uint32_t> inFlight_{0}; ///< dispatches running, on every thread
+
+        /// The location of a handler's zone: one per owner and event, made once.
+        const void* HandlerZone(wxl_event event, uint32_t owner);
+
+        const Profiler*          profiler_ = nullptr;
+        OwnerNameFn              ownerName_ = nullptr;
+        void*                    ownerNameUser_ = nullptr;
+        std::atomic<bool>        profiling_{false};
+        std::vector<const void*> eventZones_;   ///< per event
+        std::vector<std::pair<uint64_t, const void*>> handlerZones_; ///< (owner << 32 | event, location), under writeLock_
 
         const Logger* logger_    = nullptr;
         ListenFn      listenFn_   = nullptr;

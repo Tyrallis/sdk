@@ -10,6 +10,7 @@
 
 #include "Args.hpp"
 #include "Objects.hpp"
+#include "Profile.hpp"
 #include "Runtime.hpp"
 #include "Sandbox.hpp"
 #include "Services.hpp"
@@ -160,7 +161,12 @@ namespace wxl::lua
         const std::string entry = candidate_.manifest.lua;
         lua_rawgeti(L, LUA_REGISTRYINDEX, traceback_);
         const int msgh = lua_gettop(L);
-        if (LoadFile(L, Entry(), Id() + "/" + entry) != 0 || lua_pcall(L, 0, 0, msgh) != 0)
+        bool loaded = false;
+        {
+            const profile::Call zone(profile::Location(*this, entry));
+            loaded = LoadFile(L, Entry(), Id() + "/" + entry) == 0 && lua_pcall(L, 0, 0, msgh) == 0;
+        }
+        if (!loaded)
         {
             runtime_.Log(WXL_LOG_ERROR, "mod " + Id() + " failed to load " + entry + ": " +
                                             (lua_tostring(L, -1) ? lua_tostring(L, -1) : "?"));
@@ -267,8 +273,11 @@ namespace wxl::lua
         // By index over the count there was: a callback registered by a callback waits.
         std::vector<int>& refs  = callbacks_[static_cast<size_t>(which)];
         const size_t      count = refs.size();
+        uintptr_t& location = zones_[static_cast<size_t>(which)];
+        if (!location) location = profile::Location(*this, kCallbackNames[static_cast<size_t>(which)]);
         for (size_t i = 0; i < count && Runs(); ++i)
         {
+            const profile::Call zone(location);
             const int base = lua_gettop(L);
             lua_rawgeti(L, LUA_REGISTRYINDEX, traceback_);
             lua_rawgeti(L, LUA_REGISTRYINDEX, refs[i]);

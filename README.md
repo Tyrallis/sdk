@@ -5,7 +5,7 @@
 **The contract a WarcraftXL mod is written against**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![ABI](https://img.shields.io/badge/ABI-0.1.11-blue.svg)](include/wxl/abi.h)
+[![ABI](https://img.shields.io/badge/ABI-0.1.12-blue.svg)](include/wxl/abi.h)
 [![C++](https://img.shields.io/badge/C%2B%2B-17%20and%20up-blue.svg)](#-getting-started)
 [![Header only](https://img.shields.io/badge/header--only-yes-lightgrey.svg)](include/wxl)
 
@@ -274,7 +274,7 @@ supplies only the bindings that reach its own client.
 
 ## 🔢 Versioning
 
-`major.minor.feature`, in [`abi.h`](include/wxl/abi.h): today `0.1.11`.
+`major.minor.feature`, in [`abi.h`](include/wxl/abi.h): today `0.1.12`.
 
 - **Major** changes when an existing field, signature or id changes meaning. A runtime refuses a
   mod built against a different major.
@@ -294,6 +294,7 @@ Event ids and stage numbers are appended, never renumbered, never removed.
 - [Your first mod](docs/your-first-mod.md) -- a tutorial, from an empty folder to a mod that does real work
 - [Building a mod](docs/building-a-mod.md) -- the manifest, the targets, the C++ layer
 - [Lua mods](docs/lua-mods.md) -- a mod with nothing to build: the folder, the API, reload, the sandbox
+- [Profiling](docs/profiling.md) -- where frame time goes, mod by mod, in the Tracy viewer, and zones of your own
 - [`schema/mod.json`](schema/mod.json) -- the manifest schema, for your editor
 - [`template/`](template/) -- a working mod to copy
 - [`examples/scout/`](examples/scout/) -- the worked example the tutorial builds

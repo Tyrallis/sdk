@@ -104,6 +104,7 @@ namespace wxl::lua
             bool       override; ///< its answer is taken
             uint32_t   id;
             bool       live;
+            uintptr_t  zone;     ///< the location of its profiler zone, "<mod>: On<Event>"
         };
 
         /// One event: the native subscription and the Lua handlers it feeds, in order.

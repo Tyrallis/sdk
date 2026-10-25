@@ -182,6 +182,17 @@ namespace wxl::host
          */
         void DisableOnRequest(ModToken token, std::string_view reason);
 
+        /**
+         * @brief Gives the host a profiler: every dispatch and every handler becomes a zone, the
+         *        handler's named after its mod, while @ref SetProfiling is on.
+         *
+         * Before @ref LoadAll; copied. A runtime without a profiler never calls it.
+         */
+        void SetProfiler(const Profiler& profiler);
+
+        /// Whether a viewer is watching. The runtime says so as it learns it, once a frame.
+        void SetProfiling(bool on) { events_.SetProfiling(on); }
+
         /// Called after a mod is disabled. A runtime uses it to withdraw what the mod registered
         /// with its services.
         void SetDisableHandler(DisableFn handler, void* user)
@@ -238,6 +249,7 @@ namespace wxl::host
         static void WXL_CALL             ThunkEmit(wxl_event event, const void* args);
         static void WXL_CALL             ThunkDisable(wxl_str reason);
 
+        static std::string NameOwner(void* user, uint32_t owner);
         static void     OnHandlerFault(void* user, uint32_t owner, wxl_event event, const Fault& fault);
         static uint32_t SwapOwner(void* user, uint32_t owner);
 
@@ -276,6 +288,7 @@ namespace wxl::host
                        size_t capacity);
 
         HostConfig       config_;
+        Profiler         profiler_;
         std::string      modsDirectoryText_; ///< what info_.mods_directory points into
         Logger           logger_;
         ServiceRegistry  services_;

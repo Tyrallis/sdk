@@ -2014,6 +2014,41 @@ function footprint.Report(name, bytes, count) end
 ---@return string|nil reason
 function footprint.WatchPressure(bytes) end
 
+---wxl.profile. Zones, graphs and messages on the profiler's timeline, beside the client's frames and the mods' handlers.
+---@class wxl.profile
+local profile = {}
+
+---Whether a profiler viewer is connected: nothing is recorded while none is.
+---@return boolean|nil
+---@return string|nil reason
+function profile.Connected() end
+
+---Opens a zone named `name` on the profiler's timeline, inside the handler or callback running
+---now; End closes it. Zones nest. Whatever this call left open is closed when it returns or
+---errors. Nothing is recorded while no viewer is connected.
+---@param name string
+function profile.Begin(name) end
+
+---Closes the innermost zone this mod opened in the call running now; nothing when none is open.
+function profile.End() end
+
+---Adds a line of text to the innermost zone this mod opened: the item, the unit, the file.
+---@param text string
+function profile.Text(text) end
+
+---Puts a value on the graph of that name, drawn under the timeline.
+---@param name string
+---@param value number
+function profile.Plot(name, value) end
+
+---A line of text on the timeline, now.
+---@param text string
+function profile.Message(text) end
+
+---Ends a frame of a frame set of the mod's own, drawn beside the client's frames.
+---@param name string
+function profile.FrameMark(name) end
+
 ---@class wxl.ModInfo
 ---@field id string
 ---@field name string
@@ -2079,6 +2114,7 @@ function object.Unwatch(type, name) end
 ---@field hook wxl.hook
 ---@field patch wxl.patch
 ---@field footprint wxl.footprint
+---@field profile wxl.profile
 ---@field events table<wxl.Family, string[]> every family's events, as On<Event>
 wxl = {}
 

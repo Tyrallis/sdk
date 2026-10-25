@@ -14,6 +14,7 @@
 #include <system_error>
 #include <vector>
 
+#include "Profile.hpp"
 #include "Runtime.hpp"
 #include "ScriptMod.hpp"
 #include "Services.hpp"
@@ -50,6 +51,7 @@ namespace wxl::lua::shims
             uint32_t    contexts = kEveryContext;
             uint32_t    bound    = 0;       ///< the contexts in which the client holds it
             bool        warned   = false;   ///< a return value that cannot cross was logged
+            uintptr_t   zone     = 0;       ///< its zone's location, made for the mod answering it
         };
 
         struct Event
@@ -119,6 +121,7 @@ namespace wxl::lua::shims
             }
 
             ++g_calling;
+            const profile::Call zone(function.zone);
             lua_rawgeti(L, LUA_REGISTRYINDEX, mod.TracebackRef());
             lua_rawgeti(L, LUA_REGISTRYINDEX, function.ref);
             for (uint32_t i = 0; i < count; ++i)
@@ -282,6 +285,7 @@ namespace wxl::lua::shims
             function->mod      = &mod;
             function->contexts = contexts;
             function->warned   = false;
+            function->zone     = profile::Location(mod, function->name);
 
             // Bound now when a context it belongs to is live; otherwise at the next one.
             const wxl_result result = Bind(*function, Live());
@@ -564,6 +568,9 @@ namespace wxl::lua::shims
         if (service == "footprint" && name == "Snapshot") return &L_Snapshot;
         if (service == "footprint" && name == "Report") return &L_Report;
         if (service == "footprint" && name == "WatchPressure") return &L_WatchPressure;
+        if (service == "profile" && name == "Begin") return &profile::L_Begin;
+        if (service == "profile" && name == "End") return &profile::L_End;
+        if (service == "profile" && name == "Text") return &profile::L_Text;
         return nullptr;
     }
 
