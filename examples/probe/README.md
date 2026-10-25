@@ -3,7 +3,8 @@
 A Lua test tool: it listens to every event the runtime raises and writes into
 `Logs/WarcraftXL.log` what it saw, so that a test session can be read back from the log alone.
 Copy it into a runtime's `Mods/` next to `wxl.lua` for a test, and take it out afterwards. It needs
-a runtime of abi `0.1.13` or later, which can say which events it raises.
+a runtime of abi `0.1.13` or later, which can say which events it raises; its manifest asks for
+`0.1.17`, so that it subscribes the gameplay events too.
 
 ```
 probe/

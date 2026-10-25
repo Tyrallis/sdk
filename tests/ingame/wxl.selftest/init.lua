@@ -9,7 +9,9 @@
 --   4. provokes events a session rarely shows (PROVOKE): a cast refused, a cast cancelled, a
 --      racial's cooldown, a hearthstone use refused, an item taken off and put back on;
 --   5. reloads the interface and calls the functions again;
---   6. logs out and back in with the same character (RELOG) and calls them again.
+--   6. logs out and back in with the same character (RELOG) and calls them again;
+--   7. checks the engine points; 8. subscribes every gameplay event, provokes a /wave and reads
+--      the inventory and aura events phase 4 caused.
 --
 -- Each check is one line in the log: PASS, FAIL, SKIP (what it needs is not there: a class
 -- without a cast-time spell, say) or NOTE (an event the server may not send). The chat box shows
@@ -169,6 +171,15 @@ for family, names in pairs({
                      "SpellCastInterrupted", "SpellCastCancel", "SpellCooldown", "ItemUseRequest",
                      "SpellCastRequest" },
     GlueScript   = { "GlueScreenChanged", "GlueCharacterList", "GlueEnterWorld" },
+}) do
+    for _, name in ipairs(names) do keep(family, name) end
+end
+
+-- The gameplay events phase 8 checks, kept from the phases that provoke them.
+for family, names in pairs({
+    ObjectScript = { "UnitAuraApplied" },
+    ItemScript   = { "InventorySlotChanged" },
+    SocialScript = { "Emote", "TextEmote" },
 }) do
     for _, name in ipairs(names) do keep(family, name) end
 end
@@ -497,7 +508,7 @@ step(function()
         racial = nil
         return
     end
-    watch("SpellCastGo", "SpellCooldown", "SpellCastFailed")
+    watch("SpellCastGo", "SpellCooldown", "SpellCastFailed", "UnitAuraApplied")
     run(string.format("CastSpellByID(%d, 'player')", racial))
     waitFor(function() return saw("SpellCastGo", spell(6, racial)) end, 3)
 end)
@@ -579,7 +590,7 @@ step(function()
         return
     end
     wornSlot, wornLink, wornId = slot, link, tonumber(tostring(link):match("item:(%d+)"))
-    watch("EquipmentChanged")
+    watch("EquipmentChanged", "InventorySlotChanged")
     local _, what = ask(string.format(
         "PickupInventoryItem(%d) PutItemInBackpack() " ..
         "if CursorHasItem() then PickupInventoryItem(%d) return 'kept' end return 'off'", slot, slot))
@@ -720,6 +731,68 @@ step(function()
         end
     else
         result("CM2Shared::FinishLoading is listed", false, "not listed")
+    end
+end)
+
+-- 8. Gameplay events ---------------------------------------------------------------------------
+
+-- Each gameplay family subscribes, and what client Lua can provoke alone is provoked; the rest
+-- needs another player, an NPC or a death, and is skipped with why.
+local GAMEPLAY = {
+    ObjectScript = { "UnitAuraApplied", "UnitAuraRemoved", "UnitAuraRefreshed", "UnitMountChanged" },
+    LootScript   = { "LootOpened", "LootSlot", "LootSlotCleared", "LootClosed", "LootMoney", "LootRollStart",
+                     "LootRoll", "LootRollWon", "LootAllPassed" },
+    ItemScript   = { "ItemPushed", "InventorySlotChanged", "ItemDurabilityChanged", "ItemStackChanged",
+                     "InventoryError" },
+    QuestScript  = { "QuestAccepted", "QuestRemoved", "QuestObjectiveChanged", "QuestCompleted", "QuestFailed",
+                     "QuestTurnedIn", "QuestGiverGreeting", "QuestGiverDetail", "QuestGiverProgress",
+                     "QuestGiverReward" },
+    GroupScript  = { "GroupInvite", "GroupUpdated", "GroupMember", "GroupLeft", "GroupLootMethodChanged",
+                     "ReadyCheck", "ReadyCheckResponse", "ReadyCheckFinished" },
+    SocialScript = { "DuelRequested", "DuelCountdown", "DuelWon", "DuelFinished", "TradeStatus", "Emote",
+                     "TextEmote", "ResurrectRequest", "WindowOpened", "WindowClosed" },
+    PlayerScript = { "PlayerDied", "PlayerReleased", "PlayerResurrected", "ReputationChanged",
+                     "AchievementEarned" },
+}
+
+step(function()
+    print("phase 8: gameplay events")
+    local count, refused = 0, {}
+    for family, names in pairs(GAMEPLAY) do
+        for _, name in ipairs(names) do
+            local ok, why = pcall(Observe, family, "On" .. name, function() end)
+            if ok then count = count + 1 else refused[#refused + 1] = name .. ": " .. tostring(why) end
+        end
+    end
+    result("every gameplay event subscribes", #refused == 0,
+           #refused == 0 and (count .. " events") or table.concat(refused, "; "))
+    watch("TextEmote", "Emote")
+    run("DoEmote('WAVE')")
+    waitFor(function() return saw("TextEmote") end, 3)
+end)
+
+step(function()
+    result("event TextEmote: /wave", saw("TextEmote", function(args) return args[3] ~= 0 end))
+    note("event Emote", saw("Emote"), "the server plays a text emote's animation through SMSG_EMOTE on some cores only")
+    if not (PROVOKE and takenOff) then
+        skip("event InventorySlotChanged", "phase 4 took no item off")
+    else
+        result("event InventorySlotChanged: the item taken off went to the bags", saw("InventorySlotChanged"))
+    end
+    if not (PROVOKE and racial and racialWent) then
+        skip("event UnitAuraApplied", "phase 4 cast no racial")
+    else
+        note("event UnitAuraApplied (" .. racialName .. ")", saw("UnitAuraApplied", spell(4, racial)),
+             "this racial puts no aura on its caster")
+    end
+    for _, what in ipairs({
+        "loot (kill something and loot it: LootOpened, LootSlot, LootSlotCleared, LootClosed, LootMoney)",
+        "rolls, group, ready checks, trades, duels, resurrection offers (another player)",
+        "quests (a quest giver: QuestGiver*, QuestAccepted, QuestObjectiveChanged, QuestTurnedIn)",
+        "windows (an NPC: WindowOpened, WindowClosed)",
+        "death, release, resurrection, reputation, achievements (they change the character)",
+    }) do
+        skip("gameplay " .. what, "the probe lists them when they happen")
     end
 end)
 

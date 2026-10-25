@@ -28,7 +28,11 @@ world with a character, wait about two minutes without touching anything, and re
 (`WxlProbeStep()`). The build puts them in the suite's folder too, with `model-swap`, the points
 example: its `[model-swap]` lines in the log name every model loaded, and murlocs are drawn as gnolls.
 Phase 7 of `wxl.selftest` checks the list of engine points (`wxl.point`, abi 0.1.16) on the runtime
-it runs on.
+it runs on. Phase 8 subscribes every gameplay event (abi 0.1.17), waves (`TextEmote`, `Emote` as a
+NOTE), and reads what phase 4 caused: the item taken off reaching the bags
+(`InventorySlotChanged`) and the racial's aura (`UnitAuraApplied`, a NOTE for a racial that puts
+none on its caster). Loot, quests, groups, trades, duels, windows, death and reputation need a
+kill, an NPC or another player: they are SKIP lines, and the probe lists them when they happen.
 
 ## Building it
 
