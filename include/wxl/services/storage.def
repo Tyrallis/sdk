@@ -52,3 +52,10 @@ WXL_API(storage, serve, Serve, result, (str path, bytes data, bytes_size size, i
         "reads them as one of its files. Priority as AddSearchPath's.")
 WXL_API(storage, unserve, Unserve, result, (str path), shim, generated,
         "Takes back what the mod serves under a name; not_found for one it does not serve.")
+
+// MSVC takes a file that expands to nothing outside its opening #ifndef X ... #endif for one
+// guarded by X, and skips it when it is included again with X defined: this table is read
+// several times in one translation unit, under shapes that may leave it empty. A directive
+// after the rows keeps it from looking guarded.
+#ifdef WXL_TABLE_END
+#endif
