@@ -13,6 +13,7 @@
 #include "wxl/services/hook.hpp"
 #include "wxl/services/net.hpp"
 #include "wxl/services/patch.hpp"
+#include "wxl/services/point.hpp"
 #include "wxl/services/profile.hpp"
 #include "wxl/services/script.hpp"
 #include "wxl/services/storage.hpp"

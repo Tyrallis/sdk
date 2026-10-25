@@ -1756,6 +1756,16 @@ function Object:Guild() end
 ---@field regions integer
 ---@field largest integer
 
+---@class wxl.PointInfo
+---@field point integer
+---@field name string
+---@field signature string
+---@field thread integer
+---@field flags integer
+---@field layout_hash integer
+---@field arg_count integer
+---@field absent string
+
 ---A File of wxl.storage.
 ---@class wxl.File
 local File = {}
@@ -2076,6 +2086,22 @@ function profile.Message(text) end
 ---@param name string
 function profile.FrameMark(name) end
 
+---wxl.point. Functions of the engine a mod runs code before, instead of or after.
+---Came with abi 0.1.16: a mod whose mod.json asks for an older abi cannot use it.
+---@class wxl.point
+local point = {}
+
+---Every point of the table, with its signature, thread, flags and, when this runtime does not have it, why.
+---@return wxl.PointInfo[]|nil
+---@return string|nil reason
+function point.Points() end
+
+---The id of a point this runtime has, by name.
+---@param name string
+---@return integer|nil
+---@return string|nil reason
+function point.Find(name) end
+
 ---@class wxl.ModInfo
 ---@field id string
 ---@field name string
@@ -2145,6 +2171,7 @@ function object.Unwatch(type, name) end
 ---@field patch wxl.patch
 ---@field footprint wxl.footprint
 ---@field profile wxl.profile
+---@field point wxl.point
 ---@field events table<wxl.Family, string[]> every family's events, as On<Event>
 wxl = {}
 

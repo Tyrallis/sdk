@@ -5,7 +5,7 @@
 **The contract a WarcraftXL mod is written against**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![ABI](https://img.shields.io/badge/ABI-0.1.15-blue.svg)](include/wxl/abi.h)
+[![ABI](https://img.shields.io/badge/ABI-0.1.16-blue.svg)](include/wxl/abi.h)
 [![C++](https://img.shields.io/badge/C%2B%2B-17%20and%20up-blue.svg)](#-getting-started)
 [![Header only](https://img.shields.io/badge/header--only-yes-lightgrey.svg)](include/wxl)
 
@@ -210,13 +210,15 @@ Beyond events, a runtime publishes services, and a mod asks for the ones it need
 | `wxl.data` | the client's databases, served from a mod's files | yes |
 | `wxl.net` | messages to and from the server | yes; no runtime publishes it yet |
 | `wxl.ui` | frames and the interface | yes; no runtime publishes it yet |
+| `wxl.point` | functions of the engine: run code before, instead of or after them | yes; a few exist on one runtime, and say so |
 | `wxl.hook` | hook points a runtime names and keeps working | yes |
 | `wxl.hook.raw` | a detour at a raw address | no: runtimes that load into a shipped binary |
 | `wxl.patch` | bytes written into the image | no: runtimes that load into a shipped binary |
 
 Each service has a typed facade with its name and version sealed in -- `wxl::ObjectService`,
 `wxl::ScriptService`, `wxl::StorageService`, `wxl::DataService`, `wxl::NetService`,
-`wxl::UiService`, `wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService` -- taking and
+`wxl::UiService`, `wxl::PointService`, `wxl::HookService`, `wxl::RawHookService`,
+`wxl::PatchService` -- taking and
 returning C++ types. `wxl::Service<T>` is still there for the raw table. Lua mods reach the same
 services as `wxl.storage`, `wxl.data`, `wxl.script`, `wxl.hook` and `wxl.patch`, built from the
 same tables.
@@ -269,6 +271,7 @@ examples/lua-hello/ the same in Lua: a folder, no build
 examples/lua-services/ a Lua mod using the services: files, a search path, databases, the
                    client's own script
 examples/memory-report/ a Lua mod that writes where the client's memory goes into a report
+examples/model-swap/ a C++ mod changing the engine through a point: the model cache
 examples/probe/    a Lua test tool: every event the runtime raises, and /mark, into the log
 tests/             the contract, the mod host, the shared runtime and wxl.lua, each against fakes
 tests/ingame/      the same against a real client: test mods and wxl.selftest, which drives them
@@ -280,7 +283,7 @@ supplies only the bindings that reach its own client.
 
 ## 🔢 Versioning
 
-`major.minor.feature`, in [`abi.h`](include/wxl/abi.h): today `0.1.15`.
+`major.minor.feature`, in [`abi.h`](include/wxl/abi.h): today `0.1.16`.
 
 - **Major** changes when an existing field, signature or id changes meaning. A runtime refuses a
   mod built against a different major.
@@ -305,6 +308,7 @@ Event ids and stage numbers are appended, never renumbered, never removed.
 - [`schema/mod.json`](schema/mod.json) -- the manifest schema, for your editor
 - [`template/`](template/) -- a working mod to copy
 - [`examples/scout/`](examples/scout/) -- the worked example the tutorial builds
+- [`examples/model-swap/`](examples/model-swap/) -- the engine changed through a point ("Changing the engine: points" in Building a mod)
 
 ## 💬 Support
 

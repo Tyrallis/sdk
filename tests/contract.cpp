@@ -357,6 +357,77 @@ namespace
 // The entry points the WXL_MOD macro writes, exercised in-process.
 WXL_MOD(LifecycleMod, "wxl.contract", "Contract")
 
+
+// --- A point service that records what is attached, for the typed facade -----------------------
+namespace fakepoint
+{
+    struct Attached
+    {
+        uint32_t     point, side;
+        wxl_point_fn fn;
+        void*        user;
+        uint32_t     hash;
+        bool         live;
+    };
+    std::vector<Attached> g_attached;
+    int                   g_originals = 0;
+
+    uint32_t WXL_CALL List(wxl_point_info*, uint32_t) { return 0; }
+    wxl_result WXL_CALL Find(const char* name, uint32_t* out)
+    {
+        uint32_t id = 0;
+#define WXL_POINT(Ident, n, ret, params, lowered, hash, policy, thread, stability, runtimes) \
+        ++id;                                                                              \
+        if (std::strcmp(n, name) == 0) { *out = id; return WXL_OK; }
+#include "wxl/points.def"
+#undef WXL_POINT
+        return WXL_E_NOT_FOUND;
+    }
+    uint32_t WXL_CALL Attach(uint32_t point, uint32_t side, wxl_point_fn fn, void* user, int32_t, uint32_t hash)
+    {
+        g_attached.push_back(Attached{point, side, fn, user, hash, true});
+        return static_cast<uint32_t>(g_attached.size());
+    }
+    wxl_result WXL_CALL Detach(uint32_t id)
+    {
+        if (id == 0 || id > g_attached.size() || !g_attached[id - 1].live) return WXL_E_NOT_FOUND;
+        g_attached[id - 1].live = false;
+        return WXL_OK;
+    }
+    /// The original of the camera's point: answers data + param, as addresses.
+    void WXL_CALL CallOriginal(wxl_point_call* call)
+    {
+        ++g_originals;
+        const uintptr_t data  = reinterpret_cast<uintptr_t>(*static_cast<void**>(call->args[0]));
+        const uintptr_t param = reinterpret_cast<uintptr_t>(*static_cast<void**>(call->args[1]));
+        *static_cast<int32_t*>(call->result) = static_cast<int32_t>(data + param);
+    }
+    const wxl_point_api g_api = {sizeof(wxl_point_api), &List, &Find, &Attach, &Detach, &CallOriginal};
+
+    /// Runs the live handlers of the camera point on a call, side by side, as a runtime would.
+    int32_t Run(uintptr_t data, uintptr_t param)
+    {
+        void*          a = reinterpret_cast<void*>(data);
+        void*          b = reinterpret_cast<void*>(param);
+        void* const    args[] = {&a, &b};
+        int32_t        result = 0;
+        wxl_point_call call{sizeof(wxl_point_call), 1, 0, 1, 0, 2, args, &result, {0, 0, 0}};
+        for (uint32_t side : {WXL_POINT_BEFORE, WXL_POINT_REPLACE, WXL_POINT_AFTER})
+        {
+            call.side  = side;
+            bool ran   = false;
+            for (const Attached& one : g_attached)
+                if (one.live && one.side == side)
+                {
+                    one.fn(&call, one.user);
+                    ran = true;
+                }
+            if (side == WXL_POINT_REPLACE && !ran) CallOriginal(&call);
+        }
+        return result;
+    }
+}
+
 int main()
 {
     // Unbuffered, so the last line printed before a crash is never held back in a buffer.
@@ -1500,6 +1571,39 @@ int main()
               "on a runtime without disable, the mod says so and stops itself");
         host.WithDisable();
         LifecycleMod::throwIn.clear();
+    }
+
+    Section("typed points");
+    {
+        host.Table()->publish_service(WXL_POINT_SERVICE, WXL_POINT_SERVICE_VERSION, &fakepoint::g_api);
+        using Camera = wxl::points::CGCamera_UpdateCallback;
+        Check(std::is_same_v<Camera::Signature, int32_t(void*, void*)> && Camera::kReplaceable && Camera::kStable &&
+                  Camera::kThread == WXL_POINT_THREAD_MAIN && std::strcmp(Camera::kName, "CGCamera::UpdateCallback") == 0,
+              "a point's class carries its row: signature, policy, stability, thread, name");
+        Check(Camera::Id() == 1, "its id is found by name");
+
+        int  seen  = 0;
+        auto first = Camera::Before([&seen](void*& data, void*&) { seen = static_cast<int>(reinterpret_cast<uintptr_t>(data)); data = reinterpret_cast<void*>(uintptr_t{10}); });
+        wxl::PointAttachment replace = Camera::Replace([](auto original, void* data, void* param) {
+            return original(data, reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(param) + 1)) * 2;
+        });
+        wxl::PointAttachment after = Camera::After([](int32_t& result, void*, void*) { result += 3; });
+        Check(first && replace && after && fakepoint::g_attached.size() == 3, "Before, Replace and After attach");
+        Check(fakepoint::g_attached[1].hash == Camera::kLayoutHash, "and pass the point's layout hash");
+        const int32_t answer = fakepoint::Run(1, 2);
+        Check(seen == 1 && answer == (10 + 3) * 2 + 3 && fakepoint::g_originals == 1,
+              "Before rewrote an argument, Replace called the original with its own and doubled it, After added to it");
+
+        wxl::PointAttachment throws = Camera::Replace([](auto, void*, void*) -> int32_t { throw std::runtime_error("no"); });
+        replace.Reset();
+        fakepoint::g_originals = 0;
+        Check(fakepoint::Run(1, 2) == 10 + 2 + 3 && fakepoint::g_originals == 1,
+              "a Replace that throws before calling the original: the facade calls it, the call goes on");
+        first.Reset();
+        after.Reset();
+        throws.Reset();
+        Check(fakepoint::Run(1, 2) == 3, "Reset detaches each");
+        Check(!fakepoint::g_attached[0].live && !fakepoint::g_attached[3].live, "and a reset handle detaches nothing twice");
     }
 
     if (g_failures == 0)

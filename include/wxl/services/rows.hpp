@@ -48,6 +48,7 @@
 // Parameters, and the C parameters each one is:
 //   str wxl_str  cstr const char*  i32  u32  u64  uptr uintptr_t  f64 double  boolean wxl_bool
 //   ptr void*  ptr_out void**  call wxl_script_call*  script_fn wxl_script_fn
+//   point_fn wxl_point_fn  point_call wxl_point_call*
 //   values (const wxl_value*, uint32_t count)  bytes const void*
 //   bytes_size uint32_t: the length of the bytes before it, which must all be as long
 //   a resource: its ctype
@@ -82,6 +83,7 @@
 #include "wxl/services/data.h"
 #include "wxl/services/hook.h"
 #include "wxl/services/patch.h"
+#include "wxl/services/point.h"
 #include "wxl/services/footprint.h"
 #include "wxl/services/profile.h"
 #include "wxl/services/script.h"
@@ -110,6 +112,8 @@ namespace wxl::api
         struct ptr_out {};
         struct call {};
         struct script_fn {};
+        struct point_fn {};
+        struct point_call {};
         struct values {};
         struct bytes {};
         struct bytes_size {};
@@ -153,6 +157,7 @@ namespace wxl::api
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
+#include "wxl/services/point.def"
 #undef WXL_API_RESOURCE
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
@@ -199,6 +204,8 @@ namespace wxl::api
     template <> struct Param<kind::ptr_out> { using C = List<void**>; };
     template <> struct Param<kind::call> { using C = List<wxl_script_call*>; };
     template <> struct Param<kind::script_fn> { using C = List<wxl_script_fn>; };
+    template <> struct Param<kind::point_fn> { using C = List<wxl_point_fn>; };
+    template <> struct Param<kind::point_call> { using C = List<wxl_point_call*>; };
     template <> struct Param<kind::values> { using C = List<const wxl_value*, uint32_t>; };
     template <> struct Param<kind::bytes> { using C = List<const void*>; };
     template <> struct Param<kind::bytes_size> { using C = List<uint32_t>; };
@@ -332,6 +339,7 @@ namespace wxl::api
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
+#include "wxl/services/point.def"
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
 #undef WXL_API_CLOSE
@@ -477,6 +485,7 @@ namespace wxl::api
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
+#include "wxl/services/point.def"
         };
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
@@ -504,6 +513,7 @@ namespace wxl::api
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
+#include "wxl/services/point.def"
         };
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
@@ -527,6 +537,7 @@ namespace wxl::api
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
+#include "wxl/services/point.def"
         };
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
@@ -551,6 +562,7 @@ namespace wxl::api
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
+#include "wxl/services/point.def"
         };
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
@@ -577,6 +589,7 @@ namespace wxl::api
 #include "wxl/services/patch.def"
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
+#include "wxl/services/point.def"
         };
 #undef WXL_API_SINCE
 #undef WXL_API_FIELD
