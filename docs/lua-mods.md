@@ -1367,6 +1367,7 @@ them in `include/wxl/services/<service>.def`.
 | `wxl.footprint.WatchPressure(bytes)` | `true`: `OnMemoryPressure` when the largest free block falls under it; 0 stops |
 | `wxl.profile.Begin(name)`, `.End()`, `.Text(text)` | a zone on the profiler's timeline inside the running handler, closed by `End` or when the handler returns; a line of text on it (abi `0.1.12`, see [Profiling](profiling.md)) |
 | `wxl.profile.Plot(name, value)`, `.Message(text)`, `.FrameMark(name)`, `.Connected()` | a point on a graph; a line on the timeline; a frame of your own frame set; whether a viewer is connected |
+| `wxl.point.Points()`, `.Find(name)` | the engine functions a C++ mod can run code before, instead of or after (name, signature, thread, flags, and `absent`: why this runtime lacks one); the id of one this runtime has (abi `0.1.16`). Attaching from Lua is to come; see "Changing the engine: points" in [Building a mod](building-a-mod.md) |
 
 ### Object methods
 

@@ -97,6 +97,14 @@ endif()
 # The in-game test suite, assembled as a Mods folder for a client (ingame/README.md).
 add_subdirectory(ingame)
 
+# The points example: built, warnings as errors, so the typed point facade compiles as a mod sees it.
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../examples/model-swap ${CMAKE_CURRENT_BINARY_DIR}/model-swap)
+if(MSVC)
+    target_compile_options(model-swap PRIVATE /WX)
+else()
+    target_compile_options(model-swap PRIVATE -Werror)
+endif()
+
 add_executable(wxl-scout-tests scout_tests.cpp)
 target_link_libraries(wxl-scout-tests PRIVATE wxl::host)
 target_include_directories(wxl-scout-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

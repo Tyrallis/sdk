@@ -406,7 +406,7 @@ same value, in the same type: health is an `int32_t` both ways, as the client ho
 
 Each service has a typed facade with its name and version sealed in: `wxl::ObjectService`,
 `wxl::ScriptService`, `wxl::StorageService`, `wxl::DataService`, `wxl::NetService`,
-`wxl::UiService`, `wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService`
+`wxl::UiService`, `wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService`, `wxl::PointService`
 (`include/wxl/services/*.hpp`, or all of them through `include/wxl/services.hpp`). A facade is stateless -- construct one
 wherever it is needed -- and resolves its table on first use. It tests false while the runtime
 does not publish the service, and every call through it then answers `WXL_E_UNSUPPORTED` or the
@@ -460,6 +460,96 @@ of `RegisterFunction`. The same rows build the Lua modules of `wxl.lua`, so a me
 and Lua alike from its one row.
 
 `wxl::Service<T>(name, version)` still gives the raw table, for a service these do not cover.
+
+### Changing the engine: points
+
+Events tell your mod what happened. A **point** lets it change what happens: it is a function of
+the client's engine -- the camera's update, the model cache, the world's render pass, the network's
+packet handler -- that your mod runs code in front of, instead of, or after. The runtime names the
+points it keeps working on every client, in `include/wxl/points.def`, and each one is a C++ class
+in `wxl::points` once you include `wxl/services/point.hpp`.
+
+A handler goes on one of three sides:
+
+| Side | Runs | Can change |
+|---|---|---|
+| `Before` | when the function is entered | its arguments: each is handed by reference |
+| `Replace` | instead of the function | everything: it answers in the function's place, and calls `original(...)` to run the function, with the arguments it chooses |
+| `After` | once the function has returned | its answer, handed by reference first |
+
+The example `examples/model-swap` works on `CM2Cache::CreateShared`, the function every model of
+the client goes through by file name before the cache is searched. Its row in `points.def` gives
+the signature your handlers take: `(void* self, void* name, uint32_t flags)`, answering a `void*`.
+Every pointer is a `void*` for now; `name` is the model's path as a C string.
+
+The Replace hands the function another file name for one model. It receives `original` first,
+then the arguments; whatever it returns is what the client gets:
+
+**`examples/model-swap/src/ModelSwap.cpp`**
+
+```cpp
+            swap_ = CreateShared::Replace([](auto original, void* cache, void* name, uint32_t flags) {
+                if (name && IsMurloc(static_cast<const char*>(name)))
+                    return original(cache, const_cast<char*>("Creature\\Gnoll\\Gnoll.m2"), flags);
+                return original(cache, name, flags);
+            });
+```
+
+Calling `original` is a choice, not a duty. A Replace that never calls it takes the call away from
+the function -- and from every other mod's Replace attached below yours; the log says so once, by
+name, so that two mods fighting over a point are easy to tell apart.
+
+The After sees the answer. Here it logs each model the first time it loads; `model` is a reference,
+so writing it would change what the client receives:
+
+**`examples/model-swap/src/ModelSwap.cpp`**
+
+```cpp
+            log_ = CreateShared::After([this](void*& model, void*, void* name, uint32_t) {
+                if (!name || !seen_.insert(static_cast<const char*>(name)).second) return;
+                char line[320];
+                std::snprintf(line, sizeof line, "model %s%s", static_cast<const char*>(name),
+                              model ? "" : " (not found)");
+                wxl::Log(WXL_LOG_INFO, kTag, line);
+            });
+```
+
+Each call answers a `wxl::PointAttachment`, which detaches the handler when it is destroyed: keep it
+as a member of your mod, as the example does, and the handler lives as long as the mod. The
+runtime detaches whatever your mod still holds when it is unloaded or disabled.
+
+Build the example as any mod, put `build/dist/wxl.model-swap/` in the client's `Mods/`, and walk to a
+place with murlocs: they are gnolls, and `Logs\WarcraftXL.log` holds a `[model-swap] model ...`
+line per model. The mod's manifest asks for `"abi": "0.1.16"`, which brought `wxl.point`, and
+requires the service.
+
+What to know before writing your own:
+
+- **Order.** Handlers of a lower priority (the second argument of `Before`, `Replace`, `After`,
+  0 by default) run first among Befores, outermost among Replaces and last among Afters, so that
+  your mod's Before and After nest around the others'. Equal priorities follow the mods' load order.
+- **Faults.** A handler that crashes is stopped there, its mod disabled, and the call goes on: a
+  Replace that crashed before calling the original is followed by the original. A C++ exception
+  is caught at the handler and logged, and the call goes on the same way.
+- **Threads.** The points of `thread main` run on the client's main thread, as events do. A point
+  of `thread any` may run on several threads at once: its handler must hold no state (a lambda
+  without captures, or a function), which the facade checks when it compiles.
+- **One runtime only.** A function the 2008 compiler inlined everywhere has no address in the stock
+  client, so it is a point of the recompiled client alone (`CM2Shared::FinishLoading`, the end of a
+  model's load). `Here()` tells whether this runtime has a point and `Absent()` why not; attaching
+  where it is absent attaches nothing and logs why.
+- **Signatures.** Each attach carries the point's layout hash from your headers. If a later SDK
+  changes a point's signature, a mod built against the old one is refused with a line asking to
+  rebuild it, instead of being called with the wrong arguments. The points of `stable` never change
+  signature; a `provisional` one may, with a new version of the contract.
+- **Cost.** A point nobody is attached to costs nothing: on the stock client its function is not
+  hooked at all, and on the recompiled client it is the test of one byte. Attached, a call costs
+  about what an event's dispatch costs.
+
+For a point your mod only knows by name at run time, `wxl::PointService` lists them all
+(`Points()`), finds one (`Find(name)`), and attaches a handler of the generic shape, which is
+handed the call: `call->args[i]` is the address of argument `i` and `call->result` the address of
+the answer.
 
 ### Profiling memory
 
