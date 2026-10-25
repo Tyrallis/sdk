@@ -543,6 +543,11 @@ print("remove " .. show(s.RemoveSearchPath(wxl.mod.directory .. "\\assets"), s.R
                         s.RemoveSearchPath(wxl.mod.directory .. "\\assets")))
 print("remove other " .. show(s.RemoveSearchPath(wxl.mod.directory .. "\\..\\lua-services\\assets")))
 s.AddSearchPath(wxl.mod.directory .. "/assets/", 1)
+print("serve " .. show(s.Serve("Interface\\Served.txt", "served\0bytes", 1), s.Read("interface/served.TXT") == "served\0bytes",
+                       s.Unserve("Interface\\Served.txt"), s.Read("Interface\\Served.txt"), s.Unserve("Interface\\Served.txt")))
+print("no data " .. show(pcall(s.Serve, "Interface\\x.txt")))
+print("no serve priority " .. show(pcall(s.Serve, "Interface\\x.txt", "x")))
+s.Serve("Interface\\Kept.txt", "kept by services", 2)
 
 print("data " .. show(d.IsLoaded("Spell.dbc"), d.ServeTable("Item.dbc", "Interface\\hello.txt"), d.ServedFrom("Item.dbc"),
                       select(2, d.ServeTable("Item.dbc", "Interface\\hello.txt")), d.RestoreTable("Item.dbc"),
@@ -1206,12 +1211,16 @@ int main(int argc, char** argv)
 
         const fs::path mods = MakeTree(scratch, "services", binary, fs::path());
         fs::copy(fs::path(example).parent_path() / "lua-services", mods / "lua-services", fs::copy_options::recursive);
+        fs::copy(fs::path(example).parent_path() / "lua-assets", mods / "lua-assets", fs::copy_options::recursive);
         WriteFile(mods / "services" / "mod.json",
                   LuaManifest("wxl.services", "\"requires\": [ { \"service\": \"wxl.patch\", \"version\": 1 } ]"));
         WriteFile(mods / "services" / "init.lua", kServices);
         WriteFile(mods / "services" / "assets" / "Interface" / "probe.txt", "from disk");
         WriteFile(mods / "services" / "assets" / "Interface" / "hello.txt", "hello, overridden");
         WriteFile(mods / "undeclared" / "mod.json", LuaManifest("wxl.undeclared"));
+        WriteFile(mods / "served" / "mod.json", LuaManifest("wxl.served"));
+        WriteFile(mods / "served" / "init.lua", "wxl.storage.Serve(\"interface/KEPT.txt\", \"lower\", 1)\n");
+        FakeStorage::Served().clear();
         WriteFile(mods / "undeclared" / "init.lua", kServicesUndeclared);
 
         const std::string toc = "## Interface: 30300\nGlobalStrings.lua\nFrameXML.xml\n";
@@ -1266,6 +1275,15 @@ int main(int argc, char** argv)
               "nil is a missing argument too");
         Check(sink.Has("[wxl.services] remove true nil nil not_found"),
               "a folder removed serves nothing, and removing it again finds nothing");
+        Check(sink.Has("[wxl.services] serve true true true nil nil not_found"),
+              "bytes a Lua mod serves read back as a file, in any case and with either slash, until it takes them back");
+        Check(sink.Has("[wxl.services] no data false ") &&
+                  sink.Has("wxl.storage.Serve: 'data' (argument 2) is missing; it takes a string") &&
+                  sink.Has("[wxl.services] no serve priority false ") &&
+                  sink.Has("wxl.storage.Serve: 'priority' (argument 3) is missing; it takes a whole number"),
+              "Serve names what is missing");
+        Check(FakeStorage::Served()["interface\\kept.txt"] == "kept by services",
+              "when two Lua mods serve one name, the runtime is handed the higher priority's bytes");
         Check(sink.Has("[wxl.services] remove other nil not_found"),
               "a mod cannot remove a folder another mod added");
         Check(sink.Has("[wxl.services] bad priority false ") && sink.Has("a whole number from -2147483648 to 2147483647"),
@@ -1302,6 +1320,21 @@ int main(int argc, char** argv)
         Check(sink.Has("[wxl.lua-services] from the assets folder: hello from the assets folder"),
               "and one of its own, through the search path");
         Check(sink.Has("[wxl.lua-services] it starts with \"## Interface\""), "and the first bytes of a file it opens");
+        Check(sink.Has("[wxl.lua-assets] served Interface\\lua-assets\\note.txt: true") &&
+                  sink.Has("[wxl.lua-assets] read back: This file lives in a Lua mod's memory."),
+              "lua-assets serves a file and reads it back through the storage");
+        {
+            const char*           tile = "World\\Maps\\Azeroth\\Azeroth_32_48.adt";
+            wxl_terrain_tile_args args{};
+            args.path   = wxl_str{tile, static_cast<uint32_t>(std::strlen(tile))};
+            args.tile_x = 32;
+            args.tile_y = 48;
+            args.data   = "MVER";
+            args.size   = 4;
+            raise(WXL_EV_TerrainTileLoad, &args);
+            Check(sink.Has("[wxl.lua-assets] first terrain tile: World\\Maps\\Azeroth\\Azeroth_32_48.adt (32, 48), 4 bytes"),
+                  "and its AssetScript handler hears a terrain tile load, with its place and size");
+        }
         Check(sink.Has("[wxl.lua-services] 1 table(s) of contents in Interface\\FrameXML") &&
                   sink.Has("[wxl.lua-services] Spell.dbc read already: true") &&
                   sink.Has("[wxl.lua-services] 1 hook point(s) named"),

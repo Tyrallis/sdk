@@ -13,7 +13,10 @@
 --   7. checks the engine points; 8. subscribes every gameplay event, provokes a /wave and reads
 --      the inventory and aura events phase 4 caused;
 --   9. reads the player, its target and an item it wears through wxl.object and compares each
---      with what the client's Lua says, then has the player target itself and clears the target.
+--      with what the client's Lua says, then has the player target itself and clears the target;
+--  10. the asset pipeline: bytes it serves read back through the client, a file wxl.test-assets
+--      provides and converts, the add-on it provides that the client loaded, and the engine's
+--      asset events seen since the start.
 --
 -- Each check is one line in the log: PASS, FAIL, SKIP (what it needs is not there: a class
 -- without a cast-time spell, say) or NOTE (an event the server may not send). The chat box shows
@@ -184,6 +187,25 @@ for family, names in pairs({
     SocialScript = { "Emote", "TextEmote" },
 }) do
     for _, name in ipairs(names) do keep(family, name) end
+end
+
+-- The engine's asset events phase 10 checks: counted from the start, with the first one's
+-- arguments as text (a tile's bytes are megabytes: they are not kept).
+local ASSET_EVENTS = { "TerrainTileLoad", "MapObjectGroupLoad", "SkinProfileLoad", "TextureDecode", "ShaderLoad",
+                       "SoundFileLoad" }
+local assetCount, assetFirst = {}, {}
+for _, name in ipairs(ASSET_EVENTS) do
+    assetCount[name] = 0
+    Observe("AssetScript", "On" .. name, function(...)
+        assetCount[name] = assetCount[name] + 1
+        if assetFirst[name] then return end
+        local shown = {}
+        for i = 1, select("#", ...) do
+            local v = select(i, ...)
+            shown[#shown + 1] = type(v) == "string" and #v > 64 and ("<" .. #v .. " bytes>") or tostring(v)
+        end
+        assetFirst[name] = table.concat(shown, ", ")
+    end)
 end
 
 -- Any argument equal to `text`.
@@ -922,6 +944,49 @@ step(function() wait(0.5) end)
 
 step(function()
     same("nothing is targeted after ClearTarget()", false, nil, "return UnitExists('target')", truthy)
+end)
+
+-- 10. The asset pipeline --------------------------------------------------------------------------
+
+step(function()
+    print("phase 10: the asset pipeline")
+    local s = wxl.storage
+    if not (s and s.Serve) then
+        result("wxl.storage.Serve", false, "this runtime has no asset pipeline")
+        return
+    end
+    local ok, why = s.Serve("Interface\\WxlSelfTest\\served.txt", "served by wxl.selftest", 1)
+    result("Serve: a Lua mod serves bytes under a name", ok == true, tostring(why))
+    local text, reason = s.Read("interface/wxlselftest/SERVED.txt")
+    result("the client's file layer reads served bytes as one of its files", text == "served by wxl.selftest",
+           tostring(text or reason))
+    s.Unserve("Interface\\WxlSelfTest\\served.txt")
+    result("Unserve: the name is gone", s.Exists("Interface\\WxlSelfTest\\served.txt") == false)
+
+    if not s.Exists("Interface\\WxlTest\\lower.wxltest") then
+        skip("a provider's file and add-on", "wxl.test-assets is not in Mods")
+    else
+        local upper, why2 = s.Read("Interface\\WxlTest\\lower.wxltest")
+        result("a provider's file, converted by a transform as it is read", upper == "READ THROUGH A TRANSFORM",
+               tostring(upper or why2))
+        local asked, value, loaded = ask("return WXL_PROVIDED_ADDON, IsAddOnLoaded('WxlProvided')")
+        result("the client listed, loaded and ran an add-on only a provider has, its Lua transformed",
+               asked and value == "loaded, transformed" and loaded ~= nil,
+               "WXL_PROVIDED_ADDON " .. tostring(value) .. ", IsAddOnLoaded " .. tostring(loaded))
+    end
+    run("PlaySoundFile('Sound\\\\Interface\\\\iQuestUpdate.wav')")
+    wait(1)
+end)
+
+step(function()
+    for _, name in ipairs({ "TerrainTileLoad", "TextureDecode", "SkinProfileLoad", "SoundFileLoad" }) do
+        result("event " .. name .. " (" .. assetCount[name] .. " since the start)", assetCount[name] > 0,
+               assetFirst[name] or "never raised")
+    end
+    note("event MapObjectGroupLoad (" .. assetCount.MapObjectGroupLoad .. ")", assetCount.MapObjectGroupLoad > 0,
+         "only where a map object stands in view")
+    note("event ShaderLoad (" .. assetCount.ShaderLoad .. ")", assetCount.ShaderLoad > 0,
+         "shaders may load before the mods do")
 end)
 
 -- The end ----------------------------------------------------------------------------------------

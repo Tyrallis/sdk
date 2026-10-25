@@ -33,10 +33,11 @@ set(ingame_lua_mods
     wxl.test-watch-other)
 
 # The C++ mods of the suite, wxl.<name>/ each, built as <name>.dll from their sources.
-set(ingame_cpp_mods test-throw test-throw-ready test-manifest)
+set(ingame_cpp_mods test-throw test-throw-ready test-manifest test-assets)
 set(ingame_test-throw_sources src/TestThrow.cpp)
 set(ingame_test-throw-ready_sources src/TestThrowReady.cpp)
 set(ingame_test-manifest_sources src/TestManifest.cpp)
+set(ingame_test-assets_sources src/TestAssets.cpp)
 
 # The Lua examples selftest calls into, copied from examples/ under their manifest ids.
 set(ingame_examples lua-services memory-report probe)

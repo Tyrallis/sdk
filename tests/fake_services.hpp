@@ -843,10 +843,23 @@ namespace wxltest
             return found != Redirects().end() ? found->second : name;
         }
 
-        /// What a name reads as: a winning folder's file, the client's, or a folder's.
+        /// The bytes served under each name, as the runtime holds them: one set per name, by its key.
+        static std::map<std::string, std::string>& Served()
+        {
+            static std::map<std::string, std::string> served;
+            return served;
+        }
+
+        /// What a name reads as: served bytes, a winning folder's file, the client's, or a folder's.
         static bool Contents(const std::string& asked, std::string& out)
         {
             const std::string name = Redirected(asked);
+            const auto        served = Served().find(NameKey(name));
+            if (served != Served().end())
+            {
+                out = served->second;
+                return true;
+            }
             if (FromFolder(name, true, out)) return true;
             const auto found = Files().find(name);
             if (found != Files().end())
@@ -1000,6 +1013,18 @@ namespace wxltest
             return Redirects().erase(NameKey(Key(from))) ? WXL_OK : WXL_E_NOT_FOUND;
         }
 
+        static wxl_result WXL_CALL Serve(wxl_str path, const void* data, uint32_t size, int32_t)
+        {
+            if (!path.size || (size && !data)) return WXL_E_INVALID;
+            Served()[NameKey(Key(path))] = std::string(static_cast<const char*>(data), size);
+            return WXL_OK;
+        }
+
+        static wxl_result WXL_CALL Unserve(wxl_str path)
+        {
+            return Served().erase(NameKey(Key(path))) ? WXL_OK : WXL_E_NOT_FOUND;
+        }
+
         static uint32_t WXL_CALL Find(wxl_str pattern, wxl_str* out, uint32_t capacity)
         {
             const std::string prefix = Key(pattern).substr(0, Key(pattern).find('*'));
@@ -1031,6 +1056,8 @@ namespace wxltest
                 t.find            = &Find;
                 t.redirect        = &Redirect;
                 t.unredirect      = &Unredirect;
+                t.serve           = &Serve;
+                t.unserve         = &Unserve;
                 return t;
             }();
             return &api;

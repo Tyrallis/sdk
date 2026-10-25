@@ -21,6 +21,7 @@ world with a character, wait about two minutes without touching anything, and re
 | `wxl.test-throw/` | C++ | an exception thrown by a handler or a script function costs that call only; `TestThrow()` |
 | `wxl.test-throw-ready/` | C++ | an exception thrown by `OnReady` disables the mod, and none of its code runs again |
 | `wxl.test-manifest/` | C++ | puts back the `mod.json` `wxl.test-reload` broke, which that mod cannot do once it is unloaded; `TestManifestRepair()` |
+| `wxl.test-assets/` | C++ | serves the add-on `WxlProvided` and `Interface\WxlTest\lower.wxltest` through an asset provider; one transform rewrites the add-on's Lua, another upper-cases `.wxltest` files (phase 10) |
 | `steps.txt` | text | the plan the probe shows with `/mark`: the few steps a person still plays |
 
 `wxl.selftest` also calls into four of the SDK's examples: `scout` (`ScoutCount()` and the others),
@@ -38,6 +39,16 @@ Phase 9 reads the player, its target and an item it wears through the object met
 `GetInventoryItemID`, `GetItemInfo`, `UnitReaction`...), then targets the player with `Select()`
 and clears the target with `wxl.action.ClearTarget()`. Target a creature before the run to have
 the target's reads checked; without one they are a SKIP.
+Phase 10 checks the asset pipeline (abi 0.1.19): bytes `wxl.storage.Serve` serves are read back
+through the client's file layer and taken back; the C++ mod `wxl.test-assets` provides an add-on,
+`WxlProvided`, that is on no disk -- the client must list it, load it and run its Lua, which a
+transform of `.lua` files rewrites on the way (`WXL_PROVIDED_ADDON` reads `"loaded, transformed"`)
+-- and a `.wxltest` file a second transform upper-cases; then the asset events seen since the
+start: terrain tiles, textures, skins and a sound it plays are PASS lines, map object groups and
+shaders NOTE lines (they depend on where you stand and on when the mods load). Without
+`wxl.test-assets` in `Mods/`, the provider's checks are a SKIP. The `.lua` transform sees every
+Lua file the interface loads (it changes only its own add-on's), so this pass also reads the whole
+interface through the runtime's file layer.
 
 ## Building it
 
