@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "wxl/host/admission.hpp"
@@ -942,6 +943,42 @@ int main(int argc, char** argv)
         Check(registry.Publish("", 1, &one) == WXL_E_INVALID, "an empty name is refused");
         Check(registry.Publish("x", 1, nullptr) == WXL_E_INVALID, "a null interface is refused");
         Check(registry.Entries().size() == 2, "the entries can be listed");
+    }
+
+    Section("listening");
+    {
+        EventBus bus({WXL_EV_Update, WXL_EV_FrameBegin}, nullptr);
+        struct Seen
+        {
+            std::vector<std::pair<wxl_event, bool>> changes;
+        } seen;
+        auto record = [](void* user, wxl_event event, bool listening) {
+            static_cast<Seen*>(user)->changes.emplace_back(event, listening);
+        };
+        int one = 1, two = 2;
+        Check(!bus.Listening(WXL_EV_Update), "nobody listens to an event before a subscription");
+        const wxl_subscription early = bus.Subscribe(WXL_EV_FrameBegin, &Record, &one, 0);
+        bus.SetListenHandler(record, &seen);
+        Check(seen.changes.size() == 1 && seen.changes[0].first == WXL_EV_FrameBegin && seen.changes[0].second,
+              "the handler is told at once of an event already listened to");
+        const wxl_subscription a = bus.Subscribe(WXL_EV_Update, &Record, &one, 0);
+        const wxl_subscription b = bus.Subscribe(WXL_EV_Update, &Record, &two, 0);
+        Check(bus.Listening(WXL_EV_Update), "a subscription makes its event listened to");
+        Check(seen.changes.size() == 2 && seen.changes[1].first == WXL_EV_Update && seen.changes[1].second,
+              "the first subscription is reported, the second is not");
+        bus.Unsubscribe(a);
+        Check(bus.Listening(WXL_EV_Update) && seen.changes.size() == 2, "one left: still listened to");
+        bus.Unsubscribe(b);
+        Check(!bus.Listening(WXL_EV_Update), "the last one gone: nobody listens");
+        Check(seen.changes.size() == 3 && seen.changes[2].first == WXL_EV_Update && !seen.changes[2].second,
+              "and the handler is told");
+        bus.Subscribe(WXL_EV_Update, &Record, &one, 0, 7);
+        bus.DropOwner(7);
+        Check(!bus.Listening(WXL_EV_Update) && seen.changes.size() == 5, "dropping an owner is reported too");
+        Check(!bus.Listening(static_cast<wxl_event>(WXL_EV_COUNT)), "an event outside the table is never listened to");
+        bus.SetListenHandler(nullptr, nullptr);
+        bus.Unsubscribe(early);
+        Check(seen.changes.size() == 5 && !bus.Listening(WXL_EV_FrameBegin), "a null handler stops the reports");
     }
 
     Section("event bus");

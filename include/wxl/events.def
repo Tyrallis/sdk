@@ -137,7 +137,8 @@ WXL_EVENT(Render, SwapchainRestored,12, wxl_swapchain_args)
 
 /** An object entered the client's view. */
 WXL_EVENT(Object, ObjectCreate,     13, wxl_object_args)
-/** An object's server-side fields changed. */
+/** An object's server-side fields changed: once per object and update packet, after the whole
+    packet is applied. An object the packet creates is announced by ObjectCreate instead. */
 WXL_EVENT(Object, ObjectUpdate,     14, wxl_object_args)
 /** An object is about to leave; it is still resident and its handle still resolves. */
 WXL_EVENT(Object, ObjectDestroy,    15, wxl_object_args)
@@ -161,7 +162,8 @@ WXL_EVENT(Asset, MapObjectLoad,     22, wxl_map_object_args)
 /** A file is about to be opened by name. A handler may answer with another path. May be raised
     on any thread that opens files. */
 WXL_EVENT(Asset, FileOpen,          29, wxl_file_open_args)
-/** A file open finished, whether or not it found anything. */
+/** A file open finished, whether or not it found anything. May be raised on any thread that opens
+    files. */
 WXL_EVENT(Asset, FileOpened,        30, wxl_file_opened_args)
 /** A client database finished loading; its records are readable. */
 WXL_EVENT(Asset, ClientDbLoaded,    31, wxl_client_db_args)

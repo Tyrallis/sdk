@@ -141,11 +141,12 @@ WXL_ARGS_FIELD(wxl_target_args, previous, handle) ///< WXL_HANDLE_NONE when noth
 WXL_ARGS_FIELD(wxl_target_args, current, handle)  ///< WXL_HANDLE_NONE when the target was cleared
 WXL_ARGS_END(wxl_target_args)
 
-/// A doodad placed by the map.
+/// A doodad placed by the map: a model of a terrain tile, of a map object's doodad set, or one
+/// the game places itself.
 WXL_ARGS(wxl_doodad_args)
-WXL_ARGS_FIELD(wxl_doodad_args, doodad, handle)
-WXL_ARGS_FIELD(wxl_doodad_args, path, str)      ///< the model it was built from
-WXL_ARGS_FIELD(wxl_doodad_args, position, vec3)
+WXL_ARGS_FIELD(wxl_doodad_args, doodad, handle)  ///< WXL_HANDLE_NONE: a doodad is not an object of wxl.object
+WXL_ARGS_FIELD(wxl_doodad_args, path, str)       ///< the model it was built from
+WXL_ARGS_FIELD(wxl_doodad_args, position, vec3)  ///< where it stands, in world coordinates
 WXL_ARGS_END(wxl_doodad_args)
 
 /// A unit's visible equipment changing.
@@ -155,16 +156,23 @@ WXL_ARGS_FIELD(wxl_equipment_args, slot, u32)
 WXL_ARGS_FIELD(wxl_equipment_args, item_id, u32) ///< 0 when the slot was cleared
 WXL_ARGS_END(wxl_equipment_args)
 
-/// A model's bytes, before the parse.
+/**
+ * @brief A model file's bytes, read whole, before the client parses them.
+ *
+ * Pointing `*replacement` at other bytes and setting `*replacement_size` has the client parse
+ * those instead: once every handler has run, the runtime copies them into a buffer of the
+ * client's own, which takes the place of the file's. The bytes only have to outlive the event.
+ * The last handler to write wins, so a handler that cares reads `*replacement` first.
+ */
 WXL_ARGS(wxl_model_load_args)
-WXL_ARGS_FIELD(wxl_model_load_args, path, str)
+WXL_ARGS_FIELD(wxl_model_load_args, path, str)                 ///< the path the model was opened by
 WXL_ARGS_BYTES(wxl_model_load_args, data, size)                ///< the bytes as read; valid for the call only
 WXL_ARGS_FIELD(wxl_model_load_args, size, u32)
-WXL_ARGS_PTR(wxl_model_load_args, replacement, const void**)   ///< write a buffer here to parse it instead of @ref data
-WXL_ARGS_PTR(wxl_model_load_args, replacement_size, uint32_t*) ///< its length; the writer keeps it alive until the next load
+WXL_ARGS_PTR(wxl_model_load_args, replacement, const void**)   ///< null on entry; write other bytes here to have them parsed instead of @ref data
+WXL_ARGS_PTR(wxl_model_load_args, replacement_size, uint32_t*) ///< 0 on entry; their length
 WXL_ARGS_END(wxl_model_load_args)
 
-/// A texture requested by name.
+/// A texture requested by name, before the client looks in its cache.
 WXL_ARGS(wxl_texture_load_args)
 WXL_ARGS_FIELD(wxl_texture_load_args, path, str)
 WXL_ARGS_END(wxl_texture_load_args)
@@ -178,9 +186,9 @@ WXL_ARGS_FIELD(wxl_terrain_chunk_args, chunk_x, i32) ///< the chunk inside that 
 WXL_ARGS_FIELD(wxl_terrain_chunk_args, chunk_y, i32) ///< the chunk inside that tile
 WXL_ARGS_END(wxl_terrain_chunk_args)
 
-/// A map object's root, before its sub-chunks are walked.
+/// A map object's root file, read whole, before its chunks are walked.
 WXL_ARGS(wxl_map_object_args)
-WXL_ARGS_FIELD(wxl_map_object_args, path, str)
+WXL_ARGS_FIELD(wxl_map_object_args, path, str)  ///< the file it was read from
 WXL_ARGS_BYTES(wxl_map_object_args, data, size) ///< the root bytes; valid for the call only
 WXL_ARGS_FIELD(wxl_map_object_args, size, u32)
 WXL_ARGS_END(wxl_map_object_args)
@@ -198,7 +206,7 @@ WXL_ARGS_BUFFER(wxl_file_open_args, redirect, redirect_capacity) ///< empty on e
 WXL_ARGS_FIELD(wxl_file_open_args, redirect_capacity, u32)       ///< bytes available in @ref redirect, terminator included
 WXL_ARGS_END(wxl_file_open_args)
 
-/// The result of an open.
+/// The result of an open, found or not. Raised on the thread that opened the file.
 WXL_ARGS(wxl_file_opened_args)
 WXL_ARGS_FIELD(wxl_file_opened_args, path, str)   ///< the path actually opened, after any redirect
 WXL_ARGS_FIELD(wxl_file_opened_args, found, bool)

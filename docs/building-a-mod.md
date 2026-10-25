@@ -241,6 +241,44 @@ handler with the same parameters and returns a `wxl::Subscription` that unsubscr
 destructor. `wxl::EventArgsOf<WXL_EV_...>` names the args struct of any event: what a C handler
 receives, and what `wxl::Emit` raises.
 
+### Loading and updates
+
+Seven events follow what the client loads and how objects change. Each is raised only while a
+mod listens to it -- until then the client does not read what it would carry -- so they cost
+nothing to the mods that leave them alone. Two are busy: `OnTextureLoad` runs for every texture
+reference, `OnFileOpened` for every open (on whichever thread opens the file).
+
+| Event | When | Parameters |
+|---|---|---|
+| `ObjectScript::OnObjectUpdate` | a server update changed an object's fields; once per object and packet, once the packet is applied | `wxl::Object`, its guid, its type |
+| `ObjectScript::OnDoodadSpawn` | the map placed a doodad (of a tile, of a building, or one the game puts down) | the doodad (`WXL_HANDLE_NONE`: it is not an object of `wxl.object`), the model's path, its position |
+| `AssetScript::OnModelLoad` | a model file has been read, before the client parses it | the path, the bytes, and two pointers to answer through |
+| `AssetScript::OnTextureLoad` | a texture is asked for by name, cached or not | the path |
+| `AssetScript::OnMapObjectLoad` | a building's root file has been read, before the client walks it | the path, the bytes |
+| `AssetScript::OnFileOpened` | an open finished, found or not | the path opened (after any `OnFileOpen` redirect), whether it was found, its size |
+| `AssetScript::OnClientDbLoaded` | the client has loaded its databases, once per table | the file's name, the records, their count and size |
+
+`OnModelLoad` can be answered with other bytes. Point `*replacement` at them and set
+`*replacement_size`: once every handler has run, the runtime copies them into a buffer of the
+client's own and the client parses that instead of the file. Your buffer only has to outlive the
+event. The last handler to write wins, so read `*replacement` first if another mod may answer
+too:
+
+```cpp
+void OnModelLoad(std::string_view path, wxl::Bytes data, const void** replacement,
+                 uint32_t* replacement_size) override
+{
+    if (path != "Creature\\Boar\\Boar.m2" || *replacement) return;
+    bigger_ = LoadMyBoar();                       // a std::vector<uint8_t> member of the script
+    *replacement      = bigger_.data();
+    *replacement_size = static_cast<uint32_t>(bigger_.size());
+}
+```
+
+The bytes have to be a model the client can parse: a file of the same version, as the client's
+own tools write it. If the runtime cannot make the copy, the log says so and the client parses
+the file as it read it.
+
 ### Reads that can fail
 
 Every read through a service answers `wxl::Expected<T>` (`include/wxl/expected.hpp`): the value,

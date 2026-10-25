@@ -145,6 +145,22 @@ namespace wxl::host
         /// Dispatches an event. What the runtime calls at its own seams, from any thread.
         void Raise(wxl_event event, const void* args);
 
+        /**
+         * @brief Whether a @ref Raise of @p event would reach any handler.
+         *
+         * One atomic load and no lock, from any thread: a seam asks it before reading the
+         * client for the event's args, so an event nobody listens to costs only the question.
+         * See EventBus::Listening.
+         */
+        bool Listening(wxl_event event) const { return events_.Listening(event); }
+
+        /// Has @p handler told when an event gains its first handler or loses its last; see
+        /// EventBus::SetListenHandler.
+        void SetListenHandler(EventBus::ListenFn handler, void* user)
+        {
+            events_.SetListenHandler(handler, user);
+        }
+
         /// The same, to the handlers of the mods @p accept takes (by ModToken): an event that
         /// concerns some mods only.
         void RaiseTo(wxl_event event, const void* args, EventBus::AcceptFn accept, void* user);

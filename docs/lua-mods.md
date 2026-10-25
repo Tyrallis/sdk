@@ -456,6 +456,34 @@ The events that can be answered, as the SDK stands:
 | `ObjectScript:OnItemUseRequest` | `refused` | the item is not used |
 | `ChatScript:OnChatSend` | `suppressed` | the chat or addon message is not sent (abi `0.1.6`) |
 
+### Loading and updates
+
+Seven events follow what the client loads from disk and how objects change. Each is raised only
+while some mod listens to it: until then the client does not even read what the event would
+carry, so a mod that does not subscribe costs nothing. The busy ones are worth knowing before you
+subscribe: `OnTextureLoad` runs for every texture reference, and `OnFileOpened` for every file.
+
+| Event | When | What it carries |
+|---|---|---|
+| `ObjectScript:OnObjectUpdate` | an update packet from the server changed an object's fields; once per object and packet, after the whole packet is applied | the object, its guid, its type |
+| `ObjectScript:OnDoodadSpawn` | the map placed a doodad: a tree, a lamp, a crate of a tile or of a building | `doodad` (always `nil`: a doodad is not an object you can read), the model's path, its position |
+| `AssetScript:OnModelLoad` | a model's file (`.m2`) has been read, before the client parses it | the path, the file's bytes; the last two parameters are for C++ mods (below) |
+| `AssetScript:OnTextureLoad` | the client asks for a texture by name, cached or not | the path |
+| `AssetScript:OnMapObjectLoad` | a building's root file (`.wmo`) has been read, before the client walks it | the path, the file's bytes |
+| `AssetScript:OnFileOpened` | an open finished, found or not | the path that was opened (after any `OnFileOpen` redirect), whether it was found, its size |
+| `AssetScript:OnClientDbLoaded` | the client has loaded its databases, once per table | the file's name and the table's size; `records` is for C++ mods |
+
+An object update and a create are different events: an object that comes into view arrives in
+`OnObjectCreate`, not in `OnObjectUpdate`. To follow one field, watch it with `wxl.object.Watch(type, name)` and
+`OnObjectFieldChanged` (see [Descriptor fields](#descriptor-fields-everything-the-server-says-about-an-object)),
+which tell you which field moved and what it was before.
+
+The bytes of `OnModelLoad` and `OnMapObjectLoad` are a copy of the whole file, as a string. A
+handler may look at them (`data:sub(1, 4)` is the file's magic, `"MD20"` for a model), but a large
+model is a large string: subscribe only while you need them. Giving the client other bytes to
+parse instead is a C++ mod's job: `replacement` and `replacement_size` arrive in Lua as opaque
+values that nothing in the Lua API can write.
+
 ### The order handlers run in
 
 For one event, handlers run mod by mod, in the order the mods were loaded, and within a mod in the
@@ -477,7 +505,8 @@ Lua mods all run inside `wxl.lua`, so next to C++ mods they run where `wxl.lua` 
 
 Every handler runs on the client's main thread, the one that runs the game. A few events can
 happen elsewhere: [`events.def`](../include/wxl/events.def) says so on their row, and today they
-are `OnFileOpen` (any thread that opens files), `OnMessageSent` (the connection's thread), and
+are `OnFileOpen` and `OnFileOpened` (any thread that opens files), `OnMessageSent` (the
+connection's thread), and
 `OnGlueRealmList` and `OnGlueRealm` (the logon connection's thread).
 When one of them happens on another thread, `wxl.lua` copies it and delivers the copy at the
 start of the next `OnUpdate`. Your handler sees the same values, a moment later. It can no longer

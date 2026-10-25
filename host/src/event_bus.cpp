@@ -105,10 +105,23 @@ namespace wxl::host
         if (next && next->empty()) next.reset();
 
         std::unique_ptr<Snapshot> old = std::move(current_[event]);
+        const bool                was = old != nullptr;
         current_[event]               = std::move(next);
         lists_[event].store(current_[event].get(), std::memory_order_seq_cst);
+        const bool is = current_[event] != nullptr;
+        if (listenFn_ && was != is) listenFn_(listenUser_, event, is);
         if (old) retiredSnapshots_.push_back(std::move(old));
         Reclaim();
+    }
+
+    void EventBus::SetListenHandler(ListenFn handler, void* user)
+    {
+        std::lock_guard<std::mutex> lock(writeLock_);
+        listenFn_   = handler;
+        listenUser_ = user;
+        if (!handler) return;
+        for (uint32_t i = 0; i < static_cast<uint32_t>(WXL_EV_COUNT); ++i)
+            if (current_[i]) handler(user, static_cast<wxl_event>(i), true);
     }
 
     void EventBus::Reclaim()

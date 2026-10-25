@@ -72,6 +72,31 @@ namespace wxl::host
         void SetRaisable(wxl_event event, bool raisable);
         bool CanRaise(wxl_event event) const;
 
+        /// Told when an event gains its first live subscription or loses its last one.
+        using ListenFn = void (*)(void* user, wxl_event event, bool listening);
+
+        /**
+         * @brief Has @p handler told whenever @ref Listening changes for an event, and at once
+         *        for every event already listened to.
+         *
+         * Called with the subscription lock held, on the thread that changed the subscriptions:
+         * it must not subscribe or unsubscribe. A runtime uses it to keep a flag per event where
+         * the client can test it without calling into the runtime. Null stops the reports.
+         */
+        void SetListenHandler(ListenFn handler, void* user);
+
+        /**
+         * @brief Whether a dispatch of @p event would reach any handler.
+         *
+         * One atomic load, no lock: what a seam asks before it reads the client for an event's
+         * args. A subscription made or dropped on another thread meanwhile may not be seen yet,
+         * as if it had come a moment later or earlier.
+         */
+        bool Listening(wxl_event event) const
+        {
+            return Known(event) && lists_[event].load(std::memory_order_relaxed) != nullptr;
+        }
+
         void SetOwnerTracker(OwnerFn swap, void* user)
         {
             ownerFn_   = swap;
@@ -162,6 +187,8 @@ namespace wxl::host
         mutable std::atomic<uint32_t> inFlight_{0}; ///< dispatches running, on every thread
 
         const Logger* logger_    = nullptr;
+        ListenFn      listenFn_   = nullptr;
+        void*         listenUser_ = nullptr;
         OwnerFn       ownerFn_   = nullptr;
         void*         ownerUser_ = nullptr;
         FaultFn       faultFn_   = nullptr;
