@@ -114,7 +114,8 @@ A few seconds after the character enters the world, without a keystroke:
    `OnSpellCastFailed` when cast again during it), a hearthstone use a handler refuses
    (`OnItemUseRequest`, and no cast), an item taken off and put back on (`OnEquipmentChanged`
    twice).
-5. **/reload.** Reloads the interface and calls the functions again.
+5. **/reload.** Checks `OnWorldEnter` came at login, reloads the interface, checks it raised
+   neither `OnWorldLeave` nor `OnWorldEnter` (the player never left), and calls the functions again.
 6. **Log out and back in** (`RELOG`): logs out, waits for the character list, enters the world
    with the same character (`OnWorldLeave`, `OnGlueScreenChanged`, `OnGlueCharacterList`,
    `OnGlueEnterWorld`, `OnWorldEnter`), and calls the functions again.
@@ -130,7 +131,8 @@ seconds): moving cancels the logout, and armour cannot change in combat.
 **When something is missing,** the check is skipped with a reason rather than failed: a class
 without a cast-time spell at its level (warrior, rogue, hunter, mage, death knight), a race whose
 racials are left out (War Stomp, Arcane Torrent and Shadowmeld reach the units around, or hide the
-player), no hearthstone, nothing worn in the slots tried, a full backpack. If the logout does not
+player), no hearthstone, nothing worn in the slots tried, a full backpack, the game's sound off
+(`OnSoundFileLoad`: the client loads no sound file then). If the logout does not
 happen (in combat, moved), the run says so and ends; log in again by hand. Set `PROVOKE` or
 `RELOG` to `false` at the top of `wxl.selftest/init.lua` to leave that part out.
 

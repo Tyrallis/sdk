@@ -76,7 +76,9 @@ typedef struct wxl_asset_provider
      *
      * The client lists some of its folders from the disk -- the add-ons, the macro icons --
      * and the entries listed here join them, so a provider can serve a whole add-on; find
-     * walks it too.
+     * walks it too. An entry listed here also exists for the client where the disk has none:
+     * asked its information or whether it exists, it answers a folder or a file, as the add-on
+     * list asks of every entry it is told.
      */
     void(WXL_CALL* list)(void* user, wxl_str folder, wxl_asset_entry_fn fn, void* context);
 } wxl_asset_provider;

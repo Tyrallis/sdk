@@ -182,6 +182,8 @@ for family, names in pairs({
 }) do
     for _, name in ipairs(names) do keep(family, name) end
 end
+-- The login's own entry into the world, which phase 5 checks.
+watch("WorldEnter", "WorldLeave")
 
 -- The gameplay events phase 8 checks, kept from the phases that provoke them.
 for family, names in pairs({
@@ -676,6 +678,8 @@ local enteredBefore
 
 step(function()
     print("phase 5: /reload")
+    result("event WorldEnter at login", saw("WorldEnter"))
+    watch("WorldEnter", "WorldLeave")
     enteredBefore = entered
     run("ReloadUI()")
     waitFor(function() return entered > enteredBefore end, 60,
@@ -685,7 +689,10 @@ end)
 step(function() wait(3) end)
 
 step(function()
-    if entered > enteredBefore then call(AGAIN, " after /reload") end
+    if entered > enteredBefore then
+        result("a /reload raises neither WorldLeave nor WorldEnter", not saw("WorldLeave") and not saw("WorldEnter"))
+        call(AGAIN, " after /reload")
+    end
 end)
 
 -- 6. Log out and back in ---------------------------------------------------------------------------
@@ -998,9 +1005,18 @@ step(function()
 end)
 
 step(function()
-    for _, name in ipairs({ "TerrainTileLoad", "TextureDecode", "SkinProfileLoad", "SoundFileLoad" }) do
+    for _, name in ipairs({ "TerrainTileLoad", "TextureDecode", "SkinProfileLoad" }) do
         result("event " .. name .. " (" .. assetCount[name] .. " since the start)", assetCount[name] > 0,
                assetFirst[name] or "never raised")
+    end
+    -- The client loads no sound file while its sound is off: PlaySoundKit and PlaySoundFile return
+    -- before the sound engine (SoundPlay is still raised, at the request).
+    local asked, allSound = ask("return GetCVar('Sound_EnableAllSound')")
+    if asked and allSound == "0" and assetCount.SoundFileLoad == 0 then
+        skip("event SoundFileLoad", "the client's sound is off (Sound_EnableAllSound 0), so it loads no sound file")
+    else
+        result("event SoundFileLoad (" .. assetCount.SoundFileLoad .. " since the start)",
+               assetCount.SoundFileLoad > 0, assetFirst.SoundFileLoad or "never raised")
     end
     note("event MapObjectGroupLoad (" .. assetCount.MapObjectGroupLoad .. ")", assetCount.MapObjectGroupLoad > 0,
          "only where a map object stands in view")

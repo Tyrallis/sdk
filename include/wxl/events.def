@@ -124,9 +124,11 @@ WXL_EVENTS_SINCE(0, 1, 5, 0)
 
 /** The logic tick advanced. */
 WXL_EVENT(World, Update,        0, wxl_update_args)
-/** The world finished loading and the player is in it. */
+/** The world finished loading and the player is in it: after a login and every loading screen
+    (a teleport, an instance), once per entry; a /reload is no entry. */
 WXL_EVENT(World, WorldEnter,    1, wxl_world_args)
-/** The world is being torn down; the map being left is still loaded. */
+/** The player is leaving the world: a logout, a teleport with a loading screen. Once per exit, the
+    map being left still loaded; a /reload is no exit. */
 WXL_EVENT(World, WorldLeave,    2, wxl_world_args)
 /** A click resolved to a point in the world, and possibly to an object. */
 WXL_EVENT(World, WorldClick,    3, wxl_world_click_args)
@@ -494,7 +496,8 @@ WXL_EVENT(Asset, SkinProfileLoad,    131, wxl_skin_profile_args)
 WXL_EVENT(Asset, TextureDecode,      132, wxl_texture_decode_args)
 /** The graphics device is loading a shader program by name. */
 WXL_EVENT(Asset, ShaderLoad,         133, wxl_shader_load_args)
-/** The sound engine is opening a sound file to play it. */
+/** The sound engine is opening a sound file to play it. Never raised while the client's sound is off
+    (`Sound_EnableAllSound` 0): the client then loads no sound, though SoundPlay is still raised. */
 WXL_EVENT(Asset, SoundFileLoad,      134, wxl_sound_file_args)
 
 // --- Models: the loader's stages, appearances and drawn batches ------------------------------

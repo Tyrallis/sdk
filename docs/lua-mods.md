@@ -1043,7 +1043,7 @@ end
 | `OnSkinProfileLoad` | `model`, `data` | a model's `.skin` was read, before it is parsed |
 | `OnTextureDecode` | `path`, `width`, `height`, `encoding`, `alpha_bits`, `alpha_kind`, `mip_levels` | a texture file is about to be decoded: what its header says (`encoding`: `"palette"`, `"dxt"` or `"raw"`) |
 | `OnShaderLoad` | `stage`, `path`, `name`, `permutations` | the graphics device loads a shader program (`stage`: `"vertex"` or `"pixel"`) |
-| `OnSoundFileLoad` | `path`, `streaming`, `priority` | the sound engine opens a sound file to play it |
+| `OnSoundFileLoad` | `path`, `streaming`, `priority` | the sound engine opens a sound file to play it (never while the game's sound is off) |
 
 `data` is the file's bytes as one string, valid in the handler; `#data` is their count. They are
 the bytes the client is about to parse, transforms applied. These events came with `0.1.19`: a mod

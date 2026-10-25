@@ -868,7 +868,9 @@ closes the file when it is done, which destroys the object.
 
 `List` is optional. The client lists a few of its folders from the disk itself -- the add-ons, the
 macro icons -- and what `List` tells joins those listings: that is how the client finds
-HelloProvider among its add-ons, then reads its `.toc` and its `.lua` through the provider.
+HelloProvider among its add-ons, then reads its `.toc` and its `.lua` through the provider. What
+`List` tells is also there when the client asks about one entry, a folder or a file, as the
+add-on list does of each name it is told before it keeps it.
 `StorageService::Find` walks the providers' folders too.
 
 A transform is a function, or an object deriving from `wxl::AssetTransform`:
