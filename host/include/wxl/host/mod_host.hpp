@@ -8,6 +8,7 @@
 #define WXL_HOST_MOD_HOST_HPP
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <mutex>
@@ -165,6 +166,28 @@ namespace wxl::host
         /// concerns some mods only.
         void RaiseTo(wxl_event event, const void* args, EventBus::AcceptFn accept, void* user);
 
+        /// One of the last events raised while someone listened, as @ref Recent reports it.
+        struct RecentEvent
+        {
+            wxl_event event;
+            bool      main_thread; ///< raised on the thread that built the host
+            uint32_t  ms_ago;      ///< how long before the call to Recent
+        };
+
+        /// How many raises @ref Recent remembers.
+        static constexpr size_t kRecentEvents = 32;
+
+        /**
+         * @brief The last events raised to at least one handler, oldest first; returns how many
+         *        were written.
+         *
+         * What a crash report says the mods were doing. Lock-free and allocation-free, safe from
+         * an exception filter on any thread; a raise racing the read may be missed or shown
+         * twice. An event nobody listens to is not remembered: the record costs only a raise
+         * that dispatches.
+         */
+        size_t Recent(RecentEvent* out, size_t capacity) const;
+
         /**
          * @brief Disables a mod after it faulted: logs what it was doing, drops its
          *        subscriptions, skips its remaining entry points, tells the disable handler.
@@ -248,6 +271,10 @@ namespace wxl::host
         static void WXL_CALL             ThunkUnsubscribe(wxl_subscription subscription);
         static void WXL_CALL             ThunkEmit(wxl_event event, const void* args);
         static void WXL_CALL             ThunkDisable(wxl_str reason);
+        static wxl_bool WXL_CALL         ThunkRaises(wxl_event event);
+
+        /// Remembers a raise for @ref Recent when it reaches a handler.
+        void NoteRaise(wxl_event event);
 
         static std::string NameOwner(void* user, uint32_t owner);
         static void     OnHandlerFault(void* user, uint32_t owner, wxl_event event, const Fault& fault);
@@ -321,6 +348,12 @@ namespace wxl::host
         std::set<std::pair<ModToken, uint32_t>>         warnedUnraised_;
         std::set<std::pair<ModToken, uint32_t>>         warnedNewer_;
         std::atomic<bool>                               disablesPending_{false};
+
+        /// event + 1 (0 is an empty slot), main-thread bit << 16, milliseconds since the host
+        /// was built << 32. One store per raise, read without a lock.
+        std::atomic<uint64_t>                           recent_[kRecentEvents] = {};
+        std::atomic<uint32_t>                           recentNext_{0};
+        std::chrono::steady_clock::time_point           builtAt_ = std::chrono::steady_clock::now();
     };
 } // namespace wxl::host
 

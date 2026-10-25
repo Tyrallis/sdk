@@ -184,7 +184,8 @@ namespace wxl::lua
             return false;
         }
         runtime_.Log(WXL_LOG_INFO, "loaded " + Id() + " " + candidate_.manifest.version.text +
-                                       " (" + candidate_.manifest.name + ") from " + entry);
+                                       " (" + candidate_.manifest.name + ") from " + entry +
+                                       ", abi " + host::AbiText(candidate_.manifest.abi));
         return true;
     }
 
@@ -434,6 +435,8 @@ namespace wxl::lua
         const std::string abiText = host::AbiText(abi);
         lua_pushlstring(L, abiText.data(), abiText.size());
         lua_setfield(L, -2, "abi");
+        PushClosure(&L_Raises);
+        lua_setfield(L, -2, "Raises");
         lua_setfield(L, -2, "runtime");
 
         lua_newtable(L); // wxl.events: family -> { "OnX", ... }
@@ -511,13 +514,9 @@ namespace wxl::lua
 
     int ScriptMod::L_Override(lua_State* L) { return Self(L).Subscribe(L, true); }
 
-    int ScriptMod::Subscribe(lua_State* L, bool override)
+    const reflect::Event& ScriptMod::Resolve(lua_State* L, const char* verb, const char* family,
+                                             const char* method)
     {
-        const char* verb   = override ? "Override" : "Observe";
-        const char* family = luaL_checkstring(L, 1);
-        const char* method = luaL_checkstring(L, 2);
-        luaL_checktype(L, 3, LUA_TFUNCTION);
-
         // "WorldScript" names the family "World" of reflect.hpp; "OnUpdate" its event "Update".
         const size_t familyLength = std::strlen(family);
         std::string  stem;
@@ -527,14 +526,24 @@ namespace wxl::lua
         for (const std::string& known : Families())
             if (known == family) knownFamily = true;
         if (!knownFamily)
-            return luaL_error(L, "%s: unknown family '%s'; the families are %s", verb, family,
-                              Join(Families()).c_str());
+            luaL_error(L, "%s: unknown family '%s'; the families are %s", verb, family,
+                       Join(Families()).c_str());
 
         const reflect::Event* event =
             std::strncmp(method, "On", 2) == 0 ? reflect::Find(stem.c_str(), method + 2) : nullptr;
         if (!event)
-            return luaL_error(L, "%s: %s has no '%s'; its events are %s", verb, family, method,
-                              MethodsOf(stem.c_str()).c_str());
+            luaL_error(L, "%s: %s has no '%s'; its events are %s", verb, family, method,
+                       MethodsOf(stem.c_str()).c_str());
+        return *event;
+    }
+
+    int ScriptMod::Subscribe(lua_State* L, bool override)
+    {
+        const char* verb   = override ? "Override" : "Observe";
+        const char* family = luaL_checkstring(L, 1);
+        const char* method = luaL_checkstring(L, 2);
+        luaL_checktype(L, 3, LUA_TFUNCTION);
+        const reflect::Event* event = &Resolve(L, verb, family, method);
 
         if (const std::string newer = TooNew(*event); !newer.empty())
             return luaL_error(L, "%s: %s of %s %s", verb, method, family, newer.c_str());
@@ -548,6 +557,24 @@ namespace wxl::lua
         const int      ref = luaL_ref(L, LUA_REGISTRYINDEX);
         const uint32_t id  = runtime_.Observe(*this, *event, ref, override);
         lua_pushnumber(L, id);
+        return 1;
+    }
+
+    int ScriptMod::L_Raises(lua_State* L)
+    {
+        ScriptMod&            self   = Self(L);
+        const char*           family = luaL_checkstring(L, 1);
+        const char*           method = luaL_checkstring(L, 2);
+        const reflect::Event& event  = Resolve(L, "Raises", family, method);
+        const wxl_host*       host   = self.runtime_.Host();
+        const size_t          needed = offsetof(wxl_host, raises) + sizeof(host->raises);
+        if (!host || host->struct_size < needed || !host->raises)
+        {
+            lua_pushnil(L);
+            lua_pushliteral(L, "unsupported");
+            return 2;
+        }
+        lua_pushboolean(L, host->raises(event.id) != 0);
         return 1;
     }
 

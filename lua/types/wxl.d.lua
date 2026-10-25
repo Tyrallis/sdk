@@ -2063,6 +2063,9 @@ function profile.FrameMark(name) end
 ---@field abi_major integer
 ---@field abi_minor integer
 ---@field abi_feature integer
+---Whether the runtime raises an event at all, so that subscribing to it can work: false
+---for one it never raises; nil and "unsupported" on a runtime older than abi 0.1.13.
+---@field Raises fun(family: wxl.Family, event: string): boolean|nil, string|nil
 
 ---@class wxl.object
 local object = {}

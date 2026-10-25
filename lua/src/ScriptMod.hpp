@@ -133,7 +133,13 @@ namespace wxl::lua
         static int L_Observe(lua_State* L);
         static int L_Override(lua_State* L);
         static int L_Unobserve(lua_State* L);
+        static int L_Raises(lua_State* L);
         static int L_traceback(lua_State* L);
+
+        /// The event `family` and `method` name ("WorldScript", "OnUpdate"); a Lua error naming
+        /// what exists when either is unknown, prefixed with @p verb.
+        static const reflect::Event& Resolve(lua_State* L, const char* verb, const char* family,
+                                             const char* method);
 
         /// Observe and Override: resolves the event, keeps the function, tells the runtime.
         int Subscribe(lua_State* L, bool override);

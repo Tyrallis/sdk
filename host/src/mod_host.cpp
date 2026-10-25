@@ -126,6 +126,7 @@ namespace wxl::host
         table_.emit            = &ModHost::ThunkEmit;
         table_.abi_feature     = WXL_ABI_VERSION_FEATURE;
         table_.disable         = &ModHost::ThunkDisable;
+        table_.raises          = &ModHost::ThunkRaises;
 
         for (const PublishedService& service : config_.services)
         {
@@ -204,6 +205,12 @@ namespace wxl::host
             static_cast<uint32_t>(event) < static_cast<uint32_t>(WXL_EV_COUNT))
             current_->WarnUnraised(t_currentMod, event);
         return token;
+    }
+
+    wxl_bool WXL_CALL ModHost::ThunkRaises(wxl_event event)
+    {
+        if (!current_ || static_cast<uint32_t>(event) >= static_cast<uint32_t>(WXL_EV_COUNT)) return 0;
+        return current_->events_.CanRaise(event) ? 1 : 0;
     }
 
     void WXL_CALL ModHost::ThunkUnsubscribe(wxl_subscription subscription)
@@ -300,7 +307,7 @@ namespace wxl::host
 
     // --- Faults ----------------------------------------------------------------------------
 
-    void ModHost::OnHandlerFault(void* user, uint32_t owner, wxl_event event, const Fault&)
+    void ModHost::OnHandlerFault(void* user, uint32_t owner, wxl_event event, const Fault& fault)
     {
         ModHost* host = static_cast<ModHost*>(user);
         if (!host) return;
@@ -310,7 +317,9 @@ namespace wxl::host
                                               " belongs to no mod; nothing is disabled");
             return;
         }
-        host->Disable(owner, std::string("in its handler for ") + EventName(event));
+        char description[192];
+        host->Disable(owner, std::string("in its handler for ") + EventName(event) + ": " +
+                                 DescribeFault(fault, description, sizeof description));
     }
 
     const LoadedMod* ModHost::ModOf(ModToken token) const
@@ -439,7 +448,7 @@ namespace wxl::host
 
         // The token this mod gets if it loads: its place at the end of loaded_.
         const ModToken token = static_cast<ModToken>(loaded_.size() + 1);
-        char           description[96];
+        char           description[192];
 
         // Names the mod in what its query and load do, before it is in loaded_.
         struct Loading
@@ -561,7 +570,7 @@ namespace wxl::host
         const auto one = [&](size_t i) {
             if (loaded_[i].disabled || !binaries_[i].Entries().stage) return;
             StageCall call{binaries_[i].Entries().stage, stage};
-            char      description[96];
+            char      description[192];
             if (!CallEntry(static_cast<ModToken>(i + 1), &InvokeStage, &call, description,
                            sizeof description))
                 Disable(static_cast<ModToken>(i + 1), std::string("in wxl_mod_stage(") +
@@ -607,7 +616,7 @@ namespace wxl::host
             }
             if (binaries_[i].Entries().unload)
             {
-                char description[96];
+                char description[192];
                 if (!CallEntry(static_cast<ModToken>(i + 1), &InvokeUnload,
                                reinterpret_cast<void*>(binaries_[i].Entries().unload), description,
                                sizeof description))
@@ -642,12 +651,46 @@ namespace wxl::host
     void ModHost::Raise(wxl_event event, const void* args)
     {
         if (disablesPending_.load(std::memory_order_relaxed)) SettleDisables();
+        if (events_.Listening(event)) NoteRaise(event);
         events_.Emit(event, args);
     }
 
     void ModHost::RaiseTo(wxl_event event, const void* args, EventBus::AcceptFn accept, void* user)
     {
         if (disablesPending_.load(std::memory_order_relaxed)) SettleDisables();
+        if (events_.Listening(event)) NoteRaise(event);
         events_.EmitTo(event, args, accept, user);
+    }
+
+    void ModHost::NoteRaise(wxl_event event)
+    {
+        const uint64_t ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                      std::chrono::steady_clock::now() - builtAt_)
+                                                      .count());
+        const uint64_t packed = (static_cast<uint64_t>(static_cast<uint32_t>(event) + 1u) & 0xFFFFu) |
+                                (OnMainThread() ? 0x10000u : 0u) | (ms << 32);
+        const uint32_t slot = recentNext_.fetch_add(1, std::memory_order_relaxed) % kRecentEvents;
+        recent_[slot].store(packed, std::memory_order_relaxed);
+    }
+
+    size_t ModHost::Recent(RecentEvent* out, size_t capacity) const
+    {
+        if (!out || capacity == 0) return 0;
+        const uint64_t now = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                       std::chrono::steady_clock::now() - builtAt_)
+                                                       .count());
+        const uint32_t next    = recentNext_.load(std::memory_order_relaxed);
+        const size_t   skipped = kRecentEvents > capacity ? kRecentEvents - capacity : 0;
+        size_t         written = 0;
+        for (size_t i = skipped; i < kRecentEvents; ++i)
+        {
+            const uint64_t packed = recent_[(next + i) % kRecentEvents].load(std::memory_order_relaxed);
+            if ((packed & 0xFFFFu) == 0) continue;
+            const uint64_t at = packed >> 32;
+            out[written++]    = RecentEvent{static_cast<wxl_event>((packed & 0xFFFFu) - 1u),
+                                            (packed & 0x10000u) != 0,
+                                            static_cast<uint32_t>(now > at ? now - at : 0)};
+        }
+        return written;
     }
 } // namespace wxl::host

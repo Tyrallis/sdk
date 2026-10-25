@@ -1441,6 +1441,86 @@ int main(int argc, char** argv)
         if (g_failures) sink.Dump();
     }
 
+
+    Section("the probe example");
+    {
+        using wxltest::FakeScript;
+
+        const fs::path mods = MakeTree(scratch, "probe-example", binary, fs::path());
+        fs::copy(fs::path(example).parent_path() / "probe", mods / "probe", fs::copy_options::recursive);
+        FakeScript::Live() = WXL_SCRIPT_CONTEXT_GAME;
+        FakeScript::Functions().clear();
+        FakeScript::Chunks().clear();
+
+        CaptureSink sink;
+        HostConfig  config = Config(mods, sink);
+        // A runtime that never raises sounds, so the probe has something to say it lacks.
+        config.events.erase(std::remove(config.events.begin(), config.events.end(), WXL_EV_SoundPlay),
+                            config.events.end());
+        config.services.push_back(PublishedService{WXL_SCRIPT_SERVICE, WXL_SCRIPT_SERVICE_VERSION, FakeScript::Table()});
+        ModHost host(std::move(config));
+        host.LoadAll();
+        host.Stage(WXL_STAGE_READY);
+
+        const size_t offered = static_cast<size_t>(WXL_EV_COUNT) - 1;
+        Check(sink.Has(("[wxl.probe] listening to " + std::to_string(offered) + " events").c_str()) &&
+                  sink.Has("[wxl.probe] not raised by this runtime: OnSoundPlay"),
+              "the probe listens to every event the runtime raises, and names the one it does not");
+        Check(host.Listening(WXL_EV_TextureLoad) && !host.Listening(WXL_EV_SoundPlay),
+              "which turns every raised event on, as its README warns");
+
+        const wxl_world_args world{571, {5000.25f, -12.5f, 31.0f}};
+        host.Raise(WXL_EV_WorldEnter, &world);
+        Check(sink.Has("[wxl.probe] OnWorldEnter #1: 571, (5000.25, -12.50, 31.00)"),
+              "an event's first occurrence is logged with its arguments, a position as three numbers");
+
+        const unsigned char bytes[] = {0x01, 0x00, 0xFF, 0x10};
+        wxl_message_args    message{};
+        message.opcode = 0x1F6;
+        message.data   = bytes;
+        message.size   = sizeof bytes;
+        host.Raise(WXL_EV_MessageReceived, &message);
+        Check(sink.Has("[wxl.probe] OnMessageReceived #1: 502, <4 bytes 01 00 FF 10>, nil"),
+              "bytes are shown in hex, an answer the runtime gave nothing to answer through as nil");
+
+        wxl_ui_event_args ui{};
+        ui.name = wxl_str{"PLAYER_ENTERING_WORLD", 21};
+        for (int i = 0; i < 7; ++i) host.Raise(WXL_EV_UiEvent, &ui);
+        Check(sink.Has("[wxl.probe] OnUiEvent #5 (last shown): 0, \"PLAYER_ENTERING_WORLD\", \"\"") &&
+                  !sink.Has("OnUiEvent #6"),
+              "the first five occurrences are logged, then only counted");
+        bool slash = false;
+        for (const std::string& chunk : FakeScript::Chunks())
+            if (Contains(chunk, "wxl.probe: ") && Contains(chunk, "SLASH_WXLPROBEMARK1 = \"/mark\"")) slash = true;
+        Check(slash, "PLAYER_ENTERING_WORLD gives the client's chat a /mark command");
+
+        const wxl_update_args tick{40.0f};
+        host.Raise(WXL_EV_Update, &tick);
+        host.Raise(WXL_EV_Update, &tick);
+        Check(sink.Has("[wxl.probe] minute 1: 4 events, 11 raises: OnUiEvent 7, OnUpdate 2, OnMessageReceived 1, "
+                       "OnWorldEnter 1"),
+              "after a minute, a line of what came in it, busiest first");
+
+        wxl_value text{};
+        text.type      = WXL_VALUE_STRING;
+        text.as.string = wxl_str{" opened the bank ", 17};
+        wxl_script_call marked = ScriptCallOf({text});
+        Check(FakeScript::Invoke("WxlProbeMark", marked) && marked.results.size() == 1 &&
+                  marked.results[0].as.number == 1.0,
+              "WxlProbeMark answers the mark's number");
+        Check(sink.Has("[wxl.probe] ==== MARK 1: opened the bank ====") &&
+                  sink.Has("[wxl.probe] since the probe loaded (80.0 s): 4 events, 11 raises: OnUiEvent 7, OnUpdate 2"),
+              "a mark is a line of its own, followed by what came since the previous one");
+        Check(sink.Has("[wxl.probe] memory at mark 1: no snapshot: unsupported"),
+              "and the memory, or why there is none");
+
+        host.Stage(WXL_STAGE_SHUTDOWN);
+        Check(sink.Has("[wxl.probe] summary: 4 of ") && sink.Has("[wxl.probe] never seen: ") &&
+                  sink.Has("OnTextureLoad"),
+              "at exit, the totals and the events that never came");
+        if (g_failures) sink.Dump();
+    }
+
     Section("handler order across reloads");
     {
         const fs::path mods = MakeTree(scratch, "order", binary, fs::path());

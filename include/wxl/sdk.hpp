@@ -501,6 +501,19 @@ namespace wxl
         return Subscription(host->subscribe(event, handler, user, priority));
     }
 
+    /**
+     * @brief Whether the runtime raises @p event at all (abi 0.1.13): what a subscribe to it
+     *        would be refused for.
+     *
+     * False as well on a runtime older than 0.1.13, which cannot say; a mod that must know
+     * there subscribes and checks the Subscription.
+     */
+    inline bool Raises(wxl_event event)
+    {
+        const wxl_host* host = Host();
+        return detail::Carries(host, &wxl_host::raises) && host->raises(event) != 0;
+    }
+
     namespace detail
     {
         /// "UnitDeath" for WXL_EV_UnitDeath; "?" for an id this SDK does not know.

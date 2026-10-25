@@ -5,7 +5,7 @@
 **The contract a WarcraftXL mod is written against**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![ABI](https://img.shields.io/badge/ABI-0.1.12-blue.svg)](include/wxl/abi.h)
+[![ABI](https://img.shields.io/badge/ABI-0.1.13-blue.svg)](include/wxl/abi.h)
 [![C++](https://img.shields.io/badge/C%2B%2B-17%20and%20up-blue.svg)](#-getting-started)
 [![Header only](https://img.shields.io/badge/header--only-yes-lightgrey.svg)](include/wxl)
 
@@ -266,6 +266,7 @@ examples/lua-hello/ the same in Lua: a folder, no build
 examples/lua-services/ a Lua mod using the services: files, a search path, databases, the
                    client's own script
 examples/memory-report/ a Lua mod that writes where the client's memory goes into a report
+examples/probe/    a Lua test tool: every event the runtime raises, and /mark, into the log
 tests/             the contract, the mod host, the shared runtime and wxl.lua, each against fakes
 ```
 
@@ -274,7 +275,7 @@ supplies only the bindings that reach its own client.
 
 ## 🔢 Versioning
 
-`major.minor.feature`, in [`abi.h`](include/wxl/abi.h): today `0.1.12`.
+`major.minor.feature`, in [`abi.h`](include/wxl/abi.h): today `0.1.13`.
 
 - **Major** changes when an existing field, signature or id changes meaning. A runtime refuses a
   mod built against a different major.
@@ -295,6 +296,7 @@ Event ids and stage numbers are appended, never renumbered, never removed.
 - [Building a mod](docs/building-a-mod.md) -- the manifest, the targets, the C++ layer
 - [Lua mods](docs/lua-mods.md) -- a mod with nothing to build: the folder, the API, reload, the sandbox
 - [Profiling](docs/profiling.md) -- where frame time goes, mod by mod, in the Tracy viewer, and zones of your own
+- [Reading the log](docs/the-log.md) -- where the log is, what a launch says, the level setting, marking a test with `/mark`
 - [`schema/mod.json`](schema/mod.json) -- the manifest schema, for your editor
 - [`template/`](template/) -- a working mod to copy
 - [`examples/scout/`](examples/scout/) -- the worked example the tutorial builds

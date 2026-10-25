@@ -171,6 +171,18 @@ typedef struct wxl_host
      * @param reason  what went wrong, for the log: "OnReady threw an exception: ...".
      */
     void(WXL_CALL* disable)(wxl_str reason);
+
+    // --- appended at 0.1.13 ------------------------------------------------------------------
+
+    /**
+     * @brief Whether this runtime raises @p event at all: a subscribe to one it never raises is
+     *        refused.
+     *
+     * For a mod that takes whatever the runtime offers (a probe, a menu of events) rather than
+     * asking for one event it needs. Says nothing of whether anyone listens. An event outside
+     * the contract the runtime was built with answers false.
+     */
+    wxl_bool(WXL_CALL* raises)(wxl_event event);
 } wxl_host;
 
 #ifdef __cplusplus

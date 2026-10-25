@@ -62,6 +62,7 @@ namespace wxltest
             table_.emit            = &FakeHost::Emit;
             table_.abi_feature     = WXL_ABI_VERSION_FEATURE;
             table_.disable         = &FakeHost::Disable;
+            table_.raises          = &FakeHost::Raises;
         }
 
         const wxl_host* Table() const { return &table_; }
@@ -160,6 +161,13 @@ namespace wxltest
         static void WXL_CALL Emit(wxl_event event, const void* args)
         {
             current_->Raise(event, args);
+        }
+
+        static wxl_bool WXL_CALL Raises(wxl_event event)
+        {
+            for (wxl_event withheld : current_->withheld_)
+                if (withheld == event) return 0;
+            return static_cast<uint32_t>(event) < static_cast<uint32_t>(WXL_EV_COUNT) ? 1 : 0;
         }
 
         static void WXL_CALL Disable(wxl_str reason)

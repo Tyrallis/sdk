@@ -5,8 +5,10 @@
 
 #include <cstdio>
 
-#ifdef _MSC_VER
+#ifdef _WIN32
     #include <windows.h>
+#endif
+#ifdef _MSC_VER
     #include <malloc.h>
 #endif
 
@@ -25,10 +27,16 @@ namespace wxl::host
                 return EXCEPTION_CONTINUE_SEARCH;
             if (fault)
             {
+                const EXCEPTION_RECORD* record = info ? info->ExceptionRecord : nullptr;
                 fault->code    = code;
-                fault->address = info && info->ExceptionRecord
-                                     ? reinterpret_cast<uintptr_t>(info->ExceptionRecord->ExceptionAddress)
-                                     : 0;
+                fault->address = record ? reinterpret_cast<uintptr_t>(record->ExceptionAddress) : 0;
+                if (record && (code == EXCEPTION_ACCESS_VIOLATION || code == EXCEPTION_IN_PAGE_ERROR) &&
+                    record->NumberParameters >= 2)
+                {
+                    fault->access     = static_cast<uint32_t>(record->ExceptionInformation[0]);
+                    fault->target     = static_cast<uintptr_t>(record->ExceptionInformation[1]);
+                    fault->has_target = true;
+                }
             }
             return EXCEPTION_EXECUTE_HANDLER;
         }
@@ -86,12 +94,51 @@ namespace wxl::host
         }
     }
 
+    const char* DescribeAddress(uintptr_t address, char* buffer, size_t capacity)
+    {
+        if (!buffer || capacity == 0) return "";
+#ifdef _WIN32
+        HMODULE module = nullptr;
+        wchar_t path[MAX_PATH];
+        if (address && GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                          reinterpret_cast<LPCWSTR>(address), &module))
+        {
+            const DWORD length = GetModuleFileNameW(module, path, MAX_PATH);
+            if (length > 0 && length < MAX_PATH)
+            {
+                const wchar_t* name = path;
+                for (const wchar_t* at = path; *at; ++at)
+                    if (*at == L'\\' || *at == L'/') name = at + 1;
+                char utf8[MAX_PATH * 3];
+                const int bytes =
+                    WideCharToMultiByte(CP_UTF8, 0, name, -1, utf8, sizeof utf8, nullptr, nullptr);
+                if (bytes > 0)
+                {
+                    std::snprintf(buffer, capacity, "%s+0x%llX", utf8,
+                                  static_cast<unsigned long long>(
+                                      address - reinterpret_cast<uintptr_t>(module)));
+                    return buffer;
+                }
+            }
+        }
+#endif
+        std::snprintf(buffer, capacity, "0x%llX", static_cast<unsigned long long>(address));
+        return buffer;
+    }
+
     const char* DescribeFault(const Fault& fault, char* buffer, size_t capacity)
     {
         if (!buffer || capacity == 0) return "";
-        std::snprintf(buffer, capacity, "%s (0x%08X) at 0x%llX", FaultName(fault.code),
-                      static_cast<unsigned>(fault.code),
-                      static_cast<unsigned long long>(fault.address));
+        char where[160];
+        DescribeAddress(fault.address, where, sizeof where);
+        char touched[64] = "";
+        if (fault.has_target)
+            std::snprintf(touched, sizeof touched, " %s 0x%llX",
+                          fault.access == 1 ? "writing" : fault.access == 8 ? "executing" : "reading",
+                          static_cast<unsigned long long>(fault.target));
+        std::snprintf(buffer, capacity, "%s (0x%08X)%s at %s", FaultName(fault.code),
+                      static_cast<unsigned>(fault.code), touched, where);
         return buffer;
     }
 } // namespace wxl::host

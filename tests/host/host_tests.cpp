@@ -982,6 +982,43 @@ int main(int argc, char** argv)
         Check(seen.changes.size() == 5 && !bus.Listening(WXL_EV_FrameBegin), "a null handler stops the reports");
     }
 
+    Section("what the host tells of its events");
+    {
+        CaptureSink sink;
+        HostConfig  config;
+        config.mods_directory = scratch.empty() ? fs::path("no-mods-here") : scratch / "no-mods-here";
+        config.runtime_id     = "test";
+        config.log_sink       = &sink;
+        config.events         = {WXL_EV_Update, WXL_EV_FrameEnd};
+        ModHost host(std::move(config));
+        const wxl_host* table = host.Table();
+        Check(table->struct_size >= offsetof(wxl_host, raises) + sizeof(table->raises) && table->raises,
+              "the table carries raises");
+        Check(table->raises(WXL_EV_Update) && table->raises(WXL_EV_FrameEnd) && !table->raises(WXL_EV_SoundPlay) &&
+                  !table->raises(static_cast<wxl_event>(WXL_EV_COUNT)),
+              "raises answers the runtime's list, false outside it and outside the contract");
+
+        ModHost::RecentEvent recent[ModHost::kRecentEvents];
+        const wxl_update_args tick{0.1f};
+        host.Raise(WXL_EV_Update, &tick);
+        Check(host.Recent(recent, ModHost::kRecentEvents) == 0, "a raise nobody listens to is not remembered");
+        int one = 1;
+        host.Events().Subscribe(WXL_EV_Update, &Record, &one, 0);
+        for (int i = 0; i < 3; ++i) host.Raise(WXL_EV_Update, &tick);
+        host.Raise(WXL_EV_FrameEnd, nullptr);
+        size_t count = host.Recent(recent, ModHost::kRecentEvents);
+        Check(count == 3 && recent[0].event == WXL_EV_Update && recent[2].main_thread,
+              "the raises that dispatched are remembered, on the main thread");
+        for (int i = 0; i < 40; ++i) host.Raise(WXL_EV_Update, &tick);
+        count = host.Recent(recent, 4);
+        Check(count == 4 && recent[3].event == WXL_EV_Update, "the last ones, as many as asked for");
+        Check(host.Recent(recent, ModHost::kRecentEvents) == ModHost::kRecentEvents, "at most kRecentEvents");
+        std::thread([&] { host.Raise(WXL_EV_Update, &tick); }).join();
+        count = host.Recent(recent, 1);
+        Check(count == 1 && !recent[0].main_thread, "a raise on another thread says so");
+        g_order.clear();
+    }
+
     Section("event bus");
     {
         CaptureSink sink;
@@ -1405,9 +1442,14 @@ int main(int argc, char** argv)
               "a call that returns is reported as returned");
         Check(!CallGuarded(&GuardedCrash, nullptr, &fault) && fault.code == 0xC0000005u,
               "a null write inside the guard is reported as an access violation");
-        char text[96];
-        Check(Contains(DescribeFault(fault, text, sizeof text), "access violation (0xC0000005) at 0x"),
-              "a fault describes itself");
+        char text[192];
+        DescribeFault(fault, text, sizeof text);
+        Check(Contains(text, "access violation (0xC0000005) writing 0x0 at "),
+              "a fault describes itself, with the address it touched");
+        Check(Contains(text, ".exe+0x"), "and where it happened, as a module and an offset");
+        char where[96];
+        Check(std::string(DescribeAddress(0x10, where, sizeof where)) == "0x10",
+              "an address outside every module is shown bare");
     }
     if (scratch.empty())
     {
