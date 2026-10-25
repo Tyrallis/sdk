@@ -8,7 +8,7 @@
 #error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including storage.def"
 #endif
 
-WXL_API_SERVICE(storage, WXL_STORAGE_SERVICE, WXL_STORAGE_SERVICE_VERSION, safe,
+WXL_API_SERVICE(storage, WXL_STORAGE_SERVICE, WXL_STORAGE_SERVICE_VERSION, (0, 1, 5), safe,
                 "The client's files, whatever they are packed in: named as the client names them.")
 
 // An open file, from open, closed by close; a Lua mod's are closed when it lets go of them.
@@ -33,5 +33,6 @@ WXL_API(storage, mount_archive, MountArchive, result, (str path, i32 priority), 
         "Adds an archive to the files searched, at a priority as AddSearchPath's.")
 WXL_API(storage, find, Find, list<wxl_str>, (str pattern), generated, by_hand,
         "The names matching a pattern, * standing for any run of characters, each once.")
+WXL_API_SINCE(storage, remove_search_path, (0, 1, 10))
 WXL_API(storage, remove_search_path, RemoveSearchPath, result, (str directory), shim, generated,
         "Takes a folder the mod added back out of the files searched; not_found for one it did not add.")

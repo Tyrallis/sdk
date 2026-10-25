@@ -11,9 +11,16 @@
 //
 // One .def per service table, one row per member, in member order:
 //
-//   WXL_API_SERVICE(svc, name, version, access, doc)
-//       opens the table of wxl_<svc>_api: the macros of its name and version, and `safe` or
-//       `unsafe`. An unsafe service reaches a script mod only when its mod.json declares it.
+//   WXL_API_SERVICE(svc, name, version, since, access, doc)
+//       opens the table of wxl_<svc>_api: the macros of its name and version, the version of
+//       the contract it came with as `(major, minor, feature)`, and `safe` or `unsafe`. A script
+//       mod whose mod.json asks for an older abi cannot use it; an unsafe service reaches a
+//       script mod only when its mod.json declares it. The services there before the contract
+//       dated what it brought say (0, 1, 5), the oldest abi a mod can ask for.
+//   WXL_API_SINCE(svc, member, (major, minor, feature))
+//       right above a member appended to a table after the table came: that member and the
+//       ones below it came with that version, until the next such row. A script mod whose
+//       mod.json asks for an older abi cannot use them.
 //   WXL_API(svc, member, Name, answer, (params), lua, cxx, doc)
 //       one member. `answer (params)` reads as a C++ function type over the kinds below, its
 //       parameters named for the reader: `out<u64> (str path)`. `lua` is `generated` (wxl.lua
@@ -125,9 +132,10 @@ namespace wxl::api
         struct list {};
 
         // The resources of the tables: a Name with its C type and the value meaning none.
-#define WXL_API_SERVICE(svc, name, version, access, doc)
+#define WXL_API_SERVICE(svc, name, version, since, access, doc)
 #define WXL_API(svc, member, Name, answer, params, lua, cxx, doc)
 #define WXL_API_CLOSE(svc, member, Name, answer, Resource, when, doc)
+#define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(type, member, kind)
 #define WXL_API_RESOURCE(svc, Name, ctype, none_value)              \
     struct Name                                                     \
@@ -147,6 +155,7 @@ namespace wxl::api
 #include "wxl/services/profile.def"
 #undef WXL_API_RESOURCE
 #undef WXL_API_FIELD
+#undef WXL_API_SINCE
 #undef WXL_API_CLOSE
 #undef WXL_API
 #undef WXL_API_SERVICE
@@ -301,7 +310,7 @@ namespace wxl::api
 
 #define WXL_API_UNSAFE_safe   false
 #define WXL_API_UNSAFE_unsafe true
-#define WXL_API_SERVICE(svc, name, version, access, doc)                     \
+#define WXL_API_SERVICE(svc, name, version, since, access, doc)                     \
     template <>                                                         \
     struct ServiceOf<wxl_##svc##_api>                                   \
     {                                                                   \
@@ -313,6 +322,7 @@ namespace wxl::api
 #define WXL_API(svc, member, Name, answer, params, lua, cxx, doc)
 #define WXL_API_RESOURCE(svc, Name, ctype, none_value)
 #define WXL_API_CLOSE(svc, member, Name, answer, Resource, when, doc)
+#define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(type, member, kind)
 #include "wxl/services/script.def"
 #include "wxl/services/storage.def"
@@ -323,6 +333,7 @@ namespace wxl::api
 #include "wxl/services/footprint.def"
 #include "wxl/services/profile.def"
 #undef WXL_API_FIELD
+#undef WXL_API_SINCE
 #undef WXL_API_CLOSE
 #undef WXL_API_RESOURCE
 #undef WXL_API
@@ -371,12 +382,29 @@ namespace wxl::api
         unloaded,  ///< when the mod unloads, newest first
     };
 
+    /// A version of the contract, major.minor.feature, as abi.h numbers it.
+    struct Version
+    {
+        uint32_t major;
+        uint32_t minor;
+        uint32_t feature;
+    };
+
+    /// Whether @p version is @p floor or later.
+    constexpr bool AtLeast(const Version& version, const Version& floor)
+    {
+        if (version.major != floor.major) return version.major > floor.major;
+        if (version.minor != floor.minor) return version.minor > floor.minor;
+        return version.feature >= floor.feature;
+    }
+
     /// One WXL_API_SERVICE row.
     struct ServiceRow
     {
         const char* id;       ///< "storage": the module is wxl.storage
         const char* name;     ///< what the runtime publishes it as, "wxl.storage"
         uint32_t    version;
+        Version     since;    ///< the version of the contract the table came with
         bool        unsafe;   ///< reached by a script mod only when its mod.json declares it
         uint32_t    api_size; ///< sizeof the table's struct
         const char* doc;      ///< what it is, in a line
@@ -395,6 +423,15 @@ namespace wxl::api
         When        closes;  ///< what a WXL_API_CLOSE row closes on; never for a WXL_API row
         uint32_t    offset;  ///< offsetof the member
         const char* doc;     ///< what it does, in a line; empty for a native row
+    };
+
+    /// One WXL_API_SINCE row.
+    struct SinceRow
+    {
+        const char* service; ///< the table's id, "storage"
+        const char* member;  ///< the first member it dates, "remove_search_path"
+        uint32_t    offset;  ///< offsetof that member: it and every member after it
+        Version     since;
     };
 
     /// One WXL_API_RESOURCE row.
@@ -422,11 +459,14 @@ namespace wxl::api
 
     namespace detail
     {
-#define WXL_API_SERVICE(svc, name, version, access, doc) \
-    ServiceRow{#svc, name, version, WXL_API_UNSAFE_##access, uint32_t(sizeof(wxl_##svc##_api)), doc},
+#define WXL_API_VERSION_(major, minor, feature) Version{major, minor, feature}
+#define WXL_API_SERVICE(svc, name, version, since, access, doc)                                 \
+    ServiceRow{#svc, name, version, WXL_API_VERSION_ since, WXL_API_UNSAFE_##access,             \
+               uint32_t(sizeof(wxl_##svc##_api)), doc},
 #define WXL_API(svc, member, Name, answer, params, lua, cxx, doc)
 #define WXL_API_RESOURCE(svc, Name, ctype, none_value)
 #define WXL_API_CLOSE(svc, member, Name, answer, Resource, when, doc)
+#define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(type, member, kind)
         inline constexpr ServiceRow kServices[] = {
 #include "wxl/services/script.def"
@@ -439,12 +479,13 @@ namespace wxl::api
 #include "wxl/services/profile.def"
         };
 #undef WXL_API_FIELD
+#undef WXL_API_SINCE
 #undef WXL_API_CLOSE
 #undef WXL_API_RESOURCE
 #undef WXL_API
 #undef WXL_API_SERVICE
 
-#define WXL_API_SERVICE(svc, name, version, access, doc)
+#define WXL_API_SERVICE(svc, name, version, since, access, doc)
 #define WXL_API(svc, member, Name, answer, params, lua, cxx, doc)                              \
     Row{#svc, #member, #Name, #answer, #params, Lua::lua, Cxx::cxx, When::never,          \
         uint32_t(offsetof(wxl_##svc##_api, member)), doc},
@@ -452,6 +493,7 @@ namespace wxl::api
 #define WXL_API_CLOSE(svc, member, Name, answer, Resource, when, doc)                           \
     Row{#svc, #member, #Name, #answer, "(" #Resource " self)", Lua::generated,    \
         Cxx::by_hand, When::when, uint32_t(offsetof(wxl_##svc##_api, member)), doc},
+#define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(type, member, kind)
         inline constexpr Row kRows[] = {
 #include "wxl/services/script.def"
@@ -464,15 +506,17 @@ namespace wxl::api
 #include "wxl/services/profile.def"
         };
 #undef WXL_API_FIELD
+#undef WXL_API_SINCE
 #undef WXL_API_CLOSE
 #undef WXL_API_RESOURCE
 #undef WXL_API
 #undef WXL_API_SERVICE
 
-#define WXL_API_SERVICE(svc, name, version, access, doc)
+#define WXL_API_SERVICE(svc, name, version, since, access, doc)
 #define WXL_API(svc, member, Name, answer, params, lua, cxx, doc)
 #define WXL_API_RESOURCE(svc, Name, ctype, none_value) ResourceRow{#svc, #Name},
 #define WXL_API_CLOSE(svc, member, Name, answer, Resource, when, doc)
+#define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(type, member, kind)
         inline constexpr ResourceRow kResources[] = {
 #include "wxl/services/script.def"
@@ -485,15 +529,17 @@ namespace wxl::api
 #include "wxl/services/profile.def"
         };
 #undef WXL_API_FIELD
+#undef WXL_API_SINCE
 #undef WXL_API_CLOSE
 #undef WXL_API_RESOURCE
 #undef WXL_API
 #undef WXL_API_SERVICE
 
-#define WXL_API_SERVICE(svc, name, version, access, doc)
+#define WXL_API_SERVICE(svc, name, version, since, access, doc)
 #define WXL_API(svc, member, Name, answer, params, lua, cxx, doc)
 #define WXL_API_RESOURCE(svc, Name, ctype, none_value)
 #define WXL_API_CLOSE(svc, member, Name, answer, Resource, when, doc)
+#define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(type, member, kind) \
     FieldRow{&TypeTag<type>, #type, #member, #kind, uint32_t(offsetof(type, member))},
         inline constexpr FieldRow kFields[] = {
@@ -507,10 +553,44 @@ namespace wxl::api
 #include "wxl/services/profile.def"
         };
 #undef WXL_API_FIELD
+#undef WXL_API_SINCE
 #undef WXL_API_CLOSE
 #undef WXL_API_RESOURCE
 #undef WXL_API
 #undef WXL_API_SERVICE
+
+#define WXL_API_SERVICE(svc, name, version, since, access, doc)
+#define WXL_API(svc, member, Name, answer, params, lua, cxx, doc)
+#define WXL_API_RESOURCE(svc, Name, ctype, none_value)
+#define WXL_API_CLOSE(svc, member, Name, answer, Resource, when, doc)
+#define WXL_API_FIELD(type, member, kind)
+#define WXL_API_SINCE(svc, member, since) \
+    SinceRow{#svc, #member, uint32_t(offsetof(wxl_##svc##_api, member)), WXL_API_VERSION_ since},
+        // Led by a row no table has, so that the array is never empty.
+        inline constexpr SinceRow kSinces[] = {
+            SinceRow{"", "", 0, Version{0, 0, 0}},
+#include "wxl/services/script.def"
+#include "wxl/services/storage.def"
+#include "wxl/services/data.def"
+#include "wxl/services/hook.def"
+#include "wxl/services/hook_raw.def"
+#include "wxl/services/patch.def"
+#include "wxl/services/footprint.def"
+#include "wxl/services/profile.def"
+        };
+#undef WXL_API_SINCE
+#undef WXL_API_FIELD
+#undef WXL_API_CLOSE
+#undef WXL_API_RESOURCE
+#undef WXL_API
+#undef WXL_API_SERVICE
+#undef WXL_API_VERSION_
+
+        constexpr bool Same(const char* a, const char* b)
+        {
+            while (*a && *a == *b) ++a, ++b;
+            return *a == *b;
+        }
     } // namespace detail
 
     /// Every WXL_API_SERVICE row, in table order.
@@ -540,6 +620,35 @@ namespace wxl::api
         *count = uint32_t(sizeof detail::kFields / sizeof detail::kFields[0]);
         return detail::kFields;
     }
+
+    /// Every WXL_API_SINCE row, in table order.
+    inline const SinceRow* Sinces(uint32_t* count)
+    {
+        *count = uint32_t(sizeof detail::kSinces / sizeof detail::kSinces[0]) - 1;
+        return detail::kSinces + 1;
+    }
+
+    /// The WXL_API_SERVICE row of a table's id ("storage"), or null.
+    constexpr const ServiceRow* FindService(const char* id)
+    {
+        for (const ServiceRow& service : detail::kServices)
+            if (detail::Same(service.id, id)) return &service;
+        return nullptr;
+    }
+
+    /// The version of the contract that brought the member at @p offset of a table ("storage"):
+    /// the table's, or that of the last WXL_API_SINCE row of the table at or above the member.
+    constexpr Version SinceOf(const char* service, uint32_t offset)
+    {
+        const ServiceRow* table   = FindService(service);
+        Version           version = table ? table->since : Version{0, 0, 0};
+        for (const SinceRow& since : detail::kSinces)
+            if (detail::Same(since.service, service) && since.offset <= offset) version = since.since;
+        return version;
+    }
+
+    /// The version of the contract that brought a row's member.
+    constexpr Version SinceOf(const Row& row) { return SinceOf(row.service, row.offset); }
 
     // --- a generated facade method -----------------------------------------------------------
     //

@@ -11,7 +11,7 @@
 #error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including script.def"
 #endif
 
-WXL_API_SERVICE(script, WXL_SCRIPT_SERVICE, WXL_SCRIPT_SERVICE_VERSION, safe,
+WXL_API_SERVICE(script, WXL_SCRIPT_SERVICE, WXL_SCRIPT_SERVICE_VERSION, (0, 1, 5), safe,
                 "The client's own script: functions and events added to it, text run in it.")
 
 WXL_API(script, context, Context, enumeration<wxl_script_context>, (), generated, generated,

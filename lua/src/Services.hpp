@@ -20,9 +20,12 @@ namespace wxl::lua
      * @brief Sets wxl.<service> on the table at the top of the stack, for one mod.
      *
      * Each module holds a function per row a script reaches. A service the runtime does not
-     * publish still has its module: every call answers nil, "unsupported". An unsafe service
-     * the mod's manifest does not declare (in "requires" or "optional") is a module whose every
-     * use raises an error saying so.
+     * publish still has its module: every call answers nil, "unsupported". A service that came
+     * with a later contract than the "abi" the mod's manifest asks for (WXL_API_SERVICE's
+     * `since`) is a module whose every use raises an error naming both and the abi to ask for;
+     * a member that came later than its service (WXL_API_SINCE) raises the same error when the
+     * mod reaches for it. An unsafe service the mod's manifest does not declare (in "requires"
+     * or "optional") is a module whose every use raises an error saying so.
      */
     void PushServiceModules(lua_State* L, ScriptMod& mod);
 

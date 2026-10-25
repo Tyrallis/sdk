@@ -10,7 +10,7 @@
 #error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including hook_raw.def"
 #endif
 
-WXL_API_SERVICE(hook_raw, WXL_HOOK_RAW_SERVICE, WXL_HOOK_RAW_SERVICE_VERSION, unsafe,
+WXL_API_SERVICE(hook_raw, WXL_HOOK_RAW_SERVICE, WXL_HOOK_RAW_SERVICE_VERSION, (0, 1, 5), unsafe,
                 "Detours at an address of a binary whose addresses mean something.")
 
 WXL_API(hook_raw, image_base, ImageBase, uptr, (), native, generated, "")

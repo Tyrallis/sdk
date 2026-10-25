@@ -10,7 +10,7 @@
 #error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including patch.def"
 #endif
 
-WXL_API_SERVICE(patch, WXL_PATCH_SERVICE, WXL_PATCH_SERVICE_VERSION, unsafe,
+WXL_API_SERVICE(patch, WXL_PATCH_SERVICE, WXL_PATCH_SERVICE_VERSION, (0, 1, 5), unsafe,
                 "Bytes written into the client's image over the bytes expected there, journaled.")
 
 // An applied write, from apply, undone by restore; a Lua mod's are restored, newest first, when

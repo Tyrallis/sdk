@@ -8,7 +8,7 @@
 #error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including footprint.def"
 #endif
 
-WXL_API_SERVICE(footprint, WXL_FOOTPRINT_SERVICE, WXL_FOOTPRINT_SERVICE_VERSION, safe,
+WXL_API_SERVICE(footprint, WXL_FOOTPRINT_SERVICE, WXL_FOOTPRINT_SERVICE_VERSION, (0, 1, 11), safe,
                 "Where the client's memory goes: Storm's allocations by source file, the big consumers, the address space.")
 
 WXL_API_FIELD(wxl_footprint_category, name, str)

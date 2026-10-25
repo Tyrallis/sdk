@@ -343,9 +343,10 @@ namespace wxl::lua
         return std::filesystem::path();
     }
 
-    std::string ScriptMod::TooNew(const reflect::Event& event) const
+    std::string ScriptMod::TooNew(const reflect::Event& event) const { return TooNew(host::EventSince(event.id)); }
+
+    std::string ScriptMod::TooNew(const host::AbiVersion& since) const
     {
-        const host::AbiVersion since = host::EventSince(event.id);
         const host::AbiVersion asked = candidate_.manifest.abi;
         if (host::AtLeast(asked, since)) return std::string();
         if (!manifested_)

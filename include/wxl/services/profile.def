@@ -8,7 +8,7 @@
 #error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including profile.def"
 #endif
 
-WXL_API_SERVICE(profile, WXL_PROFILE_SERVICE, WXL_PROFILE_SERVICE_VERSION, safe,
+WXL_API_SERVICE(profile, WXL_PROFILE_SERVICE, WXL_PROFILE_SERVICE_VERSION, (0, 1, 12), safe,
                 "Zones, graphs and messages on the profiler's timeline, beside the client's frames and the mods' handlers.")
 
 WXL_API(profile, connected, Connected, boolean, (), generated, generated,

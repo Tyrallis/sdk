@@ -17,15 +17,17 @@
 #error "define WXL_API_TABLE as the table to read before including methods.inc"
 #endif
 
-#define WXL_API_SERVICE(svc, name, version, access, doc)
+#define WXL_API_SERVICE(svc, name, version, since, access, doc)
 #define WXL_API_RESOURCE(svc, Name, ctype, none_value)
 #define WXL_API_CLOSE(svc, member, Name, answer, Resource, when, doc)
+#define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(type, member, kind)
 #define WXL_API(svc, member, Name, answer, params, lua, cxx, doc) \
     WXL_API_CXX_##cxx(svc, member, Name, answer, params)
 #include WXL_API_TABLE
 #undef WXL_API
 #undef WXL_API_FIELD
+#undef WXL_API_SINCE
 #undef WXL_API_CLOSE
 #undef WXL_API_RESOURCE
 #undef WXL_API_SERVICE

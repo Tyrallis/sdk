@@ -61,6 +61,13 @@ namespace wxl::lua
         bool HasManifest() const { return manifested_; }
 
         /**
+         * @brief Empty when the mod may use what came with @p since, otherwise the end of the
+         *        refusal: "came with abi 0.1.12, and this mod's mod.json asks for 0.1.11; to use
+         *        it, set "abi": "0.1.12" there", which the caller leads with what it names.
+         */
+        std::string TooNew(const host::AbiVersion& since) const;
+
+        /**
          * @brief Reads the mod.json again, for a reload.
          *
          * False with @p problem set when it no longer parses, gives another id, or names no

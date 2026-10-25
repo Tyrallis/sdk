@@ -161,8 +161,9 @@ namespace service_signatures
 {
     using namespace wxl::api::kind;
 
-#define WXL_API_SERVICE(svc, name, version, access, doc)
+#define WXL_API_SERVICE(svc, name, version, since, access, doc)
 #define WXL_API_RESOURCE(svc, Name, ctype, none_value)
+#define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(Struct, member, field_kind)                                         \
     static_assert(std::is_same_v<decltype(Struct::member),                                \
                                  wxl::api::Value<wxl::api::kind::field_kind>::type>,      \
@@ -186,9 +187,44 @@ namespace service_signatures
 #undef WXL_API_CLOSE
 #undef WXL_API
 #undef WXL_API_FIELD
+#undef WXL_API_SINCE
 #undef WXL_API_RESOURCE
 #undef WXL_API_SERVICE
 } // namespace service_signatures
+
+// The service tables in table order, a WXL_API_SINCE row as a mark: what sits right below it.
+namespace service_order
+{
+    struct Entry
+    {
+        bool        since;
+        const char* service;
+        const char* member;
+    };
+
+#define WXL_API_SERVICE(svc, name, version, since, access, doc)
+#define WXL_API_RESOURCE(svc, Name, ctype, none_value)
+#define WXL_API_SINCE(svc, member, since) Entry{true, #svc, #member},
+#define WXL_API_FIELD(Struct, member, field_kind)
+#define WXL_API(svc, member, Name, answer, params, lua, cxx, doc) Entry{false, #svc, #member},
+#define WXL_API_CLOSE(svc, member, Name, answer, Resource, when, doc) Entry{false, #svc, #member},
+    const Entry kEntries[] = {
+#include "wxl/services/script.def"
+#include "wxl/services/storage.def"
+#include "wxl/services/data.def"
+#include "wxl/services/hook.def"
+#include "wxl/services/hook_raw.def"
+#include "wxl/services/patch.def"
+#include "wxl/services/footprint.def"
+#include "wxl/services/profile.def"
+    };
+#undef WXL_API_CLOSE
+#undef WXL_API
+#undef WXL_API_FIELD
+#undef WXL_API_SINCE
+#undef WXL_API_RESOURCE
+#undef WXL_API_SERVICE
+} // namespace service_order
 
 int main()
 {
@@ -515,6 +551,58 @@ int main()
             Check(std::strncmp(service.name, "wxl.", 4) == 0, named.c_str());
         }
         Check(at == rowCount, "every row belongs to the table it follows");
+
+        // The version each table and member came with: none newer than abi.h, none older than
+        // the oldest abi a mod can ask for, a member never older than its table.
+        const wxl::api::Version current{WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR, WXL_ABI_VERSION_FEATURE};
+        const wxl::api::Version oldest{0, 1, 5};
+        for (uint32_t s = 0; s < serviceCount; ++s)
+        {
+            const std::string what = std::string("wxl.") + services[s].id +
+                                     " came with an abi from 0.1.5 to abi.h's";
+            Check(wxl::api::AtLeast(services[s].since, oldest) && wxl::api::AtLeast(current, services[s].since),
+                  what.c_str());
+        }
+        uint32_t                    sinceCount = 0;
+        const wxl::api::SinceRow*   sinces     = wxl::api::Sinces(&sinceCount);
+        for (uint32_t i = 0; i < sinceCount; ++i)
+        {
+            const wxl::api::ServiceRow* service = wxl::api::FindService(sinces[i].service);
+            const std::string what = std::string("WXL_API_SINCE(") + sinces[i].service + ", " + sinces[i].member +
+                                     ") is newer than its table and the one above it, and no newer than abi.h";
+            bool newer = service && wxl::api::AtLeast(sinces[i].since, service->since) &&
+                         !wxl::api::AtLeast(service->since, sinces[i].since);
+            if (i > 0 && std::strcmp(sinces[i - 1].service, sinces[i].service) == 0)
+                newer = newer && !wxl::api::AtLeast(sinces[i - 1].since, sinces[i].since);
+            Check(newer && wxl::api::AtLeast(current, sinces[i].since), what.c_str());
+        }
+        uint32_t marks = 0;
+        const uint32_t entryCount = uint32_t(sizeof service_order::kEntries / sizeof service_order::kEntries[0]);
+        for (uint32_t i = 0; i < entryCount; ++i)
+        {
+            const service_order::Entry& entry = service_order::kEntries[i];
+            if (!entry.since) continue;
+            ++marks;
+            const service_order::Entry* below = i + 1 < entryCount ? &service_order::kEntries[i + 1] : nullptr;
+            const std::string what = std::string("WXL_API_SINCE(") + entry.service + ", " + entry.member +
+                                     ") sits right above that member's row";
+            Check(below && !below->since && std::strcmp(below->service, entry.service) == 0 &&
+                      std::strcmp(below->member, entry.member) == 0,
+                  what.c_str());
+        }
+        Check(marks == sinceCount, "one SinceRow per WXL_API_SINCE row");
+        const wxl::api::Row* removed = nullptr;
+        const wxl::api::Row* read    = nullptr;
+        for (uint32_t i = 0; i < rowCount; ++i)
+        {
+            if (std::strcmp(rows[i].member, "remove_search_path") == 0) removed = &rows[i];
+            if (std::strcmp(rows[i].service, "storage") == 0 && std::strcmp(rows[i].member, "read") == 0)
+                read = &rows[i];
+        }
+        constexpr const wxl::api::ServiceRow* profileRow = wxl::api::FindService("profile");
+        static_assert(profileRow && profileRow->since.feature == 12, "a table's version reads at compile time");
+        Check(removed && read && wxl::api::SinceOf(*removed).feature == 10 && wxl::api::SinceOf(*read).feature == 5,
+              "a member below a WXL_API_SINCE row came with it, one above it with its table");
 
         // A resource is handed out by one row and given back by one close row of its service.
         uint32_t                     resourceCount = 0;

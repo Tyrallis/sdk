@@ -72,9 +72,10 @@ namespace wxl::lua
         namespace closers
         {
             using namespace ::wxl::api::kind;
-#define WXL_API_SERVICE(svc, name, version, access, doc)
+#define WXL_API_SERVICE(svc, name, version, since, access, doc)
 #define WXL_API(svc, member, Name, answer, params, lua, cxx, doc)
 #define WXL_API_RESOURCE(svc, Name, ctype, none_value)
+#define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(type, member, field_kind)
 #define WXL_API_CLOSE(svc, member, Name, answer_kind, Resource, when_kind, doc)                  \
     struct Resource##Closer                                                             \
@@ -95,14 +96,16 @@ namespace wxl::lua
 #include "wxl/services/profile.def"
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD
+#undef WXL_API_SINCE
 #undef WXL_API_RESOURCE
 #undef WXL_API
 #undef WXL_API_SERVICE
         } // namespace closers
 
-#define WXL_API_SERVICE(svc, name, version, access, doc)
+#define WXL_API_SERVICE(svc, name, version, since, access, doc)
 #define WXL_API(svc, member, Name, answer, params, lua, cxx, doc)
 #define WXL_API_RESOURCE(svc, Name, ctype, none_value)
+#define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(type, member, field_kind)
 #define WXL_API_CLOSE(svc, member, Name, answer_kind, Resource, when_kind, doc) \
     template <>                                                        \
@@ -119,6 +122,7 @@ namespace wxl::lua
 #include "wxl/services/profile.def"
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD
+#undef WXL_API_SINCE
 #undef WXL_API_RESOURCE
 #undef WXL_API
 #undef WXL_API_SERVICE
@@ -804,6 +808,7 @@ namespace wxl::lua
             lua_CFunction call;      ///< null for a shim row: Shims.hpp serves it
             const char*   method_of; ///< the resource it is a method of, or null for a module function
             const char*   params;    ///< as the row writes them, "(str directory, i32 priority)"
+            wxl::api::Version since; ///< the version of the contract the member came with
         };
 
         /// The name of a row's parameter by its place, from its params text: "priority".
@@ -854,18 +859,22 @@ namespace wxl::lua
         {
             using namespace ::wxl::api::kind;
 
+#define WXL_LUA_SINCE(svc, member) ::wxl::api::SinceOf(#svc, uint32_t(offsetof(wxl_##svc##_api, member)))
 #define WXL_LUA_generated(svc, member, Name, answer, params)                                 \
     LuaRow{#svc, #Name, &Call<&wxl_##svc##_api::member, answer params>::Invoke,             \
-           MethodOf<answer params>::kName, #params},
-#define WXL_LUA_shim(svc, member, Name, answer, params) LuaRow{#svc, #Name, nullptr, nullptr, #params},
+           MethodOf<answer params>::kName, #params, WXL_LUA_SINCE(svc, member)},
+#define WXL_LUA_shim(svc, member, Name, answer, params) \
+    LuaRow{#svc, #Name, nullptr, nullptr, #params, WXL_LUA_SINCE(svc, member)},
 #define WXL_LUA_native(svc, member, Name, answer, params)
-#define WXL_API_SERVICE(svc, name, version, access, doc)
+#define WXL_API_SERVICE(svc, name, version, since, access, doc)
 #define WXL_API(svc, member, Name, answer, params, lua, cxx, doc) \
     WXL_LUA_##lua(svc, member, Name, answer, params)
 #define WXL_API_RESOURCE(svc, Name, ctype, none_value)
+#define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(type, member, field_kind)
 #define WXL_API_CLOSE(svc, member, Name, answer, Resource, when, doc) \
-    LuaRow{#svc, #Name, &CloseCall<kind::Resource>, kind::Resource::kName, "(" #Resource " self)"},
+    LuaRow{#svc, #Name, &CloseCall<kind::Resource>, kind::Resource::kName, "(" #Resource " self)", \
+           WXL_LUA_SINCE(svc, member)},
             const LuaRow kRows[] = {
 #include "wxl/services/script.def"
 #include "wxl/services/storage.def"
@@ -878,17 +887,20 @@ namespace wxl::lua
             };
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD
+#undef WXL_API_SINCE
 #undef WXL_API_RESOURCE
 #undef WXL_API
 #undef WXL_API_SERVICE
 #undef WXL_LUA_native
 #undef WXL_LUA_shim
 #undef WXL_LUA_generated
+#undef WXL_LUA_SINCE
 
-#define WXL_API_SERVICE(svc, name, version, access, doc)
+#define WXL_API_SERVICE(svc, name, version, since, access, doc)
 #define WXL_API(svc, member, Name, answer, params, lua, cxx, doc)
 #define WXL_API_RESOURCE(svc, Name, ctype, none_value) \
     LuaResource{#Name, &Collect<kind::Name>, &Describe<kind::Name>},
+#define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(type, member, field_kind)
 #define WXL_API_CLOSE(svc, member, Name, answer, Resource, when, doc)
             const LuaResource kResources[] = {
@@ -903,6 +915,7 @@ namespace wxl::lua
             };
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD
+#undef WXL_API_SINCE
 #undef WXL_API_RESOURCE
 #undef WXL_API
 #undef WXL_API_SERVICE
@@ -918,44 +931,93 @@ namespace wxl::lua
             return false;
         }
 
-        /// Any use of an unsafe module the mod did not declare: upvalue 1 is why.
-        int Undeclared(lua_State* L)
+        /// Any use of a module the mod may not use: upvalue 1 is why.
+        int Refused(lua_State* L)
         {
             return luaL_error(L, "%s", lua_tostring(L, lua_upvalueindex(1)));
         }
 
-        void PushUndeclared(lua_State* L, const ScriptMod& mod, const wxl::api::ServiceRow& service)
+        /// A module whose every use raises @p why.
+        void PushRefusedModule(lua_State* L, const std::string& why)
         {
             lua_newtable(L);
             lua_createtable(L, 0, 2);
-            const std::string why =
-                std::string("wxl.") + service.id + " reaches the client's memory, so a mod uses it only when " +
-                (mod.HasManifest() ? "its mod.json declares it: add { \"service\": \"" + std::string(service.name) +
-                                         "\", \"version\": " + std::to_string(service.version) +
-                                         " } to \"requires\" (or \"optional\")"
-                                   : std::string("it has a mod.json that declares it in \"requires\""));
             lua_pushlstring(L, why.data(), why.size());
-            lua_pushcclosure(L, &Undeclared, 1);
+            lua_pushcclosure(L, &Refused, 1);
             lua_pushvalue(L, -1);
             lua_setfield(L, -3, "__index");
             lua_setfield(L, -2, "__newindex");
             lua_setmetatable(L, -2);
         }
 
-        /// Registers each resource's metatable in a state: its methods, its collector, its text.
-        void OpenResources(lua_State* L)
+        void PushUndeclared(lua_State* L, const ScriptMod& mod, const wxl::api::ServiceRow& service)
+        {
+            PushRefusedModule(
+                L, std::string("wxl.") + service.id + " reaches the client's memory, so a mod uses it only when " +
+                       (mod.HasManifest() ? "its mod.json declares it: add { \"service\": \"" +
+                                                std::string(service.name) + "\", \"version\": " +
+                                                std::to_string(service.version) + " } to \"requires\" (or \"optional\")"
+                                          : std::string("it has a mod.json that declares it in \"requires\"")));
+        }
+
+        /// Empty when @p mod may use what came with @p since, otherwise why not, led by @p what.
+        std::string TooNew(const ScriptMod& mod, const std::string& what, const wxl::api::Version& since)
+        {
+            const std::string newer = mod.TooNew(host::AbiVersion{since.major, since.minor, since.feature});
+            return newer.empty() ? newer : what + " " + newer;
+        }
+
+        /// The __index of a table some of whose names the mod may not use: upvalue 1 maps each
+        /// such name to why; any other name is nil.
+        int RefusedName(lua_State* L)
+        {
+            lua_pushvalue(L, 2);
+            lua_rawget(L, lua_upvalueindex(1));
+            if (lua_type(L, -1) == LUA_TSTRING) return luaL_error(L, "%s", lua_tostring(L, -1));
+            lua_pushnil(L);
+            return 1;
+        }
+
+        /// Gives the table at the top of the stack a metatable refusing the names in @p refused
+        /// (name, why); nothing when there are none.
+        void RefuseNames(lua_State* L, const std::vector<std::pair<std::string, std::string>>& refused)
+        {
+            if (refused.empty()) return;
+            lua_createtable(L, 0, 1);
+            lua_createtable(L, 0, static_cast<int>(refused.size()));
+            for (const auto& [name, why] : refused)
+            {
+                lua_pushlstring(L, why.data(), why.size());
+                lua_setfield(L, -2, name.c_str());
+            }
+            lua_pushcclosure(L, &RefusedName, 1);
+            lua_setfield(L, -2, "__index");
+            lua_setmetatable(L, -2);
+        }
+
+        /// Registers each resource's metatable in a state: its methods (those the mod's abi
+        /// has), its collector, its text.
+        void OpenResources(lua_State* L, const ScriptMod& mod)
         {
             for (const LuaResource& resource : rows::kResources)
             {
                 luaL_newmetatable(L, MetaName(resource.name).c_str());
                 lua_newtable(L); // the methods
+                std::vector<std::pair<std::string, std::string>> refused;
                 for (const LuaRow& row : rows::kRows)
                 {
                     if (!row.method_of || std::strcmp(row.method_of, resource.name) != 0) continue;
+                    if (std::string why = TooNew(mod, std::string(resource.name) + ":" + row.name, row.since);
+                        !why.empty())
+                    {
+                        refused.emplace_back(row.name, std::move(why));
+                        continue;
+                    }
                     lua_pushlightuserdata(L, const_cast<LuaRow*>(&row));
                     lua_pushcclosure(L, row.call, 1);
                     lua_setfield(L, -2, row.name);
                 }
+                RefuseNames(L, refused);
                 lua_setfield(L, -2, "__index");
                 lua_pushcfunction(L, resource.collect);
                 lua_setfield(L, -2, "__gc");
@@ -973,7 +1035,7 @@ namespace wxl::lua
 
     void PushServiceModules(lua_State* L, ScriptMod& mod)
     {
-        OpenResources(L);
+        OpenResources(L, mod);
 
         uint32_t                          count    = 0;
         const wxl::api::ServiceRow* const services = wxl::api::Services(&count);
@@ -985,6 +1047,13 @@ namespace wxl::lua
                 if (std::strcmp(row.service, service.id) == 0 && !row.method_of) any = true;
             if (!any) continue;
 
+            const std::string module = std::string("wxl.") + service.id;
+            if (const std::string why = TooNew(mod, module, service.since); !why.empty())
+            {
+                PushRefusedModule(L, why);
+                lua_setfield(L, -2, service.id);
+                continue;
+            }
             if (service.unsafe && !Declares(mod.Manifest(), service.name))
             {
                 PushUndeclared(L, mod, service);
@@ -993,9 +1062,15 @@ namespace wxl::lua
             }
 
             lua_newtable(L);
+            std::vector<std::pair<std::string, std::string>> refused;
             for (const LuaRow& row : rows::kRows)
             {
                 if (std::strcmp(row.service, service.id) != 0 || row.method_of) continue;
+                if (std::string why = TooNew(mod, module + "." + row.name, row.since); !why.empty())
+                {
+                    refused.emplace_back(row.name, std::move(why));
+                    continue;
+                }
                 if (row.call)
                 {
                     lua_pushlightuserdata(L, const_cast<LuaRow*>(&row));
@@ -1010,6 +1085,7 @@ namespace wxl::lua
                 }
                 lua_setfield(L, -2, row.name);
             }
+            RefuseNames(L, refused);
             lua_setfield(L, -2, service.id);
         }
     }

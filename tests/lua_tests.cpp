@@ -1723,6 +1723,61 @@ int main(int argc, char** argv)
         if (g_failures) sink.Dump();
     }
 
+    Section("what a mod's abi lets it use of the services");
+    {
+        // wxl.profile came with 0.1.12 and wxl.storage.RemoveSearchPath with 0.1.10 (their
+        // .def rows); wxl.storage itself is there from 0.1.5 on.
+        const fs::path mods = MakeTree(scratch, "service-abi", binary, fs::path());
+        const auto     withAbi = [](const char* id, const char* abi) {
+            std::string manifest = LuaManifest(id);
+            manifest.replace(manifest.find(kAbi), std::strlen(kAbi), abi);
+            return manifest;
+        };
+        const char* const probe = R"lua(
+local function try(what, reach)
+    local ok, answer = pcall(reach)
+    print(what .. ' ' .. tostring(ok) .. ' ' .. (ok and type(answer) or tostring(answer)))
+end
+try('profile', function() return wxl.profile.Connected end)
+try('profile-call', function() return wxl.profile.Connected() end)
+try('footprint', function() return wxl.footprint.Running end)
+try('read', function() return wxl.storage.Read end)
+try('remove', function() return wxl.storage.RemoveSearchPath end)
+try('unknown', function() return wxl.storage.NoSuchFunction end)
+)lua";
+        WriteFile(mods / "eleven" / "mod.json", withAbi("wxl.eleven", "0.1.11"));
+        WriteFile(mods / "eleven" / "init.lua", probe);
+        WriteFile(mods / "nine" / "mod.json", withAbi("wxl.nine", "0.1.9"));
+        WriteFile(mods / "nine" / "init.lua", probe);
+        WriteFile(mods / "now" / "mod.json", LuaManifest("wxl.now"));
+        WriteFile(mods / "now" / "init.lua", probe);
+
+        CaptureSink sink;
+        ModHost     host(Config(mods, sink));
+        host.LoadAll();
+
+        Check(sink.Has("[wxl.eleven] profile false wxl.eleven/init.lua:6: wxl.profile came with abi 0.1.12, and this mod's mod.json asks "
+                       "for 0.1.11; to use it, set \"abi\": \"0.1.12\" there"),
+              "a module newer than the mod's abi is refused at its first use, naming both and what to ask for");
+        Check(sink.Has("[wxl.eleven] profile-call false wxl.eleven/init.lua:7: wxl.profile came with abi 0.1.12"),
+              "and a call into it is refused the same way");
+        Check(sink.Has("[wxl.eleven] footprint true function") && sink.Has("[wxl.eleven] remove true function"),
+              "a module, and a function, of the mod's abi are served");
+        Check(sink.Has("[wxl.nine] footprint false wxl.nine/init.lua:8: wxl.footprint came with abi 0.1.11, and this mod's mod.json asks "
+                       "for 0.1.9"),
+              "wxl.footprint came with 0.1.11");
+        Check(sink.Has("[wxl.nine] remove false wxl.nine/init.lua:10: wxl.storage.RemoveSearchPath came with abi 0.1.10, and this mod's "
+                       "mod.json asks for 0.1.9; to use it, set \"abi\": \"0.1.10\" there"),
+              "a function added to a module after it came is refused on its own");
+        Check(sink.Has("[wxl.nine] read true function") && sink.Has("[wxl.nine] unknown true nil"),
+              "the module's older functions are served, and a name it lacks is still nil");
+        Check(sink.Has("[wxl.now] profile true function") && sink.Has("[wxl.now] remove true function"),
+              "a mod asking for the current abi gets every module");
+
+        host.Shutdown();
+        if (g_failures) sink.Dump();
+    }
+
     Section("cost of one dispatch");
     {
         const fs::path mods = MakeTree(scratch, "bench", binary, fs::path());

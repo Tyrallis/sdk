@@ -1870,6 +1870,7 @@ function storage.MountArchive(path, priority) end
 ---@return string|nil reason
 function storage.Find(pattern) end
 
+---Came with abi 0.1.10: a mod whose mod.json asks for an older abi cannot use it.
 ---Takes a folder this mod added back out of the files searched; nil, "not_found" for one
 ---it did not add.
 ---@param directory string
@@ -1950,6 +1951,7 @@ function patch.Matches(address, expected) end
 function patch.Find(pattern, after) end
 
 ---wxl.footprint. Where the client's memory goes: Storm's allocations by source file, the big consumers, the address space.
+---Came with abi 0.1.11: a mod whose mod.json asks for an older abi cannot use it.
 ---@class wxl.footprint
 local footprint = {}
 
@@ -2015,6 +2017,7 @@ function footprint.Report(name, bytes, count) end
 function footprint.WatchPressure(bytes) end
 
 ---wxl.profile. Zones, graphs and messages on the profiler's timeline, beside the client's frames and the mods' handlers.
+---Came with abi 0.1.12: a mod whose mod.json asks for an older abi cannot use it.
 ---@class wxl.profile
 local profile = {}
 

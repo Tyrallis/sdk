@@ -343,6 +343,16 @@ namespace
         return std::string();
     }
 
+    /// "Came with abi 0.1.12: ..." for what a mod asking for the oldest abi cannot use; empty
+    /// for what was there from the start.
+    std::string CameWith(const wxl::api::Version& since)
+    {
+        if (wxl::api::AtLeast(wxl::api::Version{0, 1, 5}, since)) return std::string();
+        const std::string abi =
+            std::to_string(since.major) + "." + std::to_string(since.minor) + "." + std::to_string(since.feature);
+        return "Came with abi " + abi + ": a mod whose mod.json asks for an older abi cannot use it.";
+    }
+
     std::string Services()
     {
         std::ostringstream out;
@@ -422,6 +432,7 @@ namespace
             }
             if (!any) continue;
             out << "---" << services[s].name << ". " << services[s].doc
+                << (CameWith(services[s].since).empty() ? "" : "\n---" + CameWith(services[s].since))
                 << (services[s].unsafe ? "\n---Unsafe: present only when the mod's mod.json declares it, in "
                                          "\"requires\" or \"optional\"."
                                        : "")
@@ -432,6 +443,9 @@ namespace
                 if (std::strcmp(row.service, services[s].id) != 0 || row.lua == wxl::api::Lua::native) continue;
                 const std::vector<Parameter> parameters = ParametersOf(row.params);
                 if (!parameters.empty() && IsResourceKind(parameters[0].kind)) continue;
+                const wxl::api::Version since = wxl::api::SinceOf(row);
+                if (wxl::api::AtLeast(since, services[s].since) && !wxl::api::AtLeast(services[s].since, since))
+                    out << "---" << CameWith(since) << "\n";
                 if (row.lua == wxl::api::Lua::shim)
                     out << ShimDefinition(row, services[s].id);
                 else

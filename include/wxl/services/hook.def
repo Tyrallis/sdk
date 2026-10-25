@@ -10,7 +10,7 @@
 #error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including hook.def"
 #endif
 
-WXL_API_SERVICE(hook, WXL_HOOK_SERVICE, WXL_HOOK_SERVICE_VERSION, safe,
+WXL_API_SERVICE(hook, WXL_HOOK_SERVICE, WXL_HOOK_SERVICE_VERSION, (0, 1, 5), safe,
                 "The points a runtime names for a native detour.")
 
 WXL_API_FIELD(wxl_hook_point, name, str)
