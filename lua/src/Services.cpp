@@ -88,16 +88,7 @@ namespace wxl::lua
         static constexpr When        kWhen   = When::when_kind;                         \
         static constexpr const char* kMethod = #Name;                                   \
     };
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
-#include "wxl/services/action.def"
-#include "wxl/services/point.def"
+#include "wxl/services/tables.inc"
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
@@ -116,16 +107,7 @@ namespace wxl::lua
     struct Closer<kind::Resource> : closers::Resource##Closer          \
     {                                                                  \
     };
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
-#include "wxl/services/action.def"
-#include "wxl/services/point.def"
+#include "wxl/services/tables.inc"
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
@@ -918,16 +900,7 @@ namespace wxl::lua
     LuaRow{#svc, #Name, &CloseCall<kind::Resource>, kind::Resource::kName, "(" #Resource " self)", \
            WXL_LUA_SINCE(svc, member)},
             const LuaRow kRows[] = {
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
-#include "wxl/services/action.def"
-#include "wxl/services/point.def"
+#include "wxl/services/tables.inc"
             };
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD
@@ -948,16 +921,7 @@ namespace wxl::lua
 #define WXL_API_FIELD(type, member, field_kind)
 #define WXL_API_CLOSE(svc, member, Name, answer, Resource, when, doc)
             const LuaResource kResources[] = {
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
-#include "wxl/services/action.def"
-#include "wxl/services/point.def"
+#include "wxl/services/tables.inc"
             };
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD

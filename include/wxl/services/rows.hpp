@@ -159,16 +159,7 @@ namespace wxl::api
         static constexpr const char* kName   = #Name;               \
         static constexpr const char* kService = #svc;               \
     };
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
-#include "wxl/services/action.def"
-#include "wxl/services/point.def"
+#include "wxl/services/tables.inc"
 #undef WXL_API_RESOURCE
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
@@ -346,16 +337,7 @@ namespace wxl::api
 #define WXL_API_CLOSE(svc, member, Name, answer, Resource, when, doc)
 #define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(type, member, kind)
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
-#include "wxl/services/action.def"
-#include "wxl/services/point.def"
+#include "wxl/services/tables.inc"
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
 #undef WXL_API_CLOSE
@@ -493,16 +475,7 @@ namespace wxl::api
 #define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(type, member, kind)
         inline constexpr ServiceRow kServices[] = {
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
-#include "wxl/services/action.def"
-#include "wxl/services/point.def"
+#include "wxl/services/tables.inc"
         };
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
@@ -522,16 +495,7 @@ namespace wxl::api
 #define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(type, member, kind)
         inline constexpr Row kRows[] = {
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
-#include "wxl/services/action.def"
-#include "wxl/services/point.def"
+#include "wxl/services/tables.inc"
         };
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
@@ -547,16 +511,7 @@ namespace wxl::api
 #define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(type, member, kind)
         inline constexpr ResourceRow kResources[] = {
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
-#include "wxl/services/action.def"
-#include "wxl/services/point.def"
+#include "wxl/services/tables.inc"
         };
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
@@ -573,16 +528,7 @@ namespace wxl::api
 #define WXL_API_FIELD(type, member, kind) \
     FieldRow{&TypeTag<type>, #type, #member, #kind, uint32_t(offsetof(type, member))},
         inline constexpr FieldRow kFields[] = {
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
-#include "wxl/services/action.def"
-#include "wxl/services/point.def"
+#include "wxl/services/tables.inc"
         };
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
@@ -601,16 +547,7 @@ namespace wxl::api
         // Led by a row no table has, so that the array is never empty.
         inline constexpr SinceRow kSinces[] = {
             SinceRow{"", "", 0, Version{0, 0, 0}},
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
-#include "wxl/services/action.def"
-#include "wxl/services/point.def"
+#include "wxl/services/tables.inc"
         };
 #undef WXL_API_SINCE
 #undef WXL_API_FIELD

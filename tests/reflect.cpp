@@ -176,16 +176,7 @@ namespace service_signatures
     static_assert(std::is_same_v<decltype(wxl_##svc##_api::member),                       \
                                  wxl::api::SignatureOf<answer(Resource)>>,                \
                   "wxl_" #svc "_api::" #member " is not " #answer " (" #Resource ")");
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
-#include "wxl/services/action.def"
-#include "wxl/services/point.def"
+#include "wxl/services/tables.inc"
 #undef WXL_API_CLOSE
 #undef WXL_API
 #undef WXL_API_FIELD
@@ -211,16 +202,7 @@ namespace service_order
 #define WXL_API(svc, member, Name, answer, params, lua, cxx, doc) Entry{false, #svc, #member},
 #define WXL_API_CLOSE(svc, member, Name, answer, Resource, when, doc) Entry{false, #svc, #member},
     const Entry kEntries[] = {
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
-#include "wxl/services/action.def"
-#include "wxl/services/point.def"
+#include "wxl/services/tables.inc"
     };
 #undef WXL_API_CLOSE
 #undef WXL_API
