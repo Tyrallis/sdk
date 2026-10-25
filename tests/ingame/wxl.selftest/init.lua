@@ -11,7 +11,9 @@
 --   5. reloads the interface and calls the functions again;
 --   6. logs out and back in with the same character (RELOG) and calls them again;
 --   7. checks the engine points; 8. subscribes every gameplay event, provokes a /wave and reads
---      the inventory and aura events phase 4 caused.
+--      the inventory and aura events phase 4 caused;
+--   9. reads the player, its target and an item it wears through wxl.object and compares each
+--      with what the client's Lua says, then has the player target itself and clears the target.
 --
 -- Each check is one line in the log: PASS, FAIL, SKIP (what it needs is not there: a class
 -- without a cast-time spell, say) or NOTE (an event the server may not send). The chat box shows
@@ -794,6 +796,132 @@ step(function()
     }) do
         skip("gameplay " .. what, "the probe lists them when they happen")
     end
+end)
+
+-- 9. Object methods ------------------------------------------------------------------------------
+
+-- The reads of wxl.object against what the client's own Lua says of the same thing, on the
+-- player, its target when it has one, and an item it wears; then two harmless actions: the player
+-- targets itself, and the target is cleared.
+
+-- Compares a read with the client's answer to `code`; a read that gives nothing is a FAIL with why.
+local function same(name, value, why, code, convert)
+    if value == nil then
+        result(name, false, "the read gave nil, " .. tostring(why))
+        return
+    end
+    local ok, want = ask(code)
+    if not ok then
+        result(name, false, "the client's Lua failed: " .. tostring(want))
+        return
+    end
+    if convert then want = convert(want) end
+    result(name, value == want, "read " .. tostring(value) .. ", the client says " .. tostring(want))
+end
+
+local function truthy(v) return v ~= nil and v ~= false and v ~= 0 end
+
+step(function()
+    print("phase 9: object methods")
+    local me = wxl.object.LocalPlayer()
+    if not me then
+        result("wxl.object.LocalPlayer", false, "no player in the world")
+        return
+    end
+    result("IsActivePlayer on the player", me:IsActivePlayer() == true)
+    same("Guid", me:Guid(), nil, "return UnitGUID('player')")
+    same("Level", me:Level(), nil, "return UnitLevel('player')")
+    same("Health", me:Health(), nil, "return UnitHealth('player')")
+    same("Money", me:Money(), nil, "return GetMoney()")
+    same("Xp", me:Xp(), nil, "return UnitXP('player')")
+    same("NextLevelXp", me:NextLevelXp(), nil, "return UnitXPMax('player')")
+    same("IsDead", me:IsDead(), nil, "return UnitIsDead('player')", truthy)
+    same("InCombat", me:InCombat(), nil, "return UnitAffectingCombat('player')", truthy)
+    same("IsMounted", me:IsMounted(), nil, "return IsMounted()", truthy)
+    same("IsSwimming", me:IsSwimming(), nil, "return IsSwimming()", truthy)
+    same("IsResting", me:IsResting(), nil, "return IsResting()", truthy)
+    same("IsAfk", me:IsAfk(), nil, "return UnitIsAFK('player')", truthy)
+    same("PartySize", me:PartySize(), nil, "return GetNumPartyMembers()")
+    same("RaidSize", me:RaidSize(), nil, "return GetNumRaidMembers()")
+    result("Reaction to itself is friendly", me:Reaction() == "friendly", tostring(me:Reaction()))
+    local distance = me:Distance(me)
+    result("Distance to itself is 0", distance == 0, tostring(distance))
+    local run = me:Speed("run")
+    result("Speed('run') is a speed", type(run) == "number" and run > 0, tostring(run))
+    local skills = me:Skills()
+    result("Skills lists the skill lines", type(skills) == "table" and #skills > 0 and skills[1].id > 0,
+           skills and (#skills .. " skills") or "nil")
+    note("KnowsSpell(6603) Auto Attack", me:KnowsSpell(6603) == true, "this core may not teach Auto Attack as a spell")
+
+    -- Auras: the first of the player's buffs, by spell id, as the client's UnitAura sees it.
+    local ok, buff = ask("return select(11, UnitAura('player', 1))")
+    if ok and buff then
+        result("HasAura of the player's first buff (" .. buff .. ")", me:HasAura(buff) == true)
+        local auras = me:Auras()
+        local found
+        for _, a in ipairs(auras or {}) do if a.spell_id == buff then found = a end end
+        result("Auras lists it, with its caster", found ~= nil and type(found.caster) == "string",
+               found and (found.caster .. ", " .. found.stacks .. " stacks") or "not listed")
+    else
+        skip("HasAura and Auras", "the player has no buff")
+    end
+
+    -- An item worn: its entry and its quality as the client's GetInventoryItemID and GetItemInfo.
+    local worn
+    for slot = 0, 18 do
+        local item = me:InventoryItem(slot)
+        if item then worn = { slot = slot, item = item } break end
+    end
+    if worn then
+        same("InventoryItem(" .. worn.slot .. "):Entry", worn.item:Entry(), nil,
+             "return GetInventoryItemID('player', " .. (worn.slot + 1) .. ")")
+        local quality, why = worn.item:Quality()
+        local qualities = { [0] = "poor", "common", "uncommon", "rare", "epic", "legendary", "artifact", "heirloom" }
+        if quality then
+            same("an item's Quality", quality, nil,
+                 "return select(3, GetItemInfo(" .. worn.item:Entry() .. "))", function(q) return qualities[q] end)
+        else
+            note("an item's Quality", false, "the item cache has no record yet (" .. tostring(why) .. ")")
+        end
+        local durability = worn.item:Durability()
+        result("an item's Durability reads", type(durability) == "number", tostring(durability))
+    else
+        skip("InventoryItem", "the player wears nothing")
+    end
+
+    -- The target, when there is one.
+    local target = me:Target()
+    if target then
+        same("the target's Health", target:Health(), nil, "return UnitHealth('target')")
+        local reaction = target:Reaction()
+        local names = { "hated", "hostile", "unfriendly", "neutral", "friendly", "honored", "revered", "exalted" }
+        same("the target's Reaction", reaction, nil, "return UnitReaction('target', 'player')",
+             function(r) return r and names[r] end)
+        result("the target's CreatureType is a name", type(target:CreatureType()) == "string",
+               tostring(target:CreatureType()))
+        local yards = me:Distance(target)
+        result("Distance to the target", type(yards) == "number" and yards >= 0, tostring(yards))
+    else
+        skip("the target's reads", "nothing targeted: target a creature before the run to check them")
+    end
+
+    -- Two harmless actions.
+    local done, why = me:Select()
+    result("Select(): the player targets itself", done == true, tostring(why))
+end)
+
+step(function() wait(0.5) end)
+
+step(function()
+    same("the target is the player after Select()", true, nil, "return UnitIsUnit('target', 'player')", truthy)
+    local done, why = wxl.action.ClearTarget()
+    result("wxl.action.ClearTarget()", done == true, tostring(why))
+end)
+
+step(function() wait(0.5) end)
+
+step(function()
+    same("nothing is targeted after ClearTarget()", false, nil, "return UnitExists('target')", truthy)
 end)
 
 -- The end ----------------------------------------------------------------------------------------

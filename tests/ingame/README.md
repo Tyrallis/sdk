@@ -33,6 +33,11 @@ NOTE), and reads what phase 4 caused: the item taken off reaching the bags
 (`InventorySlotChanged`) and the racial's aura (`UnitAuraApplied`, a NOTE for a racial that puts
 none on its caster). Loot, quests, groups, trades, duels, windows, death and reputation need a
 kill, an NPC or another player: they are SKIP lines, and the probe lists them when they happen.
+Phase 9 reads the player, its target and an item it wears through the object methods (abi
+0.1.18) and compares each with the client's own Lua (`UnitLevel`, `GetMoney`, `UnitAura`,
+`GetInventoryItemID`, `GetItemInfo`, `UnitReaction`...), then targets the player with `Select()`
+and clears the target with `wxl.action.ClearTarget()`. Target a creature before the run to have
+the target's reads checked; without one they are a SKIP.
 
 ## Building it
 
