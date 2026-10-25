@@ -211,18 +211,19 @@ Beyond events, a runtime publishes services, and a mod asks for the ones it need
 | `wxl.net` | messages to and from the server | yes; no runtime publishes it yet |
 | `wxl.ui` | frames and the interface | yes; no runtime publishes it yet |
 | `wxl.point` | functions of the engine: run code before, instead of or after them | yes; a few exist on one runtime, and say so |
-| `wxl.gx` | the client's D3D9 device and the model batches it draws | no: the x64 runtime, on a D3D9 device |
-| `wxl.m2file` | model files as the client's loader reads them, for a mod that teaches it a format | no: the x64 runtime |
+| `wxl.m2file` | a parsed model file's arrays, read and pointed the runtime's way, for a mod that teaches the client a model format | yes |
+| `wxl.m2` | the models objects draw with, and models a mod makes and hangs on them | yes |
+| `wxl.gx` | the client's D3D9 device, to draw a model batch again (`ModelBatchDrawn`, which only the recompiled client raises) | yes |
 | `wxl.hook` | hook points a runtime names and keeps working | yes |
 | `wxl.hook.raw` | a detour at a raw address | no: runtimes that load into a shipped binary |
 | `wxl.patch` | bytes written into the image | no: runtimes that load into a shipped binary |
 
 Each service has a typed facade with its name and version sealed in -- `wxl::ObjectService`,
 `wxl::ScriptService`, `wxl::StorageService`, `wxl::DataService`, `wxl::NetService`,
-`wxl::UiService`, `wxl::PointService`, `wxl::HookService`, `wxl::RawHookService`,
-`wxl::PatchService` -- taking and
+`wxl::UiService`, `wxl::PointService`, `wxl::M2FileService`, `wxl::M2Service`, `wxl::GxService`,
+`wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService` -- taking and
 returning C++ types. `wxl::Service<T>` is still there for the raw table. Lua mods reach the same
-services as `wxl.storage`, `wxl.data`, `wxl.script`, `wxl.hook` and `wxl.patch`, built from the
+services as `wxl.storage`, `wxl.data`, `wxl.script`, `wxl.hook`, `wxl.patch` and `wxl.m2`, built from the
 same tables.
 
 **Portable means a runtime may serve it, not that yours does.** A facade tests false and every
@@ -328,6 +329,10 @@ Event ids and stage numbers are appended, never renumbered, never removed.
 3. Append ids, never renumber them.
 4. Add the conformance check with the feature -- a contract without a test is a suggestion.
 5. Open a pull request.
+
+**Contributors.** Tyrallis brought the model services (`wxl.m2file`, `wxl.m2`, `wxl.gx`), the
+character appearance seams behind `AppearanceChanged`, and the recompiled client's skins over 65535
+indices and textures over 4 MB (sdk, core and client pull requests #1).
 
 ## 📄 License
 

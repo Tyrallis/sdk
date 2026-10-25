@@ -832,6 +832,7 @@ Lua -- and `wxl.lua` gives each one a module in the `wxl` table:
 | `wxl.hook` | the points a runtime names for a native detour |
 | `wxl.patch` | bytes written into the client's program; your `mod.json` has to ask for it |
 | `wxl.footprint` | where the client's memory goes: its allocations by source file, its big consumers, its address space |
+| `wxl.m2` | the models objects draw with, and models your mod makes and hangs on them; your `mod.json` has to ask for it |
 
 Every function of these modules answers the way an object's reads do: its value, or `nil` and a
 reason. The reason is a short word: `"unsupported"` when this runtime does not have the service or
@@ -1047,6 +1048,79 @@ end
 `data` is the file's bytes as one string, valid in the handler; `#data` is their count. They are
 the bytes the client is about to parse, transforms applied. These events came with `0.1.19`: a mod
 using them, or `Serve`, asks for `"abi": "0.1.19"`.
+
+### Models: `wxl.m2`
+
+What a character wears comes as an event, and a model of your own can be hung on any model the
+client draws -- a character, a creature, a mount. This part of the platform is the work of
+Tyrallis, who contributed it for his equipment and model mods.
+
+`wxl.m2` hands your mod the client's own models, which nothing checks for you, so your `mod.json`
+names it, in `"requires"` or `"optional"`:
+
+```json
+"requires": [ { "service": "wxl.m2", "version": 1 } ]
+```
+
+A mod that uses it without that line gets an error saying which line to add.
+
+**What characters wear.** `ObjectScript:OnAppearanceChanged` comes when a character's appearance
+puts an item display on a slot (`change` is `"worn"`), is about to take one off (`"removed"`), or
+goes away (`"freed"`). An appearance is what the client dresses: every player, every NPC dressed
+from its display, and the copies the interface makes of one (the character panel, portraits,
+character select). `model` is its body, what items hang on, as a light userdata: an address your
+mod hands back to `wxl.m2` and never reads itself.
+
+```lua
+function ObjectScript:OnAppearanceChanged(change, wearer, model, race, sex, slot, display, npc)
+    if change == "worn" then
+        print("slot " .. slot .. " puts on display " .. display)
+    end
+end
+```
+
+`slot` counts from 0: 0 the head, 1 the shoulders, 3 the chest, 4 the belt, 10 the cloak.
+
+**A model of your own.** `wxl.m2.CreateModel(model, path)` makes a model of a file in the scene of
+the model you name, and answers a `wxl.Model`, your mod's. Its methods hang it and change it:
+
+```lua
+local hat
+
+function WorldScript:OnUpdate(delta)
+    if hat and hat:Parent() then return end           -- still on the head
+    local body = wxl.m2.ObjectModel(wxl.object.LocalPlayer())
+    if not body then return end                        -- not in the world yet
+    hat = hat or wxl.m2.CreateModel(body, "Creature\\Murloc\\Murloc.m2")
+    print("hung: " .. tostring(hat:Attach(body, 11, 0)))  -- 11: the top of the head
+end
+```
+
+`wxl.m2.ObjectModel(object)` answers the model an object draws with (a mounted player answers its
+mount). `model:Attach(parent, point, flags)` hangs yours on another model at one of its attachment
+points: 11 is the top of a character's head, 1 and 2 its hands, 32 its hip. `flags` is 0, or 1 to
+hang it at the parent's origin where it has no such point, or 2 to have its bones follow the
+parent's (a piece made for a body's skeleton), or 3 for both. The client lets your model go when
+the model it hangs on goes -- the player changes shape or mounts -- and `model:Parent()` then
+answers `nil, "not_found"`: hang it again, as above.
+
+| Method | What it does |
+|---|---|
+| `model:Attach(parent, point, flags)` | hangs it on `parent`; `nil, "not_found"` for a point the parent lacks (flags 1 hangs it anyway) |
+| `model:AttachToBone(parent, point, key_bone, { x, y, z })` | hangs it on one key bone of `parent`, moved by an offset: a point the parent's file does not have |
+| `model:Detach()`, `model:Parent()` | takes it off; what it hangs on |
+| `model:SetGeosets(first, last, visible)` | shows or hides its geosets numbered `first` to `last` |
+| `model:ReplaceTexture(type, path)` | gives it a texture of its own (2 an item's skin, 11-13 a creature's) |
+| `model:Release()` | takes it off and gives it back; your mod's models go when it unloads too |
+
+`wxl.m2.AttachmentPoint(model, point)` answers where a point of a loaded model sits, as
+`{ x, y, z }`; `wxl.m2.RacePrefix(race)` the race's prefix in model file names (`"Hu"`, `"Or"`).
+
+The model loader's stages (`AssetScript:OnModelParsed`, `OnSkinProfileParsed`,
+`OnModelSequenceLoad`) and the drawn batches (`RenderScript:OnModelBatchDrawn`) come to Lua too,
+with their numbers, but reshaping a model file or drawing with the device is a C++ mod's work:
+the C++ guide (`building-a-mod.md`, "Models") shows it. `OnModelBatchDrawn` comes thousands of
+times a frame, and only on the recompiled client. All of this came with abi `0.1.20`.
 
 ### The client's databases: `wxl.data`
 
@@ -1515,6 +1589,8 @@ them in `include/wxl/services/<service>.def`.
 | `wxl.action.Target(object)`, `.ClearTarget()`, `.Interact(object)` | `true`: targets an object, clears the target, right-clicks an object; `nil, "failed"` when the client refused (abi `0.1.18`) |
 | `wxl.action.CastSpell(id, target)`, `.StopCasting()`, `.UseItem(item, target)` | casts a spell you know at a unit, or at the current target when `target` is left out; stops the cast in progress; uses an item, on a unit or what it picks |
 | `wxl.action.Follow(unit)`, `.Assist(unit)`, `.MoveTo(point)` | follows a unit; targets what it targets; walks to a point (`{ x, y, z }`) as click-to-move does |
+| `wxl.m2.ObjectModel(object)`, `.RacePrefix(race)`, `.AttachmentPoint(model, point)` | the model an object draws with; a race's prefix in file names; a point of a model as `{ x, y, z }` (abi `0.1.20`; the module needs `wxl.m2` in `mod.json`) |
+| `wxl.m2.CreateModel(model, path)` | a `Model` of your mod's in that model's scene: `:Attach`, `:AttachToBone`, `:Detach`, `:Parent`, `:SetGeosets`, `:ReplaceTexture`, `:Release` (see [Models](#models-wxlm2)) |
 | `wxl.point.Points()`, `.Find(name)` | the engine functions a C++ mod can run code before, instead of or after (name, signature, thread, flags, and `absent`: why this runtime lacks one); the id of one this runtime has (abi `0.1.16`). Attaching from Lua is to come; see "Changing the engine: points" in [Building a mod](building-a-mod.md) |
 
 ### Object methods
@@ -1744,6 +1820,9 @@ A few to start from:
 | `AssetScript` | `OnArchiveMounted`, `OnArchiveUnmounted` | `path`, `priority`, `hash_entries`, `block_entries`, `bytes` | the client mounted an archive, or is about to close one (abi `0.1.11`) |
 | `WorldScript` | `OnMemoryPressure` | `largest_free`, `free`, `committed`, `threshold` | the largest free block of the address space fell under the threshold `wxl.footprint.WatchPressure` set (abi `0.1.11`) |
 | `AssetScript` | `OnTerrainTileLoad`, `OnMapObjectGroupLoad`, `OnSkinProfileLoad`, `OnTextureDecode`, `OnShaderLoad`, `OnSoundFileLoad` | see [Serving and converting assets](#serving-and-converting-assets) | the engine read a tile, a building's group, a skin, a texture, a shader, a sound (abi `0.1.19`) |
+| `ObjectScript` | `OnAppearanceChanged` | `change`, `wearer`, `model`, `race_id`, `sex_id`, `item_slot`, `display_id`, `npc` | a character's appearance put an item on, is taking one off (`"worn"`, `"removed"`), or goes away (`"freed"`) (abi `0.1.20`) |
+| `AssetScript` | `OnModelParsed`, `OnSkinProfileParsed`, `OnModelSequenceLoad` | `path`, `file`, then the header, the skin or the sequence | the model loader's stages; see [Models](#models-wxlm2) (abi `0.1.20`) |
+| `RenderScript` | `OnModelBatchDrawn` | `model`, `root_model`, then the numbers of the draw | the device drew one batch of a model; the recompiled client only (abi `0.1.20`) |
 
 The families `PlayerScript`, `GlueScript` and `ChatScript`, and `WorldScript`'s `OnZoneChanged`,
 `OnMouseoverChanged` and `OnCVarChanged`, came with `0.1.6`: a mod that uses one asks for
@@ -1766,6 +1845,9 @@ The [gameplay events](#gameplay-events), with the families `LootScript`, `ItemSc
 `wxl.action` module came with `0.1.18`. `AssetScript`'s `OnTerrainTileLoad`, `OnMapObjectGroupLoad`,
 `OnSkinProfileLoad`, `OnTextureDecode`, `OnShaderLoad` and `OnSoundFileLoad`,
 `wxl.storage.Serve` and `wxl.storage.Unserve`, and the reason `"pending"`, came with `0.1.19`.
+`ObjectScript`'s `OnAppearanceChanged`, `AssetScript`'s `OnModelParsed`, `OnSkinProfileParsed` and
+`OnModelSequenceLoad`, `RenderScript`'s `OnModelBatchDrawn` and the `wxl.m2` module came with
+`0.1.20`.
 
 ### Gameplay events
 

@@ -733,7 +733,7 @@ same value, in the same type: health is an `int32_t` both ways, as the client ho
 Each service has a typed facade with its name and version sealed in: `wxl::ObjectService`,
 `wxl::ScriptService`, `wxl::StorageService`, `wxl::DataService`, `wxl::NetService`,
 `wxl::UiService`, `wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService`, `wxl::PointService`,
-`wxl::ActionService`
+`wxl::ActionService`, `wxl::M2Service`, `wxl::M2FileService`, `wxl::GxService`
 (`include/wxl/services/*.hpp`, or all of them through `include/wxl/services.hpp`). A facade is stateless -- construct one
 wherever it is needed -- and resolves its table on first use. It tests false while the runtime
 does not publish the service, and every call through it then answers `WXL_E_UNSUPPORTED` or the
@@ -935,6 +935,139 @@ size, encoding and alpha, from its header), `OnShaderLoad` and `OnSoundFileLoad`
 They come on the main thread, and only while someone listens. The bytes they show are the ones
 transforms left; to change bytes, write a transform. `OnModelLoad` still lets a handler answer a
 model's bytes on the main thread, after the transforms of `m2` ran.
+
+### Models: what characters wear, models of your own, model files
+
+Three things about models reach a mod, from the simplest to the most technical. This part of the
+platform is the work of Tyrallis, who contributed it for his own mods: an equipment mod, an outline
+mod and a mod that teaches the client a later expansion's model format.
+
+| Want to | Use | Where |
+|---|---|---|
+| know what a character puts on and takes off | `ObjectScript::OnAppearanceChanged` | every runtime |
+| hang a model of your own on a character, a creature, a mount | `wxl::M2Service`, `wxl::M2Model` | every runtime |
+| reshape a model file as the client loads it | `AssetScript::OnModelParsed` and the stages after it, `wxl::M2FileService` | every runtime |
+| draw a batch of a model again, with your own state | `RenderScript::OnModelBatchDrawn`, `wxl::GxService` | the recompiled client |
+
+The three services are **not safe**: they hand you the client's own models and memory, which no
+check stands between. A native mod names each one it uses in its manifest, as any service.
+
+**What characters wear.** A character's appearance is what the client dresses: every player, every
+NPC dressed from its display, and every copy the interface makes of one (the character panel,
+portraits, character select). `OnAppearanceChanged` comes when one puts an item display on a slot
+(`WXL_APPEARANCE_WORN`, once the client's own models for it hang on the body), is about to take
+one off (`WXL_APPEARANCE_REMOVED`), and when the appearance goes away (`WXL_APPEARANCE_FREED`: drop
+whatever you kept for it). `wearer` names the appearance until then; `model` is its body, what
+items hang on. `wxl::M2Service::ItemDisplay(id)` reads the display's row of `ItemDisplayInfo.dbc`.
+
+**`examples/murloc-hat/src/MurlocHat.cpp`**
+
+```cpp
+    /// Logs the first items characters put on, with the model file the item display names.
+    class Wardrobe final : public wxl::ObjectScript
+    {
+    public:
+        void OnAppearanceChanged(wxl_appearance_change change, void*, void*, uint32_t, uint32_t, uint32_t slot,
+                                 uint32_t display, bool) override
+        {
+            if (change != WXL_APPEARANCE_WORN || told_ >= 10) return;
+            ++told_;
+            const wxl::Expected<wxl_m2_item_display> row   = wxl::M2Service::ItemDisplay(display);
+            const char*                              model = row && *row->model[0] ? row->model[0] : "no model";
+            wxl::Log(WXL_LOG_INFO, kTag, "slot {} puts on display {} ({})", slot, display, model);
+        }
+
+    private:
+        int told_ = 0;
+    };
+```
+
+**A model of your own.** `wxl::M2Model(scene, path)` makes a model of a file in the scene of a
+model you name, and gives it back when the object goes. `Attach(parent, point, flags)` hangs it on
+another model at one of its attachment points: 11 is the top of a character's head, 1 and 2 its
+hands, 32 its hip. The example hangs a murloc on the player's head:
+
+**`examples/murloc-hat/src/MurlocHat.cpp`**
+
+```cpp
+        void OnUpdate(float delta) override
+        {
+            if (hat_ && hat_.Parent()) return; // still on the head
+            wait_ -= delta;
+            if (wait_ > 0.0f) return;
+            wait_ = 1.0f; // one try a second while it is not
+
+            // The model the player draws with: its mount's, while it rides one.
+            void* body = wxl::M2Service::ObjectModel(wxl::Player::Local());
+            if (!body) return; // not in the world yet
+
+            if (!hat_) hat_ = wxl::M2Model(body, "Creature\\Murloc\\Murloc.m2");
+            const wxl_result hung = hat_.Attach(body, kHead);
+            if (hung == WXL_OK)
+                wxl::Log(WXL_LOG_INFO, kTag, "a murloc sits on the player's head");
+            else
+                wxl::Log(WXL_LOG_WARN, kTag, "the murloc could not be hung: {}", wxl::ResultName(hung));
+        }
+```
+
+Why the loop: the client lets your model go whenever the model it hangs on goes -- the player
+changes shape, mounts, leaves the world. `Parent()` then answers null, and the mod hangs it again
+on the new body. Your model stays yours until the `M2Model` goes; the runtime takes it off and
+gives it back when your mod is disabled or unloads.
+
+Two flags change how it hangs. `WXL_M2_ATTACH_ROOT` hangs it even where the parent has no such
+point, at the parent's origin: what a piece skinned to the whole body wants. `WXL_M2_ATTACH_FOLLOW_BONES`
+poses its bones every frame as the parent's bones of the same key bone or name, so a piece made for
+a body's skeleton (a later expansion's collection piece) moves with the body. `AttachToBone(parent,
+point, key_bone, offset)` makes a point the parent's file does not have: every bone of your model
+takes the pose of one key bone of the parent, moved by `offset`. `SetGeosets` shows or hides parts
+of your model, `ReplaceTexture` gives it a texture of your own. The client strips the attachments
+of the copies its interface draws (the character panel, portraits); the runtime hangs yours back on
+them.
+
+**Model files.** A mod that teaches the client a model format reshapes each file as it loads, at
+five stages, all on the main thread:
+
+| Event | When |
+|---|---|
+| `AssetScript::OnModelLoad` | the file is read, nothing parsed: answer other bytes (or convert them with an `m2` transform, above) |
+| `AssetScript::OnModelParsed` | the header is parsed and nothing made from it: point its arrays elsewhere |
+| `AssetScript::OnSkinProfileLoad` | the `.skin` is read, before it is parsed |
+| `AssetScript::OnSkinProfileParsed` | the skin is parsed, before the client sizes its draw state from it |
+| `AssetScript::OnModelSequenceLoad` | an external sequence (`.anim`) is read, before it is parsed against the model |
+
+The parsed header is the file's own layout, and an array in it is two 32-bit words, a count and
+where its elements are -- an address on the stock client, an offset from the array on the
+recompiled one, whose addresses are 64-bit. `wxl::M2FileService` reads and writes an array the same
+way on both:
+
+```cpp
+void OnModelParsed(std::string_view, void* file, void* header, uint32_t) override
+{
+    uint8_t* textures = static_cast<uint8_t*>(header) + 0x50;   // the header's texture array
+    auto     current  = wxl::M2FileService::Elements<uint8_t>(textures);
+    void*    more     = wxl::M2FileService::AllocNear(textures, (current.size() + 1) * 16);
+    // ... copy the 16-byte entries over, add one ...
+    wxl::M2FileService::SetArray(textures, more, current.size() + 1);
+    wxl::M2FileService::AnimateBones(file); // its shadow moves with its bones
+}
+```
+
+`AllocNear(anchor, size)` gives zeroed memory an array at `anchor` can point at: on the recompiled
+client an offset reaches 2 GB at most, which the client's allocator does not promise. It lives for
+the session, as the client's arrays do. `AnimateBones(file)` has the client animate the file's bones
+when it draws their shadows: it skips that for a file whose bones carry none of the flags it counts.
+
+**Drawing a batch again.** On the recompiled client, `RenderScript::OnModelBatchDrawn` comes after
+every batch the device drew, with the numbers of its `DrawIndexedPrimitive` and everything it drew
+with still bound: an outline mod sets a render target and a pixel shader of its own on
+`wxl::GxService::D3d9Device()`, draws the same numbers again, puts the target back and calls
+`wxl::GxService::InvalidateState()` so that the client sends its own state again. It comes for
+every batch of every model, thousands a frame: return at once for the ones you do not want. The
+stock client keeps no record of its draws, so it does not raise it: `wxl::Raises(WXL_EV_ModelBatchDrawn)`
+says so at run time.
+
+These came with abi `0.1.20`.
 
 ### Changing the engine: points
 

@@ -1,0 +1,15 @@
+{
+  "$schema": "../../schema/mod.json",
+  "id": "wxl.murloc-hat",
+  "name": "Murloc Hat",
+  "version": "1.0.0",
+  "abi": "0.1.20",
+  "description": "Hangs a murloc on the player's head through wxl.m2, and logs the first items characters put on, through AppearanceChanged.",
+  "binaries": {
+    "win-x64": "bin/x64/murloc-hat.dll",
+    "win-x86": "bin/x86/murloc-hat.dll"
+  },
+  "requires": [
+    { "service": "wxl.m2", "version": 1 }
+  ]
+}
