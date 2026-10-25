@@ -16,7 +16,10 @@
 --      with what the client's Lua says, then has the player target itself and clears the target;
 --  10. the asset pipeline: bytes it serves read back through the client, a file wxl.test-assets
 --      provides and converts, the add-on it provides that the client loaded, and the engine's
---      asset events seen since the start.
+--      asset events seen since the start;
+--  11. models: the loader's events and the appearance changes phase 4 caused, then wxl.m2 hangs a
+--      murloc on the player's head and takes it off again, and ModelBatchDrawn counts the batches
+--      drawn meanwhile (x64 only).
 --
 -- Each check is one line in the log: PASS, FAIL, SKIP (what it needs is not there: a class
 -- without a cast-time spell, say) or NOTE (an event the server may not send). The chat box shows
@@ -205,6 +208,22 @@ for _, name in ipairs(ASSET_EVENTS) do
             shown[#shown + 1] = type(v) == "string" and #v > 64 and ("<" .. #v .. " bytes>") or tostring(v)
         end
         assetFirst[name] = table.concat(shown, ", ")
+    end)
+end
+
+-- The model events phase 11 checks: counted from the start (the loader's stages, the
+-- appearances phase 4 changed), with the first appearance change as text.
+local MODEL_EVENTS = { AppearanceChanged = "ObjectScript", ModelParsed = "AssetScript",
+                       SkinProfileParsed = "AssetScript", ModelSequenceLoad = "AssetScript" }
+local modelCount, firstAppearance = {}, nil
+for name, family in pairs(MODEL_EVENTS) do
+    modelCount[name] = 0
+    Observe(family, "On" .. name, function(...)
+        modelCount[name] = modelCount[name] + 1
+        if name == "AppearanceChanged" and not firstAppearance then
+            local change, _, _, race, _, slot, display = ...
+            firstAppearance = string.format("%s slot %d display %d race %d", tostring(change), slot, display, race)
+        end
     end)
 end
 
@@ -987,6 +1006,57 @@ step(function()
          "only where a map object stands in view")
     note("event ShaderLoad (" .. assetCount.ShaderLoad .. ")", assetCount.ShaderLoad > 0,
          "shaders may load before the mods do")
+end)
+
+-- 11. Models --------------------------------------------------------------------------------------
+
+local hat, batches, batchId = nil, 0, nil
+
+step(function()
+    print("phase 11: models")
+    result("event ModelParsed (" .. modelCount.ModelParsed .. " since the start)", modelCount.ModelParsed > 0,
+           "no model file was parsed while the mods were loaded")
+    result("event SkinProfileParsed (" .. modelCount.SkinProfileParsed .. ")", modelCount.SkinProfileParsed > 0)
+    note("event ModelSequenceLoad (" .. modelCount.ModelSequenceLoad .. ")", modelCount.ModelSequenceLoad > 0,
+         "only for a model whose sequences live in .anim files")
+    if modelCount.AppearanceChanged > 0 then
+        result("event AppearanceChanged (" .. modelCount.AppearanceChanged .. ")", true, firstAppearance)
+    else
+        skip("event AppearanceChanged", "phase 4 took no item off")
+    end
+
+    local m2 = wxl.m2
+    local body = m2.ObjectModel(wxl.object.LocalPlayer())
+    result("wxl.m2.ObjectModel: the player's model", body ~= nil)
+    if not body then return end
+    local prefix = m2.RacePrefix(wxl.object.LocalPlayer():Race() or 1)
+    note("wxl.m2.RacePrefix of the player's race", type(prefix) == "string", tostring(prefix))
+    local point = m2.AttachmentPoint(body, 11)
+    result("wxl.m2.AttachmentPoint: the head's point in the bind pose", type(point) == "table" and point.z ~= nil,
+           point and string.format("%.2f %.2f %.2f", point.x, point.y, point.z) or "none")
+    hat = m2.CreateModel(body, "Creature\\Murloc\\Murloc.m2")
+    result("wxl.m2.CreateModel: a model of the mod's own", hat ~= nil)
+    if not hat then return end
+    result("Model:Attach on the head", hat:Attach(body, 11, 0) == true)
+    result("Model:Parent is the player's model", hat:Parent() == body)
+    if wxl.runtime.Raises("RenderScript", "ModelBatchDrawn") then
+        batchId = Observe("RenderScript", "OnModelBatchDrawn", function() batches = batches + 1 end)
+    end
+    wait(2)
+end)
+
+step(function()
+    if batchId then
+        Unobserve(batchId)
+        result("event ModelBatchDrawn (" .. batches .. " batches in two seconds)", batches > 0)
+    else
+        note("event ModelBatchDrawn", false, "the stock client does not raise it: x64 only")
+    end
+    if not hat then return end
+    hat:Detach()
+    result("Model:Detach takes it off", hat:Parent() == nil)
+    hat:Release()
+    hat = nil
 end)
 
 -- The end ----------------------------------------------------------------------------------------
