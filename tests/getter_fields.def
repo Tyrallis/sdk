@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
+//
+// Which update field each getter of wxl_object_api reads as it is, for the tests that hold the
+// two tables to each other.
+//
+//   WXL_GETTER_FIELD(member, Kind, Name)   the getter `member` answers wxl::field::Kind::Name
+//                                          (its first element, for an indexed getter) as the
+//                                          client holds it: their types must be the same
+//   WXL_METHOD_FIELD(Method, Kind, Name)   a hand-written Lua method that reads that field
+//                                          (Target reads UNIT_FIELD_TARGET and answers the
+//                                          object it names)
+//
+// A getter that works its value out is not here: unit_race, unit_class, unit_sex and
+// unit_power_type pick a byte of UNIT_FIELD_BYTES_0, gameobject_state, gameobject_type and
+// gameobject_art_kit one of GAMEOBJECT_BYTES_1, gameobject_dynamic_flags the low half of
+// GAMEOBJECT_DYNAMIC, player_visible_item drops the sign the client gives a disarmed weapon's
+// PLAYER_VISIBLE_ITEM_n_ENTRYID, and position and facing come from the movement data.
+//
+// The Lua test also requires that where an object has a method and a field of one name --
+// boar:MaxHealth() and boar:Field("MaxHealth") -- this file pairs them: one name, one value.
+
+#ifndef WXL_METHOD_FIELD
+    #define WXL_METHOD_FIELD(Method, Kind, Name)
+    #define WXL_METHOD_FIELD_DEFAULTED
+#endif
+
+WXL_GETTER_FIELD(entry, Object, Entry)
+WXL_GETTER_FIELD(scale, Object, ScaleX)
+
+WXL_GETTER_FIELD(unit_health, Unit, Health)
+WXL_GETTER_FIELD(unit_max_health, Unit, MaxHealth)
+WXL_GETTER_FIELD(unit_level, Unit, Level)
+WXL_GETTER_FIELD(unit_power, Unit, Power1)
+WXL_GETTER_FIELD(unit_max_power, Unit, MaxPower1)
+WXL_GETTER_FIELD(unit_display_id, Unit, DisplayId)
+WXL_GETTER_FIELD(unit_native_display_id, Unit, NativeDisplayId)
+WXL_GETTER_FIELD(unit_mount_display_id, Unit, MountDisplayId)
+WXL_GETTER_FIELD(unit_faction_template, Unit, FactionTemplate)
+WXL_GETTER_FIELD(unit_flags, Unit, Flags)
+WXL_GETTER_FIELD(unit_flags2, Unit, Flags2)
+WXL_GETTER_FIELD(unit_dynamic_flags, Unit, DynamicFlags)
+WXL_GETTER_FIELD(unit_npc_flags, Unit, NpcFlags)
+WXL_GETTER_FIELD(unit_bounding_radius, Unit, BoundingRadius)
+WXL_GETTER_FIELD(unit_combat_reach, Unit, CombatReach)
+WXL_GETTER_FIELD(unit_charm, Unit, Charm)
+WXL_GETTER_FIELD(unit_summon, Unit, Summon)
+WXL_GETTER_FIELD(unit_charmed_by, Unit, CharmedBy)
+WXL_GETTER_FIELD(unit_summoned_by, Unit, SummonedBy)
+WXL_GETTER_FIELD(unit_created_by, Unit, CreatedBy)
+
+WXL_GETTER_FIELD(player_flags, Player, Flags)
+WXL_GETTER_FIELD(player_guild_id, Player, GuildId)
+WXL_GETTER_FIELD(player_guild_rank, Player, GuildRank)
+WXL_GETTER_FIELD(player_chosen_title, Player, ChosenTitle)
+
+WXL_GETTER_FIELD(item_owner, Item, Owner)
+WXL_GETTER_FIELD(item_contained_in, Item, Contained)
+WXL_GETTER_FIELD(item_creator, Item, Creator)
+WXL_GETTER_FIELD(item_stack_count, Item, StackCount)
+WXL_GETTER_FIELD(item_duration, Item, Duration)
+WXL_GETTER_FIELD(item_flags, Item, Flags)
+WXL_GETTER_FIELD(item_durability, Item, Durability)
+WXL_GETTER_FIELD(item_max_durability, Item, MaxDurability)
+
+WXL_GETTER_FIELD(container_num_slots, Container, NumSlots)
+WXL_GETTER_FIELD(container_slot, Container, Slot1)
+
+WXL_GETTER_FIELD(gameobject_created_by, GameObject, CreatedBy)
+WXL_GETTER_FIELD(gameobject_display_id, GameObject, DisplayId)
+WXL_GETTER_FIELD(gameobject_flags, GameObject, Flags)
+WXL_GETTER_FIELD(gameobject_faction, GameObject, Faction)
+WXL_GETTER_FIELD(gameobject_level, GameObject, Level)
+
+WXL_GETTER_FIELD(dynamic_caster, DynamicObject, Caster)
+WXL_GETTER_FIELD(dynamic_spell_id, DynamicObject, SpellId)
+WXL_GETTER_FIELD(dynamic_radius, DynamicObject, Radius)
+WXL_GETTER_FIELD(dynamic_cast_time, DynamicObject, CastTime)
+
+WXL_GETTER_FIELD(corpse_owner, Corpse, Owner)
+WXL_GETTER_FIELD(corpse_party, Corpse, Party)
+WXL_GETTER_FIELD(corpse_display_id, Corpse, DisplayId)
+WXL_GETTER_FIELD(corpse_guild, Corpse, Guild)
+WXL_GETTER_FIELD(corpse_flags, Corpse, Flags)
+WXL_GETTER_FIELD(corpse_dynamic_flags, Corpse, DynamicFlags)
+
+WXL_METHOD_FIELD(Guid, Object, Guid)
+WXL_METHOD_FIELD(Type, Object, Type)
+WXL_METHOD_FIELD(Target, Unit, Target)
+
+#ifdef WXL_METHOD_FIELD_DEFAULTED
+    #undef WXL_METHOD_FIELD
+    #undef WXL_METHOD_FIELD_DEFAULTED
+#endif

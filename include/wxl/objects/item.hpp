@@ -40,7 +40,7 @@ namespace wxl
         /// Who crafted it, or WXL_GUID_NONE.
         Expected<wxl_guid> CreatorGuid() const { return Read(&wxl_object_api::item_creator); }
 
-        Expected<uint32_t> StackCount() const { return Read(&wxl_object_api::item_stack_count); }
+        Expected<int32_t> StackCount() const { return Read(&wxl_object_api::item_stack_count); }
 
         /// Seconds before it expires; 0 when it does not.
         Expected<uint32_t> Duration() const { return Read(&wxl_object_api::item_duration); }

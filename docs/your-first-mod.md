@@ -631,9 +631,9 @@ object has no such thing (an item has no position in the world), or the runtime 
 there is none.
 
 ```cpp
-const wxl::Expected<uint32_t> health = unit.Health();
-if (health)                         // a value, possibly 0: the unit is dead
-    wxl::Log(WXL_LOG_INFO, "scout", *health == 0 ? "dead" : "alive");
+const wxl::Expected<int32_t> health = unit.Health();
+if (health)                         // a value, 0 or less when the unit is dead
+    wxl::Log(WXL_LOG_INFO, "scout", *health <= 0 ? "dead" : "alive");
 else if (health.IsNotFound())       // the unit is gone
     wxl::Log(WXL_LOG_INFO, "scout", "gone");
 else if (health.IsUnsupported())    // this runtime cannot read units

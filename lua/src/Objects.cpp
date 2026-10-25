@@ -51,6 +51,7 @@ namespace wxl::lua
         // --- pushing what a getter wrote ----------------------------------------------------
 
         void PushValue(lua_State* L, uint32_t value) { lua_pushnumber(L, value); }
+        void PushValue(lua_State* L, int32_t value) { lua_pushnumber(L, value); }
         void PushValue(lua_State* L, float value) { lua_pushnumber(L, value); }
         void PushValue(lua_State* L, wxl_guid value) { PushGuid(L, value); }
         void PushValue(lua_State* L, wxl_vec3 value)

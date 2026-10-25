@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "fake_services.hpp"
+#include "wxl/objects/fields.hpp"
 #include "wxl/host/event_bus.hpp"
 #include "wxl/host/log.hpp"
 #include "wxl/host/manifest.hpp"
@@ -526,7 +527,7 @@ registerForEvent("onInit", function()
     print("by name " .. boar:Field("Health") .. " " .. boar:Field("UNIT_FIELD_HEALTH") .. " " ..
           boar:Field("Unit.Health") .. " at " .. wxl.field.Unit.Health)
     print("bytes " .. table.concat({me:Field("Bytes0")}, ","))
-    print("float " .. boar:Field("Boundingradius") .. " guid " .. me:Field("Target"))
+    print("float " .. boar:Field("BoundingRadius") .. " guid " .. me:Field("Target"))
     print("element " .. boar:Field("Resistances", 6) .. " of " .. #boar:Fields("Resistances"))
     print("count " .. me:FieldCount() .. " " .. boar:FieldCount() .. " " .. chest:FieldCount())
     print("chest " .. chest:Field("GameObject.Flags") .. " " .. chest:Field("OBJECT_FIELD_ENTRY"))
@@ -865,6 +866,49 @@ int main(int argc, char** argv)
         };
         const std::vector<std::string> real = names::LuaNames(rows);
         Check(names::Clash(rows, real).empty(), "the real rows leave no name ambiguous");
+
+        // A method and a field of one name on one object read the same value: boar:MaxHealth()
+        // and boar:Field("MaxHealth"). getter_fields.def says which field each one reads.
+        struct Pair
+        {
+            const char* method; ///< a row's member, or a hand-written method's name
+            const char* field;  ///< the client's name
+        };
+        const Pair pairs[] = {
+#define WXL_GETTER_FIELD(member, Kind, Name) {#member, wxl::field::Kind::Name.name},
+#define WXL_METHOD_FIELD(Method, Kind, Name) {#Method, wxl::field::Kind::Name.name},
+#include "getter_fields.def"
+#undef WXL_METHOD_FIELD
+#undef WXL_GETTER_FIELD
+        };
+        const auto paired = [&](const char* method, const wxl::field::Row& field) {
+            for (const Pair& pair : pairs)
+                if (std::strcmp(pair.method, method) == 0 && std::strcmp(pair.field, field.name) == 0)
+                    return true;
+            return false;
+        };
+        std::string mismatched;
+        for (uint32_t type = WXL_OBJECT_ITEM; type <= WXL_OBJECT_CORPSE; ++type)
+        {
+            const std::string kind = names::TypeName(type);
+            for (size_t i = 0; i < rows.size(); ++i)
+            {
+                if (!(rows[i].kinds & names::KindBit(static_cast<wxl_object_type>(type)))) continue;
+                const wxl::field::Row* field = wxl::field::Find(type, real[i]);
+                if (field && !paired(rows[i].member, *field))
+                    mismatched += kind + ":" + real[i] + "() reads " + rows[i].member + ", Field(\"" +
+                                  real[i] + "\") " + field->name + "; ";
+            }
+            for (const char* own : names::kHandWritten)
+            {
+                const wxl::field::Row* field = wxl::field::Find(type, own);
+                if (field && !paired(own, *field))
+                    mismatched += kind + ":" + own + "() is hand-written, Field(\"" + own + "\") " +
+                                  field->name + "; ";
+            }
+        }
+        Check(mismatched.empty(), "a method and a field of one name read the same value");
+        if (!mismatched.empty()) std::printf("        %s\n", mismatched.c_str());
 
         const std::vector<names::Member> made = {
             {"gameobject_type", names::kGameObjects}, {"unit_flags", names::kUnits},

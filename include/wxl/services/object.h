@@ -70,7 +70,8 @@ typedef struct wxl_object_api
 
     // --- units ------------------------------------------------------------------------------
 
-    wxl_result(WXL_CALL* unit_health)(wxl_handle unit, uint32_t* out);
+    /// Signed, as the client holds UNIT_FIELD_HEALTH and tests it (`<= 0` is dead).
+    wxl_result(WXL_CALL* unit_health)(wxl_handle unit, int32_t* out);
     wxl_result(WXL_CALL* unit_max_health)(wxl_handle unit, uint32_t* out);
     wxl_result(WXL_CALL* unit_level)(wxl_handle unit, uint32_t* out);
 
@@ -145,7 +146,9 @@ typedef struct wxl_object_api
     wxl_result(WXL_CALL* player_guild_id)(wxl_handle player, uint32_t* out);
     wxl_result(WXL_CALL* player_guild_rank)(wxl_handle player, uint32_t* out);
     wxl_result(WXL_CALL* player_chosen_title)(wxl_handle player, uint32_t* out);
-    /// The item shown in an equipment slot (0 head .. 18 tabard); 0 when the slot is empty.
+    /// The item shown in an equipment slot (0 head .. 18 tabard); 0 when the slot is empty. The
+    /// client keeps a disarmed weapon's id negated in PLAYER_VISIBLE_ITEM_n_ENTRYID; this answers
+    /// the item, without the sign, which the field itself still carries.
     wxl_result(WXL_CALL* player_visible_item)(wxl_handle player, uint32_t slot, uint32_t* out);
 
     // --- items, containers included ---------------------------------------------------------
@@ -154,7 +157,8 @@ typedef struct wxl_object_api
     /// The bag holding the item, or 0 when it sits in the backpack or is equipped.
     wxl_result(WXL_CALL* item_contained_in)(wxl_handle item, wxl_guid* out);
     wxl_result(WXL_CALL* item_creator)(wxl_handle item, wxl_guid* out);
-    wxl_result(WXL_CALL* item_stack_count)(wxl_handle item, uint32_t* out);
+    /// Signed, as the client holds ITEM_FIELD_STACK_COUNT.
+    wxl_result(WXL_CALL* item_stack_count)(wxl_handle item, int32_t* out);
     /// Seconds left before the item expires; 0 when it does not.
     wxl_result(WXL_CALL* item_duration)(wxl_handle item, uint32_t* out);
     wxl_result(WXL_CALL* item_flags)(wxl_handle item, uint32_t* out);

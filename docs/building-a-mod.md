@@ -247,8 +247,8 @@ Every read through a service answers `wxl::Expected<T>` (`include/wxl/expected.h
 or the `wxl_result` that stood in for it.
 
 ```cpp
-wxl::Expected<uint32_t> hp = unit.Health();
-if (hp)                        // a value; 0 means the unit is dead
+wxl::Expected<int32_t> hp = unit.Health();
+if (hp)                        // a value; 0 or less means the unit is dead
 else if (hp.IsNotFound())      // the handle is stale: the unit is gone
 else if (hp.IsUnsupported())   // this runtime has no object service
 ```

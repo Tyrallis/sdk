@@ -29,10 +29,10 @@ namespace
             // A read answers with the value or with why there is none: a dead unit reads as 0,
             // a gone one as not found, a runtime without the service as unsupported.
             const wxl::Expected<std::string> name   = me.Name();
-            const wxl::Expected<uint32_t>    health = me.Health();
+            const wxl::Expected<int32_t>     health = me.Health();
             if (name && health)
             {
-                std::snprintf(line, sizeof(line), "local player %s, %u/%u hp", name->c_str(), *health,
+                std::snprintf(line, sizeof(line), "local player %s, %d/%u hp", name->c_str(), *health,
                               me.MaxHealth().ValueOr(0));
                 wxl::Log(WXL_LOG_INFO, kTag, line);
             }

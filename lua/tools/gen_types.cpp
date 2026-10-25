@@ -160,7 +160,7 @@ namespace
 
     const char* ValueType(const char* type)
     {
-        if (std::strcmp(type, "uint32_t") == 0) return "integer";
+        if (std::strcmp(type, "uint32_t") == 0 || std::strcmp(type, "int32_t") == 0) return "integer";
         if (std::strcmp(type, "float") == 0) return "number";
         if (std::strcmp(type, "wxl_guid") == 0) return "string";
         if (std::strcmp(type, "wxl_vec3") == 0) return "wxl.Vec3";

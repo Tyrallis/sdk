@@ -746,7 +746,7 @@ int main()
         const wxl::Unit unit(wxltest::FakeObjects::kPlayer);
         Check(!unit.IsValid() && !unit, "no object is valid without the service");
 
-        const wxl::Expected<uint32_t> health = unit.Health();
+        const wxl::Expected<int32_t> health = unit.Health();
         Check(!health && health.IsUnsupported() && health.Error() == WXL_E_UNSUPPORTED,
               "a read without the service is unsupported, not zero");
         Check(health.ValueOr(7) == 7, "ValueOr answers the fallback");
@@ -807,14 +807,14 @@ int main()
         Check(me.IsValid() && me.Handle() == FakeObjects::kPlayer, "the local player resolves");
         Check(me.Type() && *me.Type() == WXL_OBJECT_PLAYER, "and reports its type");
 
-        const wxl::Expected<uint32_t> dead = me.Health();
+        const wxl::Expected<int32_t> dead = me.Health();
         Check(dead && *dead == 0, "a dead unit reads as a value of zero");
         Check(me.MaxHealth().ValueOr(0) == 5000 && me.Level().ValueOr(0) == 80, "other reads arrive");
         Check(me.HealthFraction() && *me.HealthFraction() == 0.0f, "a fraction of zero is a value");
 
         const wxl::Unit stale(FakeObjects::kStale);
         Check(!stale.IsValid(), "a stale handle is not valid");
-        const wxl::Expected<uint32_t> gone = stale.Health();
+        const wxl::Expected<int32_t> gone = stale.Health();
         Check(!gone && gone.IsNotFound(), "a read through a stale handle is absent, not zero");
         Check(gone.Error() == WXL_E_NOT_FOUND, "and says it is not found");
         Check(stale.Name().IsNotFound() && stale.Position().IsNotFound() &&
@@ -922,7 +922,7 @@ int main()
         Check(health && *health == 90, "a field reads through its constant, as the type its row says");
         const wxl::Expected<std::array<uint8_t, 4>> bytes = me.Field(wxl::field::Unit::Bytes0);
         Check(bytes && (*bytes)[0] == 1 && (*bytes)[1] == 2 && (*bytes)[3] == 1, "a field of bytes, low first");
-        const wxl::Expected<float> radius = boar.Field(wxl::field::Unit::Boundingradius);
+        const wxl::Expected<float> radius = boar.Field(wxl::field::Unit::BoundingRadius);
         Check(radius && *radius == 1.5f, "a float");
         const wxl::Expected<wxl_guid> target = me.Field(wxl::field::Unit::Target);
         Check(target && *target == 0x200, "a guid, from its two dwords");
@@ -951,7 +951,7 @@ int main()
                   FakeObjects::Watches().size() == 2 && FakeObjects::Watches()[0].type == WXL_OBJECT_UNIT &&
                   FakeObjects::Watches()[1].type == WXL_OBJECT_PLAYER && FakeObjects::Watches()[1].count == 2,
               "Watch asks for the field's kind, or the type named, over the field's dwords");
-        Check(objects.Watch(wxl::field::Unit::Createdby) == WXL_E_UNSUPPORTED, "and passes on a refusal");
+        Check(objects.Watch(wxl::field::Unit::CreatedBy) == WXL_E_UNSUPPORTED, "and passes on a refusal");
 
         struct Changes final : wxl::ObjectScript
         {

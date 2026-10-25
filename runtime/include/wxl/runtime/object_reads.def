@@ -43,7 +43,7 @@ WXL_OBJECT_READ(Any, scale,    Scale,    float)
 
 // --- Units and players ---------------------------------------------------------------------
 
-WXL_OBJECT_FIELD(Units, unit_health,            UnitHealth,          uint32_t)
+WXL_OBJECT_FIELD(Units, unit_health,            UnitHealth,          int32_t)
 WXL_OBJECT_FIELD(Units, unit_max_health,        UnitMaxHealth,       uint32_t)
 WXL_OBJECT_FIELD(Units, unit_level,             UnitLevel,           uint32_t)
 WXL_OBJECT_READ_AT(Units, unit_power,           UnitPower,           uint32_t)
@@ -81,7 +81,7 @@ WXL_OBJECT_READ_AT(Players, player_visible_item, PlayerVisibleItem, uint32_t)
 WXL_OBJECT_FIELD(Items, item_owner,          ItemOwner,         wxl_guid)
 WXL_OBJECT_FIELD(Items, item_contained_in,   ItemContainedIn,   wxl_guid)
 WXL_OBJECT_FIELD(Items, item_creator,        ItemCreator,       wxl_guid)
-WXL_OBJECT_FIELD(Items, item_stack_count,    ItemStackCount,    uint32_t)
+WXL_OBJECT_FIELD(Items, item_stack_count,    ItemStackCount,    int32_t)
 WXL_OBJECT_FIELD(Items, item_duration,       ItemDuration,      uint32_t)
 WXL_OBJECT_FIELD(Items, item_flags,          ItemFlags,         uint32_t)
 WXL_OBJECT_FIELD(Items, item_durability,     ItemDurability,    uint32_t)

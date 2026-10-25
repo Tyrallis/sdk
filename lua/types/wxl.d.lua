@@ -38,7 +38,7 @@
 ---| "ITEM_FIELD_CREATOR"
 ---| "Item.Creator"
 ---| "ITEM_FIELD_GIFTCREATOR"
----| "Item.Giftcreator"
+---| "Item.GiftCreator"
 ---| "ITEM_FIELD_STACK_COUNT"
 ---| "Item.StackCount"
 ---| "ITEM_FIELD_DURATION"
@@ -102,7 +102,7 @@
 ---| "ITEM_FIELD_DURABILITY"
 ---| "Item.Durability"
 ---| "ITEM_FIELD_MAXDURABILITY"
----| "Item.Maxdurability"
+---| "Item.MaxDurability"
 ---| "ITEM_FIELD_CREATE_PLAYED_TIME"
 ---| "Item.CreatePlayedTime"
 ---| "ITEM_FIELD_PAD"
@@ -120,11 +120,11 @@
 ---| "UNIT_FIELD_CRITTER"
 ---| "Unit.Critter"
 ---| "UNIT_FIELD_CHARMEDBY"
----| "Unit.Charmedby"
+---| "Unit.CharmedBy"
 ---| "UNIT_FIELD_SUMMONEDBY"
----| "Unit.Summonedby"
+---| "Unit.SummonedBy"
 ---| "UNIT_FIELD_CREATEDBY"
----| "Unit.Createdby"
+---| "Unit.CreatedBy"
 ---| "UNIT_FIELD_TARGET"
 ---| "Unit.Target"
 ---| "UNIT_FIELD_CHANNEL_OBJECT"
@@ -150,21 +150,21 @@
 ---| "UNIT_FIELD_POWER7"
 ---| "Unit.Power7"
 ---| "UNIT_FIELD_MAXHEALTH"
----| "Unit.Maxhealth"
+---| "Unit.MaxHealth"
 ---| "UNIT_FIELD_MAXPOWER1"
----| "Unit.Maxpower1"
+---| "Unit.MaxPower1"
 ---| "UNIT_FIELD_MAXPOWER2"
----| "Unit.Maxpower2"
+---| "Unit.MaxPower2"
 ---| "UNIT_FIELD_MAXPOWER3"
----| "Unit.Maxpower3"
+---| "Unit.MaxPower3"
 ---| "UNIT_FIELD_MAXPOWER4"
----| "Unit.Maxpower4"
+---| "Unit.MaxPower4"
 ---| "UNIT_FIELD_MAXPOWER5"
----| "Unit.Maxpower5"
+---| "Unit.MaxPower5"
 ---| "UNIT_FIELD_MAXPOWER6"
----| "Unit.Maxpower6"
+---| "Unit.MaxPower6"
 ---| "UNIT_FIELD_MAXPOWER7"
----| "Unit.Maxpower7"
+---| "Unit.MaxPower7"
 ---| "UNIT_FIELD_POWER_REGEN_FLAT_MODIFIER"
 ---| "Unit.PowerRegenFlatModifier"
 ---| "UNIT_FIELD_POWER_REGEN_INTERRUPTED_FLAT_MODIFIER"
@@ -172,7 +172,7 @@
 ---| "UNIT_FIELD_LEVEL"
 ---| "Unit.Level"
 ---| "UNIT_FIELD_FACTIONTEMPLATE"
----| "Unit.Factiontemplate"
+---| "Unit.FactionTemplate"
 ---| "UNIT_VIRTUAL_ITEM_SLOT_ID"
 ---| "Unit.VirtualItemSlotId"
 ---| "UNIT_FIELD_FLAGS"
@@ -180,39 +180,39 @@
 ---| "UNIT_FIELD_FLAGS_2"
 ---| "Unit.Flags2"
 ---| "UNIT_FIELD_AURASTATE"
----| "Unit.Aurastate"
+---| "Unit.AuraState"
 ---| "UNIT_FIELD_BASEATTACKTIME"
----| "Unit.Baseattacktime"
+---| "Unit.BaseAttackTime"
 ---| "UNIT_FIELD_RANGEDATTACKTIME"
----| "Unit.Rangedattacktime"
+---| "Unit.RangedAttackTime"
 ---| "UNIT_FIELD_BOUNDINGRADIUS"
----| "Unit.Boundingradius"
+---| "Unit.BoundingRadius"
 ---| "UNIT_FIELD_COMBATREACH"
----| "Unit.Combatreach"
+---| "Unit.CombatReach"
 ---| "UNIT_FIELD_DISPLAYID"
----| "Unit.Displayid"
+---| "Unit.DisplayId"
 ---| "UNIT_FIELD_NATIVEDISPLAYID"
----| "Unit.Nativedisplayid"
+---| "Unit.NativeDisplayId"
 ---| "UNIT_FIELD_MOUNTDISPLAYID"
----| "Unit.Mountdisplayid"
+---| "Unit.MountDisplayId"
 ---| "UNIT_FIELD_MINDAMAGE"
----| "Unit.Mindamage"
+---| "Unit.MinDamage"
 ---| "UNIT_FIELD_MAXDAMAGE"
----| "Unit.Maxdamage"
+---| "Unit.MaxDamage"
 ---| "UNIT_FIELD_MINOFFHANDDAMAGE"
----| "Unit.Minoffhanddamage"
+---| "Unit.MinOffhandDamage"
 ---| "UNIT_FIELD_MAXOFFHANDDAMAGE"
----| "Unit.Maxoffhanddamage"
+---| "Unit.MaxOffhandDamage"
 ---| "UNIT_FIELD_BYTES_1"
 ---| "Unit.Bytes1"
 ---| "UNIT_FIELD_PETNUMBER"
----| "Unit.Petnumber"
+---| "Unit.PetNumber"
 ---| "UNIT_FIELD_PET_NAME_TIMESTAMP"
 ---| "Unit.PetNameTimestamp"
 ---| "UNIT_FIELD_PETEXPERIENCE"
----| "Unit.Petexperience"
+---| "Unit.PetExperience"
 ---| "UNIT_FIELD_PETNEXTLEVELEXP"
----| "Unit.Petnextlevelexp"
+---| "Unit.PetNextLevelExp"
 ---| "UNIT_DYNAMIC_FLAGS"
 ---| "Unit.DynamicFlags"
 ---| "UNIT_MOD_CAST_SPEED"
@@ -222,7 +222,7 @@
 ---| "UNIT_NPC_FLAGS"
 ---| "Unit.NpcFlags"
 ---| "UNIT_NPC_EMOTESTATE"
----| "Unit.NpcEmotestate"
+---| "Unit.NpcEmoteState"
 ---| "UNIT_FIELD_STAT0"
 ---| "Unit.Stat0"
 ---| "UNIT_FIELD_STAT1"
@@ -234,31 +234,31 @@
 ---| "UNIT_FIELD_STAT4"
 ---| "Unit.Stat4"
 ---| "UNIT_FIELD_POSSTAT0"
----| "Unit.Posstat0"
+---| "Unit.PosStat0"
 ---| "UNIT_FIELD_POSSTAT1"
----| "Unit.Posstat1"
+---| "Unit.PosStat1"
 ---| "UNIT_FIELD_POSSTAT2"
----| "Unit.Posstat2"
+---| "Unit.PosStat2"
 ---| "UNIT_FIELD_POSSTAT3"
----| "Unit.Posstat3"
+---| "Unit.PosStat3"
 ---| "UNIT_FIELD_POSSTAT4"
----| "Unit.Posstat4"
+---| "Unit.PosStat4"
 ---| "UNIT_FIELD_NEGSTAT0"
----| "Unit.Negstat0"
+---| "Unit.NegStat0"
 ---| "UNIT_FIELD_NEGSTAT1"
----| "Unit.Negstat1"
+---| "Unit.NegStat1"
 ---| "UNIT_FIELD_NEGSTAT2"
----| "Unit.Negstat2"
+---| "Unit.NegStat2"
 ---| "UNIT_FIELD_NEGSTAT3"
----| "Unit.Negstat3"
+---| "Unit.NegStat3"
 ---| "UNIT_FIELD_NEGSTAT4"
----| "Unit.Negstat4"
+---| "Unit.NegStat4"
 ---| "UNIT_FIELD_RESISTANCES"
 ---| "Unit.Resistances"
 ---| "UNIT_FIELD_RESISTANCEBUFFMODSPOSITIVE"
----| "Unit.Resistancebuffmodspositive"
+---| "Unit.ResistanceBuffModsPositive"
 ---| "UNIT_FIELD_RESISTANCEBUFFMODSNEGATIVE"
----| "Unit.Resistancebuffmodsnegative"
+---| "Unit.ResistanceBuffModsNegative"
 ---| "UNIT_FIELD_BASE_MANA"
 ---| "Unit.BaseMana"
 ---| "UNIT_FIELD_BASE_HEALTH"
@@ -278,17 +278,17 @@
 ---| "UNIT_FIELD_RANGED_ATTACK_POWER_MULTIPLIER"
 ---| "Unit.RangedAttackPowerMultiplier"
 ---| "UNIT_FIELD_MINRANGEDDAMAGE"
----| "Unit.Minrangeddamage"
+---| "Unit.MinRangedDamage"
 ---| "UNIT_FIELD_MAXRANGEDDAMAGE"
----| "Unit.Maxrangeddamage"
+---| "Unit.MaxRangedDamage"
 ---| "UNIT_FIELD_POWER_COST_MODIFIER"
 ---| "Unit.PowerCostModifier"
 ---| "UNIT_FIELD_POWER_COST_MULTIPLIER"
 ---| "Unit.PowerCostMultiplier"
 ---| "UNIT_FIELD_MAXHEALTHMODIFIER"
----| "Unit.Maxhealthmodifier"
+---| "Unit.MaxHealthModifier"
 ---| "UNIT_FIELD_HOVERHEIGHT"
----| "Unit.Hoverheight"
+---| "Unit.HoverHeight"
 ---| "UNIT_FIELD_PADDING"
 ---| "Unit.Padding"
 ---| "PLAYER_DUEL_ARBITER"
@@ -296,9 +296,9 @@
 ---| "PLAYER_FLAGS"
 ---| "Player.Flags"
 ---| "PLAYER_GUILDID"
----| "Player.Guildid"
+---| "Player.GuildId"
 ---| "PLAYER_GUILDRANK"
----| "Player.Guildrank"
+---| "Player.GuildRank"
 ---| "PLAYER_BYTES"
 ---| "Player.Bytes"
 ---| "PLAYER_BYTES_2"
@@ -510,79 +510,79 @@
 ---| "PLAYER_QUEST_LOG_25_5"
 ---| "Player.QuestLog25_5"
 ---| "PLAYER_VISIBLE_ITEM_1_ENTRYID"
----| "Player.VisibleItem1Entryid"
+---| "Player.VisibleItem1EntryId"
 ---| "PLAYER_VISIBLE_ITEM_1_ENCHANTMENT"
 ---| "Player.VisibleItem1Enchantment"
 ---| "PLAYER_VISIBLE_ITEM_2_ENTRYID"
----| "Player.VisibleItem2Entryid"
+---| "Player.VisibleItem2EntryId"
 ---| "PLAYER_VISIBLE_ITEM_2_ENCHANTMENT"
 ---| "Player.VisibleItem2Enchantment"
 ---| "PLAYER_VISIBLE_ITEM_3_ENTRYID"
----| "Player.VisibleItem3Entryid"
+---| "Player.VisibleItem3EntryId"
 ---| "PLAYER_VISIBLE_ITEM_3_ENCHANTMENT"
 ---| "Player.VisibleItem3Enchantment"
 ---| "PLAYER_VISIBLE_ITEM_4_ENTRYID"
----| "Player.VisibleItem4Entryid"
+---| "Player.VisibleItem4EntryId"
 ---| "PLAYER_VISIBLE_ITEM_4_ENCHANTMENT"
 ---| "Player.VisibleItem4Enchantment"
 ---| "PLAYER_VISIBLE_ITEM_5_ENTRYID"
----| "Player.VisibleItem5Entryid"
+---| "Player.VisibleItem5EntryId"
 ---| "PLAYER_VISIBLE_ITEM_5_ENCHANTMENT"
 ---| "Player.VisibleItem5Enchantment"
 ---| "PLAYER_VISIBLE_ITEM_6_ENTRYID"
----| "Player.VisibleItem6Entryid"
+---| "Player.VisibleItem6EntryId"
 ---| "PLAYER_VISIBLE_ITEM_6_ENCHANTMENT"
 ---| "Player.VisibleItem6Enchantment"
 ---| "PLAYER_VISIBLE_ITEM_7_ENTRYID"
----| "Player.VisibleItem7Entryid"
+---| "Player.VisibleItem7EntryId"
 ---| "PLAYER_VISIBLE_ITEM_7_ENCHANTMENT"
 ---| "Player.VisibleItem7Enchantment"
 ---| "PLAYER_VISIBLE_ITEM_8_ENTRYID"
----| "Player.VisibleItem8Entryid"
+---| "Player.VisibleItem8EntryId"
 ---| "PLAYER_VISIBLE_ITEM_8_ENCHANTMENT"
 ---| "Player.VisibleItem8Enchantment"
 ---| "PLAYER_VISIBLE_ITEM_9_ENTRYID"
----| "Player.VisibleItem9Entryid"
+---| "Player.VisibleItem9EntryId"
 ---| "PLAYER_VISIBLE_ITEM_9_ENCHANTMENT"
 ---| "Player.VisibleItem9Enchantment"
 ---| "PLAYER_VISIBLE_ITEM_10_ENTRYID"
----| "Player.VisibleItem10Entryid"
+---| "Player.VisibleItem10EntryId"
 ---| "PLAYER_VISIBLE_ITEM_10_ENCHANTMENT"
 ---| "Player.VisibleItem10Enchantment"
 ---| "PLAYER_VISIBLE_ITEM_11_ENTRYID"
----| "Player.VisibleItem11Entryid"
+---| "Player.VisibleItem11EntryId"
 ---| "PLAYER_VISIBLE_ITEM_11_ENCHANTMENT"
 ---| "Player.VisibleItem11Enchantment"
 ---| "PLAYER_VISIBLE_ITEM_12_ENTRYID"
----| "Player.VisibleItem12Entryid"
+---| "Player.VisibleItem12EntryId"
 ---| "PLAYER_VISIBLE_ITEM_12_ENCHANTMENT"
 ---| "Player.VisibleItem12Enchantment"
 ---| "PLAYER_VISIBLE_ITEM_13_ENTRYID"
----| "Player.VisibleItem13Entryid"
+---| "Player.VisibleItem13EntryId"
 ---| "PLAYER_VISIBLE_ITEM_13_ENCHANTMENT"
 ---| "Player.VisibleItem13Enchantment"
 ---| "PLAYER_VISIBLE_ITEM_14_ENTRYID"
----| "Player.VisibleItem14Entryid"
+---| "Player.VisibleItem14EntryId"
 ---| "PLAYER_VISIBLE_ITEM_14_ENCHANTMENT"
 ---| "Player.VisibleItem14Enchantment"
 ---| "PLAYER_VISIBLE_ITEM_15_ENTRYID"
----| "Player.VisibleItem15Entryid"
+---| "Player.VisibleItem15EntryId"
 ---| "PLAYER_VISIBLE_ITEM_15_ENCHANTMENT"
 ---| "Player.VisibleItem15Enchantment"
 ---| "PLAYER_VISIBLE_ITEM_16_ENTRYID"
----| "Player.VisibleItem16Entryid"
+---| "Player.VisibleItem16EntryId"
 ---| "PLAYER_VISIBLE_ITEM_16_ENCHANTMENT"
 ---| "Player.VisibleItem16Enchantment"
 ---| "PLAYER_VISIBLE_ITEM_17_ENTRYID"
----| "Player.VisibleItem17Entryid"
+---| "Player.VisibleItem17EntryId"
 ---| "PLAYER_VISIBLE_ITEM_17_ENCHANTMENT"
 ---| "Player.VisibleItem17Enchantment"
 ---| "PLAYER_VISIBLE_ITEM_18_ENTRYID"
----| "Player.VisibleItem18Entryid"
+---| "Player.VisibleItem18EntryId"
 ---| "PLAYER_VISIBLE_ITEM_18_ENCHANTMENT"
 ---| "Player.VisibleItem18Enchantment"
 ---| "PLAYER_VISIBLE_ITEM_19_ENTRYID"
----| "Player.VisibleItem19Entryid"
+---| "Player.VisibleItem19EntryId"
 ---| "PLAYER_VISIBLE_ITEM_19_ENCHANTMENT"
 ---| "Player.VisibleItem19Enchantment"
 ---| "PLAYER_CHOSEN_TITLE"
@@ -598,15 +598,15 @@
 ---| "PLAYER_FIELD_BANK_SLOT_1"
 ---| "Player.BankSlot1"
 ---| "PLAYER_FIELD_BANKBAG_SLOT_1"
----| "Player.BankbagSlot1"
+---| "Player.BankBagSlot1"
 ---| "PLAYER_FIELD_VENDORBUYBACK_SLOT_1"
----| "Player.VendorbuybackSlot1"
+---| "Player.VendorBuybackSlot1"
 ---| "PLAYER_FIELD_KEYRING_SLOT_1"
 ---| "Player.KeyringSlot1"
 ---| "PLAYER_FIELD_CURRENCYTOKEN_SLOT_1"
----| "Player.CurrencytokenSlot1"
+---| "Player.CurrencyTokenSlot1"
 ---| "PLAYER_FARSIGHT"
----| "Player.Farsight"
+---| "Player.FarSight"
 ---| "PLAYER__FIELD_KNOWN_TITLES"
 ---| "Player.KnownTitles"
 ---| "PLAYER__FIELD_KNOWN_TITLES1"
@@ -692,7 +692,7 @@
 ---| "PLAYER_FIELD_YESTERDAY_CONTRIBUTION"
 ---| "Player.YesterdayContribution"
 ---| "PLAYER_FIELD_LIFETIME_HONORBALE_KILLS"
----| "Player.LifetimeHonorbaleKills"
+---| "Player.LifetimeHonorableKills"
 ---| "PLAYER_FIELD_BYTES2"
 ---| "Player.FieldBytes2"
 ---| "PLAYER_FIELD_WATCHED_FACTION_INDEX"
@@ -724,11 +724,11 @@
 ---| "OBJECT_FIELD_CREATED_BY"
 ---| "GameObject.CreatedBy"
 ---| "GAMEOBJECT_DISPLAYID"
----| "GameObject.Displayid"
+---| "GameObject.DisplayId"
 ---| "GAMEOBJECT_FLAGS"
 ---| "GameObject.Flags"
 ---| "GAMEOBJECT_PARENTROTATION"
----| "GameObject.Parentrotation"
+---| "GameObject.ParentRotation"
 ---| "GAMEOBJECT_DYNAMIC"
 ---| "GameObject.Dynamic"
 ---| "GAMEOBJECT_FACTION"
@@ -742,11 +742,11 @@
 ---| "DYNAMICOBJECT_BYTES"
 ---| "DynamicObject.Bytes"
 ---| "DYNAMICOBJECT_SPELLID"
----| "DynamicObject.Spellid"
+---| "DynamicObject.SpellId"
 ---| "DYNAMICOBJECT_RADIUS"
 ---| "DynamicObject.Radius"
 ---| "DYNAMICOBJECT_CASTTIME"
----| "DynamicObject.Casttime"
+---| "DynamicObject.CastTime"
 ---| "CORPSE_FIELD_OWNER"
 ---| "Corpse.Owner"
 ---| "CORPSE_FIELD_PARTY"
@@ -781,7 +781,7 @@
 ---@field Owner integer ITEM_FIELD_OWNER
 ---@field Contained integer ITEM_FIELD_CONTAINED
 ---@field Creator integer ITEM_FIELD_CREATOR
----@field Giftcreator integer ITEM_FIELD_GIFTCREATOR
+---@field GiftCreator integer ITEM_FIELD_GIFTCREATOR
 ---@field StackCount integer ITEM_FIELD_STACK_COUNT
 ---@field Duration integer ITEM_FIELD_DURATION
 ---@field SpellCharges integer ITEM_FIELD_SPELL_CHARGES
@@ -813,7 +813,7 @@
 ---@field PropertySeed integer ITEM_FIELD_PROPERTY_SEED
 ---@field RandomPropertiesId integer ITEM_FIELD_RANDOM_PROPERTIES_ID
 ---@field Durability integer ITEM_FIELD_DURABILITY
----@field Maxdurability integer ITEM_FIELD_MAXDURABILITY
+---@field MaxDurability integer ITEM_FIELD_MAXDURABILITY
 ---@field CreatePlayedTime integer ITEM_FIELD_CREATE_PLAYED_TIME
 ---@field Pad integer ITEM_FIELD_PAD
 
@@ -828,9 +828,9 @@
 ---@field Charm integer UNIT_FIELD_CHARM
 ---@field Summon integer UNIT_FIELD_SUMMON
 ---@field Critter integer UNIT_FIELD_CRITTER
----@field Charmedby integer UNIT_FIELD_CHARMEDBY
----@field Summonedby integer UNIT_FIELD_SUMMONEDBY
----@field Createdby integer UNIT_FIELD_CREATEDBY
+---@field CharmedBy integer UNIT_FIELD_CHARMEDBY
+---@field SummonedBy integer UNIT_FIELD_SUMMONEDBY
+---@field CreatedBy integer UNIT_FIELD_CREATEDBY
 ---@field Target integer UNIT_FIELD_TARGET
 ---@field ChannelObject integer UNIT_FIELD_CHANNEL_OBJECT
 ---@field ChannelSpell integer UNIT_CHANNEL_SPELL
@@ -843,61 +843,61 @@
 ---@field Power5 integer UNIT_FIELD_POWER5
 ---@field Power6 integer UNIT_FIELD_POWER6
 ---@field Power7 integer UNIT_FIELD_POWER7
----@field Maxhealth integer UNIT_FIELD_MAXHEALTH
----@field Maxpower1 integer UNIT_FIELD_MAXPOWER1
----@field Maxpower2 integer UNIT_FIELD_MAXPOWER2
----@field Maxpower3 integer UNIT_FIELD_MAXPOWER3
----@field Maxpower4 integer UNIT_FIELD_MAXPOWER4
----@field Maxpower5 integer UNIT_FIELD_MAXPOWER5
----@field Maxpower6 integer UNIT_FIELD_MAXPOWER6
----@field Maxpower7 integer UNIT_FIELD_MAXPOWER7
+---@field MaxHealth integer UNIT_FIELD_MAXHEALTH
+---@field MaxPower1 integer UNIT_FIELD_MAXPOWER1
+---@field MaxPower2 integer UNIT_FIELD_MAXPOWER2
+---@field MaxPower3 integer UNIT_FIELD_MAXPOWER3
+---@field MaxPower4 integer UNIT_FIELD_MAXPOWER4
+---@field MaxPower5 integer UNIT_FIELD_MAXPOWER5
+---@field MaxPower6 integer UNIT_FIELD_MAXPOWER6
+---@field MaxPower7 integer UNIT_FIELD_MAXPOWER7
 ---@field PowerRegenFlatModifier integer UNIT_FIELD_POWER_REGEN_FLAT_MODIFIER
 ---@field PowerRegenInterruptedFlatModifier integer UNIT_FIELD_POWER_REGEN_INTERRUPTED_FLAT_MODIFIER
 ---@field Level integer UNIT_FIELD_LEVEL
----@field Factiontemplate integer UNIT_FIELD_FACTIONTEMPLATE
+---@field FactionTemplate integer UNIT_FIELD_FACTIONTEMPLATE
 ---@field VirtualItemSlotId integer UNIT_VIRTUAL_ITEM_SLOT_ID
 ---@field Flags integer UNIT_FIELD_FLAGS
 ---@field Flags2 integer UNIT_FIELD_FLAGS_2
----@field Aurastate integer UNIT_FIELD_AURASTATE
----@field Baseattacktime integer UNIT_FIELD_BASEATTACKTIME
----@field Rangedattacktime integer UNIT_FIELD_RANGEDATTACKTIME
----@field Boundingradius integer UNIT_FIELD_BOUNDINGRADIUS
----@field Combatreach integer UNIT_FIELD_COMBATREACH
----@field Displayid integer UNIT_FIELD_DISPLAYID
----@field Nativedisplayid integer UNIT_FIELD_NATIVEDISPLAYID
----@field Mountdisplayid integer UNIT_FIELD_MOUNTDISPLAYID
----@field Mindamage integer UNIT_FIELD_MINDAMAGE
----@field Maxdamage integer UNIT_FIELD_MAXDAMAGE
----@field Minoffhanddamage integer UNIT_FIELD_MINOFFHANDDAMAGE
----@field Maxoffhanddamage integer UNIT_FIELD_MAXOFFHANDDAMAGE
+---@field AuraState integer UNIT_FIELD_AURASTATE
+---@field BaseAttackTime integer UNIT_FIELD_BASEATTACKTIME
+---@field RangedAttackTime integer UNIT_FIELD_RANGEDATTACKTIME
+---@field BoundingRadius integer UNIT_FIELD_BOUNDINGRADIUS
+---@field CombatReach integer UNIT_FIELD_COMBATREACH
+---@field DisplayId integer UNIT_FIELD_DISPLAYID
+---@field NativeDisplayId integer UNIT_FIELD_NATIVEDISPLAYID
+---@field MountDisplayId integer UNIT_FIELD_MOUNTDISPLAYID
+---@field MinDamage integer UNIT_FIELD_MINDAMAGE
+---@field MaxDamage integer UNIT_FIELD_MAXDAMAGE
+---@field MinOffhandDamage integer UNIT_FIELD_MINOFFHANDDAMAGE
+---@field MaxOffhandDamage integer UNIT_FIELD_MAXOFFHANDDAMAGE
 ---@field Bytes1 integer UNIT_FIELD_BYTES_1
----@field Petnumber integer UNIT_FIELD_PETNUMBER
+---@field PetNumber integer UNIT_FIELD_PETNUMBER
 ---@field PetNameTimestamp integer UNIT_FIELD_PET_NAME_TIMESTAMP
----@field Petexperience integer UNIT_FIELD_PETEXPERIENCE
----@field Petnextlevelexp integer UNIT_FIELD_PETNEXTLEVELEXP
+---@field PetExperience integer UNIT_FIELD_PETEXPERIENCE
+---@field PetNextLevelExp integer UNIT_FIELD_PETNEXTLEVELEXP
 ---@field DynamicFlags integer UNIT_DYNAMIC_FLAGS
 ---@field ModCastSpeed integer UNIT_MOD_CAST_SPEED
 ---@field CreatedBySpell integer UNIT_CREATED_BY_SPELL
 ---@field NpcFlags integer UNIT_NPC_FLAGS
----@field NpcEmotestate integer UNIT_NPC_EMOTESTATE
+---@field NpcEmoteState integer UNIT_NPC_EMOTESTATE
 ---@field Stat0 integer UNIT_FIELD_STAT0
 ---@field Stat1 integer UNIT_FIELD_STAT1
 ---@field Stat2 integer UNIT_FIELD_STAT2
 ---@field Stat3 integer UNIT_FIELD_STAT3
 ---@field Stat4 integer UNIT_FIELD_STAT4
----@field Posstat0 integer UNIT_FIELD_POSSTAT0
----@field Posstat1 integer UNIT_FIELD_POSSTAT1
----@field Posstat2 integer UNIT_FIELD_POSSTAT2
----@field Posstat3 integer UNIT_FIELD_POSSTAT3
----@field Posstat4 integer UNIT_FIELD_POSSTAT4
----@field Negstat0 integer UNIT_FIELD_NEGSTAT0
----@field Negstat1 integer UNIT_FIELD_NEGSTAT1
----@field Negstat2 integer UNIT_FIELD_NEGSTAT2
----@field Negstat3 integer UNIT_FIELD_NEGSTAT3
----@field Negstat4 integer UNIT_FIELD_NEGSTAT4
+---@field PosStat0 integer UNIT_FIELD_POSSTAT0
+---@field PosStat1 integer UNIT_FIELD_POSSTAT1
+---@field PosStat2 integer UNIT_FIELD_POSSTAT2
+---@field PosStat3 integer UNIT_FIELD_POSSTAT3
+---@field PosStat4 integer UNIT_FIELD_POSSTAT4
+---@field NegStat0 integer UNIT_FIELD_NEGSTAT0
+---@field NegStat1 integer UNIT_FIELD_NEGSTAT1
+---@field NegStat2 integer UNIT_FIELD_NEGSTAT2
+---@field NegStat3 integer UNIT_FIELD_NEGSTAT3
+---@field NegStat4 integer UNIT_FIELD_NEGSTAT4
 ---@field Resistances integer UNIT_FIELD_RESISTANCES
----@field Resistancebuffmodspositive integer UNIT_FIELD_RESISTANCEBUFFMODSPOSITIVE
----@field Resistancebuffmodsnegative integer UNIT_FIELD_RESISTANCEBUFFMODSNEGATIVE
+---@field ResistanceBuffModsPositive integer UNIT_FIELD_RESISTANCEBUFFMODSPOSITIVE
+---@field ResistanceBuffModsNegative integer UNIT_FIELD_RESISTANCEBUFFMODSNEGATIVE
 ---@field BaseMana integer UNIT_FIELD_BASE_MANA
 ---@field BaseHealth integer UNIT_FIELD_BASE_HEALTH
 ---@field Bytes2 integer UNIT_FIELD_BYTES_2
@@ -907,20 +907,20 @@
 ---@field RangedAttackPower integer UNIT_FIELD_RANGED_ATTACK_POWER
 ---@field RangedAttackPowerMods integer UNIT_FIELD_RANGED_ATTACK_POWER_MODS
 ---@field RangedAttackPowerMultiplier integer UNIT_FIELD_RANGED_ATTACK_POWER_MULTIPLIER
----@field Minrangeddamage integer UNIT_FIELD_MINRANGEDDAMAGE
----@field Maxrangeddamage integer UNIT_FIELD_MAXRANGEDDAMAGE
+---@field MinRangedDamage integer UNIT_FIELD_MINRANGEDDAMAGE
+---@field MaxRangedDamage integer UNIT_FIELD_MAXRANGEDDAMAGE
 ---@field PowerCostModifier integer UNIT_FIELD_POWER_COST_MODIFIER
 ---@field PowerCostMultiplier integer UNIT_FIELD_POWER_COST_MULTIPLIER
----@field Maxhealthmodifier integer UNIT_FIELD_MAXHEALTHMODIFIER
----@field Hoverheight integer UNIT_FIELD_HOVERHEIGHT
+---@field MaxHealthModifier integer UNIT_FIELD_MAXHEALTHMODIFIER
+---@field HoverHeight integer UNIT_FIELD_HOVERHEIGHT
 ---@field Padding integer UNIT_FIELD_PADDING
 
 ---The dword index of every field of a Player.
 ---@class wxl.field.Player
 ---@field DuelArbiter integer PLAYER_DUEL_ARBITER
 ---@field Flags integer PLAYER_FLAGS
----@field Guildid integer PLAYER_GUILDID
----@field Guildrank integer PLAYER_GUILDRANK
+---@field GuildId integer PLAYER_GUILDID
+---@field GuildRank integer PLAYER_GUILDRANK
 ---@field Bytes integer PLAYER_BYTES
 ---@field Bytes2 integer PLAYER_BYTES_2
 ---@field Bytes3 integer PLAYER_BYTES_3
@@ -1026,43 +1026,43 @@
 ---@field QuestLog25_2 integer PLAYER_QUEST_LOG_25_2
 ---@field QuestLog25_3 integer PLAYER_QUEST_LOG_25_3
 ---@field QuestLog25_5 integer PLAYER_QUEST_LOG_25_5
----@field VisibleItem1Entryid integer PLAYER_VISIBLE_ITEM_1_ENTRYID
+---@field VisibleItem1EntryId integer PLAYER_VISIBLE_ITEM_1_ENTRYID
 ---@field VisibleItem1Enchantment integer PLAYER_VISIBLE_ITEM_1_ENCHANTMENT
----@field VisibleItem2Entryid integer PLAYER_VISIBLE_ITEM_2_ENTRYID
+---@field VisibleItem2EntryId integer PLAYER_VISIBLE_ITEM_2_ENTRYID
 ---@field VisibleItem2Enchantment integer PLAYER_VISIBLE_ITEM_2_ENCHANTMENT
----@field VisibleItem3Entryid integer PLAYER_VISIBLE_ITEM_3_ENTRYID
+---@field VisibleItem3EntryId integer PLAYER_VISIBLE_ITEM_3_ENTRYID
 ---@field VisibleItem3Enchantment integer PLAYER_VISIBLE_ITEM_3_ENCHANTMENT
----@field VisibleItem4Entryid integer PLAYER_VISIBLE_ITEM_4_ENTRYID
+---@field VisibleItem4EntryId integer PLAYER_VISIBLE_ITEM_4_ENTRYID
 ---@field VisibleItem4Enchantment integer PLAYER_VISIBLE_ITEM_4_ENCHANTMENT
----@field VisibleItem5Entryid integer PLAYER_VISIBLE_ITEM_5_ENTRYID
+---@field VisibleItem5EntryId integer PLAYER_VISIBLE_ITEM_5_ENTRYID
 ---@field VisibleItem5Enchantment integer PLAYER_VISIBLE_ITEM_5_ENCHANTMENT
----@field VisibleItem6Entryid integer PLAYER_VISIBLE_ITEM_6_ENTRYID
+---@field VisibleItem6EntryId integer PLAYER_VISIBLE_ITEM_6_ENTRYID
 ---@field VisibleItem6Enchantment integer PLAYER_VISIBLE_ITEM_6_ENCHANTMENT
----@field VisibleItem7Entryid integer PLAYER_VISIBLE_ITEM_7_ENTRYID
+---@field VisibleItem7EntryId integer PLAYER_VISIBLE_ITEM_7_ENTRYID
 ---@field VisibleItem7Enchantment integer PLAYER_VISIBLE_ITEM_7_ENCHANTMENT
----@field VisibleItem8Entryid integer PLAYER_VISIBLE_ITEM_8_ENTRYID
+---@field VisibleItem8EntryId integer PLAYER_VISIBLE_ITEM_8_ENTRYID
 ---@field VisibleItem8Enchantment integer PLAYER_VISIBLE_ITEM_8_ENCHANTMENT
----@field VisibleItem9Entryid integer PLAYER_VISIBLE_ITEM_9_ENTRYID
+---@field VisibleItem9EntryId integer PLAYER_VISIBLE_ITEM_9_ENTRYID
 ---@field VisibleItem9Enchantment integer PLAYER_VISIBLE_ITEM_9_ENCHANTMENT
----@field VisibleItem10Entryid integer PLAYER_VISIBLE_ITEM_10_ENTRYID
+---@field VisibleItem10EntryId integer PLAYER_VISIBLE_ITEM_10_ENTRYID
 ---@field VisibleItem10Enchantment integer PLAYER_VISIBLE_ITEM_10_ENCHANTMENT
----@field VisibleItem11Entryid integer PLAYER_VISIBLE_ITEM_11_ENTRYID
+---@field VisibleItem11EntryId integer PLAYER_VISIBLE_ITEM_11_ENTRYID
 ---@field VisibleItem11Enchantment integer PLAYER_VISIBLE_ITEM_11_ENCHANTMENT
----@field VisibleItem12Entryid integer PLAYER_VISIBLE_ITEM_12_ENTRYID
+---@field VisibleItem12EntryId integer PLAYER_VISIBLE_ITEM_12_ENTRYID
 ---@field VisibleItem12Enchantment integer PLAYER_VISIBLE_ITEM_12_ENCHANTMENT
----@field VisibleItem13Entryid integer PLAYER_VISIBLE_ITEM_13_ENTRYID
+---@field VisibleItem13EntryId integer PLAYER_VISIBLE_ITEM_13_ENTRYID
 ---@field VisibleItem13Enchantment integer PLAYER_VISIBLE_ITEM_13_ENCHANTMENT
----@field VisibleItem14Entryid integer PLAYER_VISIBLE_ITEM_14_ENTRYID
+---@field VisibleItem14EntryId integer PLAYER_VISIBLE_ITEM_14_ENTRYID
 ---@field VisibleItem14Enchantment integer PLAYER_VISIBLE_ITEM_14_ENCHANTMENT
----@field VisibleItem15Entryid integer PLAYER_VISIBLE_ITEM_15_ENTRYID
+---@field VisibleItem15EntryId integer PLAYER_VISIBLE_ITEM_15_ENTRYID
 ---@field VisibleItem15Enchantment integer PLAYER_VISIBLE_ITEM_15_ENCHANTMENT
----@field VisibleItem16Entryid integer PLAYER_VISIBLE_ITEM_16_ENTRYID
+---@field VisibleItem16EntryId integer PLAYER_VISIBLE_ITEM_16_ENTRYID
 ---@field VisibleItem16Enchantment integer PLAYER_VISIBLE_ITEM_16_ENCHANTMENT
----@field VisibleItem17Entryid integer PLAYER_VISIBLE_ITEM_17_ENTRYID
+---@field VisibleItem17EntryId integer PLAYER_VISIBLE_ITEM_17_ENTRYID
 ---@field VisibleItem17Enchantment integer PLAYER_VISIBLE_ITEM_17_ENCHANTMENT
----@field VisibleItem18Entryid integer PLAYER_VISIBLE_ITEM_18_ENTRYID
+---@field VisibleItem18EntryId integer PLAYER_VISIBLE_ITEM_18_ENTRYID
 ---@field VisibleItem18Enchantment integer PLAYER_VISIBLE_ITEM_18_ENCHANTMENT
----@field VisibleItem19Entryid integer PLAYER_VISIBLE_ITEM_19_ENTRYID
+---@field VisibleItem19EntryId integer PLAYER_VISIBLE_ITEM_19_ENTRYID
 ---@field VisibleItem19Enchantment integer PLAYER_VISIBLE_ITEM_19_ENCHANTMENT
 ---@field ChosenTitle integer PLAYER_CHOSEN_TITLE
 ---@field FakeInebriation integer PLAYER_FAKE_INEBRIATION
@@ -1070,11 +1070,11 @@
 ---@field InvSlotHead integer PLAYER_FIELD_INV_SLOT_HEAD
 ---@field PackSlot1 integer PLAYER_FIELD_PACK_SLOT_1
 ---@field BankSlot1 integer PLAYER_FIELD_BANK_SLOT_1
----@field BankbagSlot1 integer PLAYER_FIELD_BANKBAG_SLOT_1
----@field VendorbuybackSlot1 integer PLAYER_FIELD_VENDORBUYBACK_SLOT_1
+---@field BankBagSlot1 integer PLAYER_FIELD_BANKBAG_SLOT_1
+---@field VendorBuybackSlot1 integer PLAYER_FIELD_VENDORBUYBACK_SLOT_1
 ---@field KeyringSlot1 integer PLAYER_FIELD_KEYRING_SLOT_1
----@field CurrencytokenSlot1 integer PLAYER_FIELD_CURRENCYTOKEN_SLOT_1
----@field Farsight integer PLAYER_FARSIGHT
+---@field CurrencyTokenSlot1 integer PLAYER_FIELD_CURRENCYTOKEN_SLOT_1
+---@field FarSight integer PLAYER_FARSIGHT
 ---@field KnownTitles integer PLAYER__FIELD_KNOWN_TITLES
 ---@field KnownTitles1 integer PLAYER__FIELD_KNOWN_TITLES1
 ---@field KnownTitles2 integer PLAYER__FIELD_KNOWN_TITLES2
@@ -1117,7 +1117,7 @@
 ---@field Kills integer PLAYER_FIELD_KILLS
 ---@field TodayContribution integer PLAYER_FIELD_TODAY_CONTRIBUTION
 ---@field YesterdayContribution integer PLAYER_FIELD_YESTERDAY_CONTRIBUTION
----@field LifetimeHonorbaleKills integer PLAYER_FIELD_LIFETIME_HONORBALE_KILLS
+---@field LifetimeHonorableKills integer PLAYER_FIELD_LIFETIME_HONORBALE_KILLS
 ---@field FieldBytes2 integer PLAYER_FIELD_BYTES2
 ---@field WatchedFactionIndex integer PLAYER_FIELD_WATCHED_FACTION_INDEX
 ---@field CombatRating1 integer PLAYER_FIELD_COMBAT_RATING_1
@@ -1136,9 +1136,9 @@
 ---The dword index of every field of a GameObject.
 ---@class wxl.field.GameObject
 ---@field CreatedBy integer OBJECT_FIELD_CREATED_BY
----@field Displayid integer GAMEOBJECT_DISPLAYID
+---@field DisplayId integer GAMEOBJECT_DISPLAYID
 ---@field Flags integer GAMEOBJECT_FLAGS
----@field Parentrotation integer GAMEOBJECT_PARENTROTATION
+---@field ParentRotation integer GAMEOBJECT_PARENTROTATION
 ---@field Dynamic integer GAMEOBJECT_DYNAMIC
 ---@field Faction integer GAMEOBJECT_FACTION
 ---@field Level integer GAMEOBJECT_LEVEL
@@ -1148,9 +1148,9 @@
 ---@class wxl.field.DynamicObject
 ---@field Caster integer DYNAMICOBJECT_CASTER
 ---@field Bytes integer DYNAMICOBJECT_BYTES
----@field Spellid integer DYNAMICOBJECT_SPELLID
+---@field SpellId integer DYNAMICOBJECT_SPELLID
 ---@field Radius integer DYNAMICOBJECT_RADIUS
----@field Casttime integer DYNAMICOBJECT_CASTTIME
+---@field CastTime integer DYNAMICOBJECT_CASTTIME
 
 ---The dword index of every field of a Corpse.
 ---@class wxl.field.Corpse

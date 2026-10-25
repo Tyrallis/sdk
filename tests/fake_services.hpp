@@ -132,18 +132,19 @@ namespace wxltest
             return WXL_OK;
         }
 
-        static wxl_result UnitRead(wxl_handle h, uint32_t* out, uint32_t player, uint32_t boar)
+        template <class V>
+        static wxl_result UnitRead(wxl_handle h, V* out, V player, V boar)
         {
             if (!out) return WXL_E_INVALID;
             if (!Live(h)) return WXL_E_NOT_FOUND;
             if (!IsUnit(h)) return WXL_E_INVALID;
-            *out = h == kPlayer ? player : h == kBoar ? boar : 50;
+            *out = h == kPlayer ? player : h == kBoar ? boar : V(50);
             return WXL_OK;
         }
 
-        static wxl_result WXL_CALL Health(wxl_handle h, uint32_t* out) { return UnitRead(h, out, 0, 90); }
-        static wxl_result WXL_CALL MaxHealth(wxl_handle h, uint32_t* out) { return UnitRead(h, out, 5000, 120); }
-        static wxl_result WXL_CALL Level(wxl_handle h, uint32_t* out) { return UnitRead(h, out, 80, 3); }
+        static wxl_result WXL_CALL Health(wxl_handle h, int32_t* out) { return UnitRead<int32_t>(h, out, 0, 90); }
+        static wxl_result WXL_CALL MaxHealth(wxl_handle h, uint32_t* out) { return UnitRead<uint32_t>(h, out, 5000, 120); }
+        static wxl_result WXL_CALL Level(wxl_handle h, uint32_t* out) { return UnitRead<uint32_t>(h, out, 80, 3); }
 
         static wxl_result WXL_CALL Target(wxl_handle h, wxl_handle* out)
         {

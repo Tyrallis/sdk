@@ -38,8 +38,8 @@ namespace wxl
         /// kind (`Accepts(type)`). As<T>() is the checked way.
         explicit constexpr Unit(const Object& object) : Object(object.Handle()) {}
 
-        /// A value of 0 is a dead unit; a missing value is a gone one.
-        Expected<uint32_t> Health() const { return Read(&wxl_object_api::unit_health); }
+        /// 0 or less is a dead unit, as the client reads it; a missing value is a gone one.
+        Expected<int32_t> Health() const { return Read(&wxl_object_api::unit_health); }
         Expected<uint32_t> MaxHealth() const { return Read(&wxl_object_api::unit_max_health); }
         Expected<uint32_t> Level() const { return Read(&wxl_object_api::unit_level); }
 
@@ -48,9 +48,9 @@ namespace wxl
         {
             const Expected<uint32_t> max = MaxHealth();
             if (!max) return Unexpected{max.Error()};
-            const Expected<uint32_t> health = Health();
+            const Expected<int32_t> health = Health();
             if (!health) return Unexpected{health.Error()};
-            return *max ? static_cast<float>(*health) / static_cast<float>(*max) : 0.0f;
+            return *max && *health > 0 ? static_cast<float>(*health) / static_cast<float>(*max) : 0.0f;
         }
 
         /// What the unit targets. A null Unit as the value means it targets nothing in view.

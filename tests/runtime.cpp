@@ -6,9 +6,44 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <type_traits>
 #include <vector>
 
+#include "wxl/objects/fields.hpp"
 #include "wxl/runtime/object_service.hpp"
+
+namespace getters
+{
+    // A getter answers a field as the client holds it in the type update_fields.def gives it:
+    // getter_fields.def pairs them, and the build fails on a pair that disagrees.
+    template <class F>
+    struct OutOf;
+    template <class V>
+    struct OutOf<wxl_result(WXL_CALL*)(wxl_handle, V*)>
+    {
+        using type = V;
+    };
+    template <class V>
+    struct OutOf<wxl_result(WXL_CALL*)(wxl_handle, uint32_t, V*)>
+    {
+        using type = V;
+    };
+
+    template <class T>
+    struct ElementOf;
+    template <class T>
+    struct ElementOf<const wxl::field::Field<T>>
+    {
+        using type = T;
+    };
+
+#define WXL_GETTER_FIELD(member, Kind, Name)                                                  \
+    static_assert(std::is_same_v<OutOf<decltype(wxl_object_api::member)>::type,               \
+                                 ElementOf<decltype(wxl::field::Kind::Name)>::type>,           \
+                  #member " answers another type than " #Kind "::" #Name " holds");
+#include "getter_fields.def"
+#undef WXL_GETTER_FIELD
+} // namespace getters
 
 namespace
 {
@@ -33,7 +68,7 @@ namespace
         float           facing = 0.0f;
         std::string     name;
         uint32_t        entry = 0;
-        uint32_t        health    = 0;
+        int32_t         health    = 0;
         uint32_t        maxHealth = 0;
         uint32_t        level     = 0;
         wxl_guid        target    = 0;
@@ -41,7 +76,7 @@ namespace
         uint32_t        maxPower[7]{};
         uint32_t        powerType = 0;
         uint32_t        visibleItem[19]{};
-        uint32_t        stackCount = 0;
+        int32_t         stackCount = 0;
         uint32_t        numSlots   = 0;
         wxl_guid        slots[36]{};
         uint32_t        goType = 0;
@@ -115,7 +150,7 @@ namespace
         bool Position(void* o, wxl_vec3& out) const override { return Give(out, As(o)->position); }
         bool Facing(void* o, float& out) const override { return Give(out, As(o)->facing); }
 
-        bool UnitHealth(void* o, uint32_t& out) const override { return Give(out, As(o)->health); }
+        bool UnitHealth(void* o, int32_t& out) const override { return Give(out, As(o)->health); }
         bool UnitMaxHealth(void* o, uint32_t& out) const override { return Give(out, As(o)->maxHealth); }
         bool UnitLevel(void* o, uint32_t& out) const override { return Give(out, As(o)->level); }
         bool UnitPower(void* o, uint32_t index, uint32_t& out) const override
@@ -134,7 +169,7 @@ namespace
         }
 
         bool ItemOwner(void* o, wxl_guid& out) const override { return Give(out, As(o)->owner); }
-        bool ItemStackCount(void* o, uint32_t& out) const override { return Give(out, As(o)->stackCount); }
+        bool ItemStackCount(void* o, int32_t& out) const override { return Give(out, As(o)->stackCount); }
 
         bool ContainerNumSlots(void* o, uint32_t& out) const override { return Give(out, As(o)->numSlots); }
         bool ContainerSlot(void* o, uint32_t index, wxl_guid& out) const override
@@ -276,7 +311,7 @@ int main()
 
     Section("type gating");
     {
-        uint32_t health = 0;
+        int32_t health = 0;
         Check(api->unit_health(boarHandle, &health) == WXL_OK && health == 90, "a unit has health");
         Check(api->unit_health(chestHandle, &health) == WXL_E_INVALID,
               "a game object asked for health is a mistake, not a missing value");
@@ -297,7 +332,8 @@ int main()
               "a player's visible item reads");
         Check(api->player_visible_item(boarHandle, 15, &value) == WXL_E_INVALID,
               "a creature has no equipment slots");
-        Check(api->item_stack_count(bagHandle, &value) == WXL_OK && value == 1,
+        int32_t stack = 0;
+        Check(api->item_stack_count(bagHandle, &stack) == WXL_OK && stack == 1,
               "a container answers the item reads");
         Check(api->container_num_slots(bagHandle, &value) == WXL_OK && value == 2,
               "and its own");
@@ -316,8 +352,9 @@ int main()
     {
         const int reads = binding.typeReads;
         uint32_t  value = 0;
-        api->unit_health(boarHandle, &value);
-        api->unit_health(chestHandle, &value);
+        int32_t   health = 0;
+        api->unit_health(boarHandle, &health);
+        api->unit_health(chestHandle, &health);
         api->type(chestHandle);
         api->enumerate(WXL_OBJECT_UNIT, nullptr, 0);
         Check(reads == 5 && binding.typeReads == reads,
@@ -370,7 +407,7 @@ int main()
         Check(api->valid(boarHandle) == WXL_FALSE, "and the old handle stays dead");
         Check(api->valid(wolfHandle) == WXL_TRUE, "while the new one lives");
 
-        uint32_t health = 0;
+        int32_t health = 0;
         Check(api->unit_health(boarHandle, &health) == WXL_E_NOT_FOUND,
               "reading through a stale handle finds nothing rather than the wrong unit");
 
@@ -425,7 +462,7 @@ int main()
         Check(me != WXL_HANDLE_NONE && me != playerHandle && api->from_guid(0x100) == me,
               "the local player is tracked on demand too, under its guid");
 
-        uint32_t   health = 0;
+        int32_t    health = 0;
         wxl_handle target = WXL_HANDLE_NONE;
         Check(api->unit_target(me, &target) == WXL_OK && target == found && api->unit_health(target, &health) == WXL_OK &&
                   health == 90,

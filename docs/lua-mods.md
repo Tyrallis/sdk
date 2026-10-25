@@ -589,8 +589,10 @@ print(me:Field("Unit.Health"))          -- the kind and a shorter name, the same
 print(me:Field("Health"))               -- the short name alone, when it is not ambiguous
 ```
 
-The short name is the client's without its kind's prefix, the words joined: `UNIT_FIELD_MAXHEALTH`
-is `Maxhealth`, `PLAYER_FIELD_COINAGE` is `Coinage`. Alone it must name one field of the object:
+The short name is the client's without its kind's prefix, each word capitalised and the words
+joined: `PLAYER_FIELD_COINAGE` is `Coinage`, `UNIT_FIELD_MAXHEALTH` is `MaxHealth` (the client runs
+`MAX` and `HEALTH` together; the short names split them, the way the getters are named, so the
+field and `MaxHealth()` read alike). Alone it must name one field of the object:
 a player has both `Unit.Flags` and `Player.Flags`, so `me:Field("Flags")` is an error that names
 the two, and you write the one you mean. A name the object does not have is an error too: a typo
 is a mistake to fix, not a value to test.
@@ -628,7 +630,7 @@ end
 value (a table of four numbers for bytes, of two for halves):
 
 ```lua
-target:SetField("Unit.Boundingradius", 3)
+target:SetField("Unit.BoundingRadius", 3)
 ```
 
 Only your client sees it, and only until the server next updates that field, which puts its own
