@@ -335,6 +335,32 @@ asked for. The client sees a change by comparing a field with a copy it keeps fr
 update, which it keeps for most fields and not all: the `watch` column of `update_fields.def` says
 which, and `Watch` answers `WXL_E_UNSUPPORTED` for the others, naming them in the log.
 
+The watch is your mod's: your handlers receive the changes of the fields you watch, and another
+mod's watches do not reach them. Each `Watch` call is one watch, given back by one
+`Unwatch(wxl::field::Unit::Health)` (abi `0.1.10`), and every watch you still hold is given back
+when your mod is disabled or unloaded. The simplest way to hold one is a `wxl::FieldWatch`: it
+watches from its construction and gives the watch back in its destructor, so as a member of your
+script it lasts exactly as long as the script:
+
+```cpp
+class Health final : public wxl::ObjectScript
+{
+    wxl::FieldWatch watch_{wxl::field::Unit::Health};   // watched while this script lives
+
+    void OnObjectFieldChanged(wxl::Object, wxl_object_type, uint32_t field, uint32_t,
+                              wxl::FieldValue, wxl::FieldValue now) override { ... }
+};
+```
+
+`if (!watch_)` tells you the watch was refused, and `watch_.Result()` why.
+
+The short names of the constants are the client's names with the kind's prefix dropped and each
+word capitalised. Where the client runs words together, the name splits them the way the getters
+do: `UNIT_FIELD_MAXHEALTH` is `wxl::field::Unit::MaxHealth`, as `unit.MaxHealth()` reads it, and
+`UNIT_FIELD_BOUNDINGRADIUS` is `BoundingRadius`. A field and a getter of one name always read the
+same value, in the same type: health is an `int32_t` both ways, as the client holds it (it takes
+0 or less for dead).
+
 ### Services
 
 Each service has a typed facade with its name and version sealed in: `wxl::ObjectService`,
@@ -373,6 +399,11 @@ wxl::DataService data;
 if (!data.IsLoaded("Spell.dbc")) data.ServeTable("Spell.dbc", "Mods\\mymod\\Spell.dbc");
 ```
 
+A folder added to the search is your mod's. `storage.RemoveSearchPath("Mods\\mymod\\assets")`
+(abi `0.1.10`) takes it back out, and the runtime takes out every folder your mod still has in the
+search when the mod is disabled or unloaded: a mod that goes leaves no folder behind for the
+others to trip on. A folder another mod added is its own; removing it answers `WXL_E_NOT_FOUND`.
+
 What C++ does better than the raw table stays written by hand in the header: `Read` into a
 vector, `Open` as a `wxl::File` that closes itself, `Find` as a vector of strings, the templates
 of `RegisterFunction`. The same rows build the Lua modules of `wxl.lua`, so a member reaches C++
@@ -384,7 +415,7 @@ and Lua alike from its one row.
 
 Whatever the C boundary hands back as a token comes back as a move-only object that releases in
 its destructor: `wxl::Subscription`, `wxl::Hook`, `wxl::Patch`, `wxl::File`, `wxl::OpcodeClaim`,
-`wxl::Panel`. Each has `Reset()` to release early (safe to repeat) and `Release()` to disown the
+`wxl::Panel`, and `wxl::FieldWatch`, which holds a watch rather than a token. Each has `Reset()` to release early (safe to repeat) and `Release()` to disown the
 token for code that manages it by hand. Keep them as members of the mod or of a script, and they
 go when it goes -- before the DLL does.
 

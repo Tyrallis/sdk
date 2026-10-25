@@ -661,8 +661,21 @@ changed raises its own event, `field` being the element's number.
 The client finds a change by comparing a field with a copy it keeps from before the update, and
 it keeps one for most fields but not all: `Watch` answers `nil` and the reason for one it does not,
 such as `UNIT_FIELD_CREATEDBY`. The `watch` column of `update_fields.def` says which: `any` on every
-object, `local` on your own player only (bags, money, experience), `none` not at all. A watch
-lasts while the game runs, and every mod observing the event receives every watched change.
+object, `local` on your own player only (bags, money, experience), `none` not at all.
+
+A watch is your mod's. Your `OnObjectFieldChanged` handlers receive the changes of the fields
+your mod watches, and only those: another mod watching `UNIT_FIELD_HEALTH` does not fill your log
+with every health change in view, and your watch does not fill its. Asking twice for the same
+field changes nothing. When you no longer need it, give it back:
+
+```lua
+wxl.object.Unwatch("Player", "Coinage")
+```
+
+From then on your handlers receive no change of it, and once no mod watches a field the client
+stops reporting it. You do not have to give your watches back before your mod goes: they end when
+it is disabled, when it reloads -- the new code asks again for what it needs, as it runs from the
+top -- and when the client closes. `Unwatch` needs abi `0.1.10`.
 
 ---
 
@@ -682,8 +695,18 @@ Lua -- and `wxl.lua` gives each one a module in the `wxl` table:
 
 Every function of these modules answers the way an object's reads do: its value, or `nil` and a
 reason. The reason is a short word: `"unsupported"` when this runtime does not have the service or
-that function, `"not_found"`, `"invalid"` or `"failed"` when the client said so. A number you
-leave out is 0.
+that function, `"not_found"`, `"invalid"` or `"failed"` when the client said so.
+
+Leaving out an argument is a mistake in your code, not a question for the client, so it is an
+error that names the function and the argument:
+
+```
+wxl.storage.AddSearchPath: 'priority' (argument 2) is missing; it takes a whole number
+```
+
+Passing `nil` counts as leaving it out. A few arguments may be left out; the editor definitions
+mark them with a `?` (`after?`), and the table at the end of this guide says what each one is
+then, such as `wxl.patch.Find`'s `after`, which starts the search from the beginning.
 
 The example of this chapter is [`examples/lua-services/`](../examples/lua-services/). Copy it into
 `Mods/` next to `lua-hello` and start the client; each line below is from its log.
@@ -780,6 +803,14 @@ does not have. The folder has to be inside the client's folder, which your mod's
 `Mods/` is; this call is best made when the mod loads, at the top of `init.lua`, so the client
 finds your files from its first look. `MountArchive(path, priority)` does the same for a whole
 `.MPQ`.
+
+The folder belongs to your mod. `wxl.storage.RemoveSearchPath(folder)` takes it out again: from
+then on the client finds none of its files, and a file it already opened from there stays open.
+Your mod's folders also leave the search on their own when the mod is disabled, when it reloads
+(the reloaded `init.lua` adds them again at its top) and when the client closes, so a mod you
+remove from `Mods/` leaves nothing behind in the next session. Another mod cannot remove your
+folder: for a folder it did not add, `RemoveSearchPath` answers `nil, "not_found"`.
+`RemoveSearchPath` needs abi `0.1.10`.
 
 ### The client's databases: `wxl.data`
 
@@ -1102,16 +1133,18 @@ Writes its arguments to the log, through `tostring`, separated by tabs, at the `
 | `wxl.object.FromGuid(guid)` | the object with that guid (`"0x"` and up to sixteen hex digits, or a whole number), or `nil` when it is not in view |
 | `wxl.object.InView(type)` | a list of the objects of a type in view; every object without a type |
 | `wxl.object.Fields(list, name, element)` | one descriptor field of every object of a list, in order, `false` where an object has none (abi `0.1.9`) |
-| `wxl.object.Watch(type, name)` | asks for `OnObjectFieldChanged` when the field changes on objects of the type, `nil` for every object; `true`, or `nil` and why (abi `0.1.9`) |
+| `wxl.object.Watch(type, name)` | asks for `OnObjectFieldChanged` when the field changes on objects of the type, `nil` for every object, for this mod's handlers; `true`, or `nil` and why (abi `0.1.9`) |
+| `wxl.object.Unwatch(type, name)` | gives that watch back; `true`, also for a field the mod did not watch (abi `0.1.10`) |
 | `wxl.field` | every descriptor field's number, by kind: `wxl.field.Unit.Health` |
 | `wxl.events` | each family's events by name, `wxl.events.NetScript[1] == "OnMessageReceived"` |
 | `wxl.log(level, ...)` | a log line at `"trace"`, `"debug"`, `"info"`, `"warn"` or `"error"` |
 
 ### Service modules
 
-Each answers its value, or `nil` and the reason; a number left out is 0. Every function, typed,
-is in [`wxl.d.lua`](../lua/types/wxl.d.lua), and every row behind them in
-`include/wxl/services/<service>.def`.
+Each answers its value, or `nil` and the reason. Every argument must be given, except `after` of
+`wxl.patch.Find`, which is 0 when left out; one left out is an error naming the function and the
+argument. Every function, typed, is in [`wxl.d.lua`](../lua/types/wxl.d.lua), and every row behind
+them in `include/wxl/services/<service>.def`.
 
 | Function | Answers |
 |---|---|
@@ -1119,7 +1152,8 @@ is in [`wxl.d.lua`](../lua/types/wxl.d.lua), and every row behind them in
 | `wxl.storage.Read(name)` | the whole file, as a string |
 | `wxl.storage.Open(name)` | a `File`: `file:ReadAt(offset, count)` reads, `file:Close()` gives it back |
 | `wxl.storage.Find(pattern)` | a list of the names matching, `*` any run of characters |
-| `wxl.storage.AddSearchPath(folder, priority)` | `true`: the folder's files are the client's, above 0 over its own |
+| `wxl.storage.AddSearchPath(folder, priority)` | `true`: the folder's files are the client's, above 0 over its own, until the mod removes it or goes |
+| `wxl.storage.RemoveSearchPath(folder)` | `true`: a folder the mod added leaves the search; `nil, "not_found"` for one it did not add (abi `0.1.10`) |
 | `wxl.storage.MountArchive(path, priority)` | `true`: an archive joins the client's |
 | `wxl.data.ServeTable(table, path)`, `.RestoreTable(table)` | `true`: the client reads the table from `path`, or its own again |
 | `wxl.data.ServedFrom(table)`, `.IsLoaded(table)` | where a table comes from, `""` for the client's own; whether the client read it already |
@@ -1128,7 +1162,7 @@ is in [`wxl.d.lua`](../lua/types/wxl.d.lua), and every row behind them in
 | `wxl.script.Run(text, name)`, `.Context()` | `true` once the text ran; `"glue"` or `"game"` |
 | `wxl.hook.Points()`, `.HasPoint(name)` | the points as `{ name, signature }`; whether one is named |
 | `wxl.patch.Apply(name, address, expected, bytes)` | a `Patch`, `patch:Restore()` to undo; the module needs `wxl.patch` in `mod.json` |
-| `wxl.patch.Matches(address, expected)`, `.Find(bytes, after)` | whether the bytes are there; where they are |
+| `wxl.patch.Matches(address, expected)`, `.Find(bytes, after)` | whether the bytes are there; where they are, after `after` or, left out, from the start |
 
 ### Object methods
 
@@ -1183,7 +1217,8 @@ The families `PlayerScript`, `GlueScript` and `ChatScript`, and `WorldScript`'s 
 unknown name. A mod asking for less cannot subscribe to them. `ChatScript`'s `OnChatAddonMessage`,
 and `OnChatMessage`'s last two parameters, came with `0.1.7`: a mod that uses them asks for
 `"abi": "0.1.7"`. `ObjectScript`'s `OnObjectFieldChanged` and the descriptor fields came with
-`0.1.9`.
+`0.1.9`. `0.1.10` brought no event: its `wxl.object.Unwatch` and `wxl.storage.RemoveSearchPath`
+answer `nil, "unsupported"` on an older runtime, as any function the runtime lacks does.
 
 Not every runtime raises every event. Subscribing to one that yours does not raise logs a warning
 naming it, and the handler never runs.
@@ -1213,6 +1248,7 @@ your mod's id first.
 | `folder '<name>' holds an init.lua but its name makes no mod id` | rename the folder, or give it a `mod.json` with an `id` |
 | `this runtime does not raise On<Event> of <Family>Script` | the handler is valid but will never run on this runtime |
 | `mod <id> errored in its ... (n/25)` | an error in a handler; the traceback after it gives the line |
+| `wxl.<module>.<Function>: '<argument>' (argument n) is missing; it takes ...` | a call left out an argument, or passed `nil` for it: give it, as the line says |
 | `mod <id> is disabled: it errored 25 times` | fix the error and save a file of the mod: it reloads and runs again |
 | `the Override of On<Event> returned ...` | a return value of the wrong kind, too many of them, or a string too long for the buffer |
 | `On<Event> was raised off the main thread` | that event happened on another thread, and its answer could not be taken ([Events from other threads](#events-from-other-threads)) |
