@@ -12,7 +12,18 @@
 #include <vector>
 
 #include "wxl/sdk.hpp"
+#include "wxl/services/rows.hpp"
 #include "wxl/services/storage.h"
+
+namespace wxl::api::facade
+{
+    template <>
+    struct Methods<wxl_storage_api>
+    {
+#define WXL_API_TABLE "wxl/services/storage.def"
+#include "wxl/services/methods.inc"
+    };
+} // namespace wxl::api::facade
 
 namespace wxl
 {
@@ -85,31 +96,25 @@ namespace wxl
      *
      * Paths are the client's own: backslash-separated, case-insensitive, relative to the data
      * root. Every call answers WXL_E_UNSUPPORTED while the runtime does not publish the service.
+     *
+     * The plain methods are rows of storage.def, and answer as storage.h says:
+     *
+     *   Exists(path)                        bool                whether the name resolves
+     *   Size(path)                          Expected<uint64_t>  its length, without reading it
+     *   AddSearchPath(directory, priority)  wxl_result          a folder joins the search: the
+     *                                                           higher priority wins a name, the
+     *                                                           client's own data is 0
+     *   MountArchive(path, priority)        wxl_result          an archive joins the search
+     *
+     * The rest are written here, for what C++ does better than the raw table: a whole file into
+     * a vector, a File that closes itself, a list of names.
      */
-    class StorageService : public detail::Facade<StorageService, wxl_storage_api>
+    class StorageService : public detail::Facade<StorageService, wxl_storage_api>,
+                           public api::facade::Methods<wxl_storage_api>
     {
     public:
         static constexpr const char* kName    = WXL_STORAGE_SERVICE;
         static constexpr uint32_t    kVersion = WXL_STORAGE_SERVICE_VERSION;
-
-        bool Exists(std::string_view path) const
-        {
-            const wxl_storage_api* api = Raw();
-            if (!detail::Carries(api, &wxl_storage_api::exists)) return false;
-            return api->exists(Str(path)) == WXL_TRUE;
-        }
-
-        /// The file's length, without reading it.
-        Expected<uint64_t> Size(std::string_view path) const
-        {
-            const wxl_storage_api* api = Raw();
-            if (!detail::Carries(api, &wxl_storage_api::size))
-                return Unexpected{WXL_E_UNSUPPORTED};
-            uint64_t         size   = 0;
-            const wxl_result result = api->size(Str(path), &size);
-            if (result != WXL_OK) return Unexpected{result};
-            return size;
-        }
 
         /// A whole file.
         Expected<std::vector<uint8_t>> Read(std::string_view path) const
@@ -149,27 +154,6 @@ namespace wxl
             const wxl_storage_api* api = Raw();
             if (!detail::Carries(api, &wxl_storage_api::open)) return File();
             return File(api, api->open(Str(path)));
-        }
-
-        /**
-         * @brief Adds a directory to the search path. Higher priority wins a name collision.
-         *
-         * Not every runtime has such a notion; one that does not answers WXL_E_UNSUPPORTED
-         * rather than pretending, so check the result before relying on an asset being found.
-         */
-        wxl_result AddSearchPath(std::string_view directory, int32_t priority = 0) const
-        {
-            const wxl_storage_api* api = Raw();
-            if (!detail::Carries(api, &wxl_storage_api::add_search_path)) return WXL_E_UNSUPPORTED;
-            return api->add_search_path(Str(directory), priority);
-        }
-
-        /// Adds an archive to the search path.
-        wxl_result MountArchive(std::string_view path, int32_t priority = 0) const
-        {
-            const wxl_storage_api* api = Raw();
-            if (!detail::Carries(api, &wxl_storage_api::mount_archive)) return WXL_E_UNSUPPORTED;
-            return api->mount_archive(Str(path), priority);
         }
 
         /// The paths matching a pattern, `*` standing for any run of characters.

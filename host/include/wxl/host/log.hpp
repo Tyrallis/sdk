@@ -16,7 +16,13 @@ namespace wxl::host
     /// The tag the library logs its own lines under.
     constexpr const char* kHostTag = "host";
 
-    /// Where lines go. A runtime implements this once: a file, a console, the client's own log.
+    /**
+     * @brief Where lines go. A runtime implements this once: a file, a console, the client's own
+     *        log.
+     *
+     * Write is called from any thread, at the same time from two of them when a handler logs off
+     * the main thread: the sink keeps each line whole (wxl_host.log promises it to mods).
+     */
     class LogSink
     {
     public:

@@ -51,13 +51,35 @@ typedef struct wxl_mod_info
     uint32_t    abi_minor; ///< WXL_ABI_VERSION_MINOR seen at compile time
     const char* id;        ///< stable identity, e.g. "wxl.foliage"; matches the manifest
     const char* name;      ///< display name, used in logs
-    uint32_t    version;   ///< the mod's own version, opaque to the runtime
+
+    /**
+     * @brief Not read; write 0.
+     *
+     * A mod's version is the manifest's "version", which a runtime reads before it opens the
+     * binary. The binary does not repeat it, so the two can never disagree.
+     */
+    uint32_t version;
+
+    // --- appended at 0.1.5 -------------------------------------------------------------------
+
+    /**
+     * @brief WXL_ABI_VERSION_FEATURE seen at compile time.
+     *
+     * On x64 it lands in what was the struct's tail padding, so @ref struct_size alone does not
+     * tell a binary built before the three-part numbering apart: the abi_minor it reports does.
+     */
+    uint32_t abi_feature;
 } wxl_mod_info;
 
 // --- Entry points --------------------------------------------------------------------------
 //
 // Declared only while compiling the mod itself: a runtime includes this header for the types and
 // must not export the symbols it goes looking for.
+//
+// Nothing is thrown out of an entry point: no exception crosses the boundary (abi.h). A mod that
+// fails where it cannot recover says so by its return value in wxl_mod_load, and through
+// wxl_host.disable in wxl_mod_stage and wxl_mod_unload. WXL_MOD (sdk.hpp) does both for a C++
+// exception that reaches it.
 
 #ifdef WXL_BUILDING_MOD
 

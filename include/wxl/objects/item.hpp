@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 WarcraftXL
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
 //
 // wxl::Item: something that sits in a bag, a bank or an equipment slot.
 
@@ -20,12 +20,16 @@ namespace wxl
     {
     public:
         static constexpr wxl_object_type kKinds[] = {WXL_OBJECT_ITEM, WXL_OBJECT_CONTAINER};
-        static constexpr bool            Accepts(wxl_object_type type)
+        static constexpr bool            Accepts(uint32_t type)
         {
             return type == WXL_OBJECT_ITEM || type == WXL_OBJECT_CONTAINER;
         }
 
         using Object::Object;
+
+        /// The same object as this class, unchecked: for a handler whose event already gave the
+        /// kind (`Accepts(type)`). As<T>() is the checked way.
+        explicit constexpr Item(const Object& object) : Object(object.Handle()) {}
 
         /// The player who owns it; resolve it with Object::Resolve when it is in view.
         Expected<wxl_guid> OwnerGuid() const { return Read(&wxl_object_api::item_owner); }
@@ -36,7 +40,7 @@ namespace wxl
         /// Who crafted it, or WXL_GUID_NONE.
         Expected<wxl_guid> CreatorGuid() const { return Read(&wxl_object_api::item_creator); }
 
-        Expected<uint32_t> StackCount() const { return Read(&wxl_object_api::item_stack_count); }
+        Expected<int32_t> StackCount() const { return Read(&wxl_object_api::item_stack_count); }
 
         /// Seconds before it expires; 0 when it does not.
         Expected<uint32_t> Duration() const { return Read(&wxl_object_api::item_duration); }

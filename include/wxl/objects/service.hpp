@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 WarcraftXL
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
 //
 // The wxl.object facade, defined: what objects/facade.hpp declared, once every class exists.
 
@@ -67,6 +67,38 @@ namespace wxl
         const wxl_result result =
             Positions(view.Handles().data(), static_cast<uint32_t>(view.size()), out.data());
         if (result != WXL_OK) return Unexpected{result};
+        return out;
+    }
+
+    template <class V, class T>
+    std::vector<Expected<T>> ObjectService::Fields(const ObjectView<V>& view,
+                                                   const field::Field<T>& which, uint32_t element) const
+    {
+        std::vector<Expected<T>> out;
+        out.reserve(view.size());
+        const wxl_object_api* api = Raw();
+        if (!detail::Carries(api, &wxl_object_api::read_field_many) || element >= which.Elements())
+        {
+            const wxl_result why = element >= which.Elements() && api ? WXL_E_INVALID : WXL_E_UNSUPPORTED;
+            for (size_t i = 0; i < view.size(); ++i) out.push_back(Unexpected{why});
+            return out;
+        }
+        const uint32_t           count  = static_cast<uint32_t>(view.size());
+        const uint32_t           dwords = which.Dwords();
+        std::vector<uint32_t>    values(size_t(count) * dwords);
+        std::vector<wxl_result>  results(count, WXL_OK);
+        if (count)
+            api->read_field_many(view.Handles().data(), count, which.IndexOf(element), dwords,
+                                 values.data(), results.data());
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            // An object of another kind holds something else at that index.
+            wxl_result result = results[i];
+            if (result == WXL_OK && !field::Carries(api->type(view.Handles()[i]), which.kind))
+                result = WXL_E_INVALID;
+            if (result == WXL_OK) out.push_back(field::Decode<T>(values.data() + size_t(i) * dwords));
+            else out.push_back(Unexpected{result});
+        }
         return out;
     }
 } // namespace wxl

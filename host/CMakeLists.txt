@@ -19,6 +19,11 @@ target_include_directories(wxl-host PUBLIC
     $<INSTALL_INTERFACE:include>)
 
 target_link_libraries(wxl-host PUBLIC wxl::sdk)
+
+# The zones the event bus opens for a runtime's profiler (wxl/host/profile.hpp). Off, a dispatch
+# carries no trace of them; on, a dispatch with nobody watching costs one load.
+option(WXL_HOST_PROFILE "Open profiler zones around each dispatch and handler when a runtime gives a profiler" ON)
+target_compile_definitions(wxl-host PUBLIC WXL_HOST_PROFILE=$<BOOL:${WXL_HOST_PROFILE}>)
 target_compile_features(wxl-host PUBLIC cxx_std_17)
 
 if(MSVC)

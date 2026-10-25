@@ -7,6 +7,7 @@
 #include <limits>
 #include <sstream>
 
+#include "wxl/abi.h"
 #include "wxl/host/json.hpp"
 
 namespace wxl::host
@@ -40,6 +41,29 @@ namespace wxl::host
     {
         bool IsIdChar(char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'); }
         bool IsDigit(char c) { return c >= '0' && c <= '9'; }
+
+        bool IsAllDigits(std::string_view text)
+        {
+            if (text.empty()) return false;
+            for (char c : text)
+                if (!IsDigit(c)) return false;
+            return true;
+        }
+
+        /// "0.5": an abi written before the three-part numbering.
+        bool IsTwoPartAbi(std::string_view text)
+        {
+            const size_t dot = text.find('.');
+            return dot != std::string_view::npos && IsAllDigits(text.substr(0, dot)) &&
+                   IsAllDigits(text.substr(dot + 1));
+        }
+
+        std::string SdkAbiText()
+        {
+            return std::to_string(WXL_ABI_VERSION_MAJOR) + "." +
+                   std::to_string(WXL_ABI_VERSION_MINOR) + "." +
+                   std::to_string(WXL_ABI_VERSION_FEATURE);
+        }
 
         /// Reads a run of digits as a uint32_t; false on no digits or overflow.
         bool ReadNumber(std::string_view text, size_t& pos, uint32_t& out)
@@ -111,6 +135,12 @@ namespace wxl::host
         return true;
     }
 
+    std::string AbiText(const AbiVersion& abi)
+    {
+        return std::to_string(abi.major) + "." + std::to_string(abi.minor) + "." +
+               std::to_string(abi.feature);
+    }
+
     bool ParseAbi(std::string_view text, AbiVersion& out)
     {
         AbiVersion parsed;
@@ -119,6 +149,9 @@ namespace wxl::host
         if (pos >= text.size() || text[pos] != '.') return false;
         ++pos;
         if (!ReadNumber(text, pos, parsed.minor)) return false;
+        if (pos >= text.size() || text[pos] != '.') return false;
+        ++pos;
+        if (!ReadNumber(text, pos, parsed.feature)) return false;
         if (pos != text.size()) return false;
         out = parsed;
         return true;
@@ -146,12 +179,19 @@ namespace wxl::host
                     !Require("version", seenVersion_) || !Require("abi", seenAbi_))
                     return false;
 
-                // A script mod has no binary: its code is the "lua" entry.
+                // A mod is native or a script, never both: its code is the "binaries" or the
+                // "lua" entry, and both together would run twice.
                 if (!seenBinaries_ && out_.lua.empty())
                 {
                     error_ = "required field 'binaries' is missing (a script mod names 'lua' instead)";
                     return false;
                 }
+                if (seenBinaries_ && !out_.lua.empty())
+                    return Fail(*binaries_, "'binaries' and 'lua' cannot both be given: a mod is "
+                                            "either a binary the runtime loads or a Lua entry "
+                                            "wxl.lua runs, and with both its code would run twice. "
+                                            "Keep 'binaries' for a C++ mod, 'lua' for a Lua mod, "
+                                            "or make two mods");
                 return true;
             }
 
@@ -310,14 +350,21 @@ namespace wxl::host
                 {
                     seenAbi_ = true;
                     if (!ExpectType(value, json::Type::String, key)) return false;
-                    if (!ParseAbi(value.string, out_.abi))
-                        return Fail(value, "'abi' must be \"major.minor\", not \"" + value.string +
-                                               "\"");
-                    return true;
+                    if (ParseAbi(value.string, out_.abi)) return true;
+                    if (IsTwoPartAbi(value.string))
+                        return Fail(value, "'abi' is \"" + value.string +
+                                               "\", the two-part numbering the SDK used before "
+                                               "0.1.5; rebuild the mod against the current SDK and "
+                                               "write the \"major.minor.feature\" its abi.h "
+                                               "carries (this runtime's is \"" +
+                                               SdkAbiText() + "\")");
+                    return Fail(value, "'abi' must be \"major.minor.feature\", not \"" +
+                                           value.string + "\"");
                 }
                 if (key == "binaries")
                 {
                     seenBinaries_ = true;
+                    binaries_     = &value;
                     return ReadBinaries(value);
                 }
                 if (key == "requires") return ReadServiceRefs(value, key, out_.required);
@@ -342,6 +389,7 @@ namespace wxl::host
             bool               seenVersion_  = false;
             bool               seenAbi_      = false;
             bool               seenBinaries_ = false;
+            const json::Value* binaries_     = nullptr;
         };
     } // namespace
 

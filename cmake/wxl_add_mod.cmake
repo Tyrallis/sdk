@@ -8,7 +8,8 @@
 #       [MANIFEST <mod.json>]            # default: mod.json beside the calling CMakeLists.txt
 #       [TARGETS <win-x64|win-x86>...]   # default: both
 #       [OUTPUT_NAME <base>]             # default: <name>; the DLL is <base>.dll
-#       [OUTPUT_DIR <dir>])              # default: ${CMAKE_BINARY_DIR}/dist
+#       [OUTPUT_DIR <dir>]               # default: ${CMAKE_BINARY_DIR}/dist
+#       [CXX_STANDARD <17|20|23>])       # default: 20
 #
 # Produces, from `cmake -S . -B build && cmake --build build`:
 #
@@ -17,18 +18,23 @@
 #     bin/x64/<base>.dll        win-x64
 #     bin/x86/<base>.dll        win-x86
 #
-# One CMake build tree is one architecture, so the call plays two roles depending on WXL_MOD_ARCH:
+# One CMake build tree is one architecture, so the call plays three roles:
 #
-#   - Unset (the mod author's `cmake -S . -B build`): a superbuild. For every requested
-#     architecture it configures and builds the same source directory as a child project
-#     (ExternalProject) with WXL_MOD_ARCH set, selecting the architecture with the Visual Studio
-#     generator platform. Each child installs its DLL into the mod folder; the manifest is copied
-#     next to them.
-#   - Set (a child, or a hand-made single-architecture tree): the real library target <name>,
-#     linking wxl::sdk-mod, with an install rule into bin/<arch>/.
+#   - A Visual Studio generator, WXL_MOD_ARCH unset (the mod author's `cmake -S . -B build`): a
+#     superbuild. For every requested architecture it configures and builds the same source
+#     directory as a child project (ExternalProject) with WXL_MOD_ARCH set, selecting the
+#     architecture with the generator platform. Each child installs its DLL into the mod folder;
+#     the manifest is copied next to them.
+#   - Any other generator (Ninja, Makefiles), WXL_MOD_ARCH unset: the one architecture the
+#     compiler targets, built in this tree into the same mod folder. Run it once per architecture
+#     with the same OUTPUT_DIR, or install each tree into one folder, to fill the folder.
+#   - WXL_MOD_ARCH set (a child, or a tree a runtime's own build drives): the real library target
+#     <name>, linking wxl::sdk-mod, with an install rule into bin/<arch>/.
 #
-# Anything else the mod wants on its target goes inside `if(TARGET <name>)`: at the top level of
-# the superbuild there is no library target, only the per-architecture drivers.
+# A mod is C++20 unless it says otherwise: wxl::Log formats with std::format, which C++20 brings.
+# The SDK headers take C++17, for a mod whose code is written to it. Anything else the mod wants
+# on its target goes inside `if(TARGET <name>)`: at the top level of the superbuild there is no
+# library target, only the per-architecture drivers.
 #
 # Cache variables:
 #   WXL_MOD_TARGETS  overrides TARGETS from the command line, e.g. -DWXL_MOD_TARGETS=win-x64.
@@ -47,12 +53,15 @@ set(WXL_MOD_TARGETS "" CACHE STRING
 set(WXL_MOD_ARCH "" CACHE STRING
     "Architecture of this build tree. Set by the superbuild; leave empty to build every target.")
 
-# A child tree compiles; the superbuild above it never needs a compiler. The language is enabled
+# A child tree compiles, and so does a tree of a generator that builds one architecture; the
+# Visual Studio superbuild above its children never needs a compiler. The language is enabled
 # here, at file scope, so the mod's project() may say LANGUAGES NONE.
 if(WXL_MOD_ARCH)
     if(NOT WXL_MOD_ARCH IN_LIST _WXL_MOD_KNOWN_ARCHS)
         message(FATAL_ERROR "WXL_MOD_ARCH is '${WXL_MOD_ARCH}'; it must be one of: ${_WXL_MOD_KNOWN_ARCHS}")
     endif()
+    enable_language(CXX)
+elseif(NOT CMAKE_GENERATOR MATCHES "^Visual Studio")
     enable_language(CXX)
 endif()
 
@@ -114,9 +123,11 @@ function(_wxl_mod_manifest_string json key out)
 endfunction()
 
 # Checks the manifest against what this build produces and returns its id. Every architecture
-# built must be promised at the path it lands on, and every Windows architecture promised must
-# be built: a runtime takes the manifest at its word.
-function(_wxl_mod_check_manifest manifest archs output_name out_id)
+# built here (`archs`) must be promised at the path it lands on, and every Windows architecture
+# promised must be one the mod is built for (`declared`, the TARGETS of wxl_add_mod): a runtime
+# takes the manifest at its word. One that is declared but not built by this tree -- another
+# tree's, or one left out with WXL_MOD_TARGETS -- is only noted: the folder lacks it until then.
+function(_wxl_mod_check_manifest manifest archs declared output_name out_id)
     if(NOT EXISTS "${manifest}")
         message(FATAL_ERROR "wxl_add_mod: manifest not found: ${manifest}")
     endif()
@@ -141,9 +152,26 @@ function(_wxl_mod_check_manifest manifest archs output_name out_id)
         set(abi_major "${CMAKE_MATCH_1}")
         string(REGEX MATCH "WXL_ABI_VERSION_MINOR[ \t]+([0-9]+)" _ "${abi_src}")
         set(abi_minor "${CMAKE_MATCH_1}")
-        if(NOT abi STREQUAL "${abi_major}.${abi_minor}")
+        string(REGEX MATCH "WXL_ABI_VERSION_FEATURE[ \t]+([0-9]+)" _ "${abi_src}")
+        set(abi_feature "${CMAKE_MATCH_1}")
+        set(abi_headers "${abi_major}.${abi_minor}.${abi_feature}")
+        # The manifest names the lowest version the mod needs: the headers' major.minor, and a
+        # feature no higher than theirs.
+        if(abi MATCHES "^([0-9]+)\\.([0-9]+)$")
+            message(FATAL_ERROR "wxl_add_mod: ${manifest}: \"abi\" is \"${abi}\", the two-part "
+                "numbering the SDK used before 0.1.5. Set \"abi\": \"${abi_headers}\".")
+        endif()
+        set(abi_ok FALSE)
+        if(abi MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
+            if(CMAKE_MATCH_1 EQUAL abi_major AND CMAKE_MATCH_2 EQUAL abi_minor
+               AND NOT CMAKE_MATCH_3 GREATER abi_feature)
+                set(abi_ok TRUE)
+            endif()
+        endif()
+        if(NOT abi_ok)
             message(FATAL_ERROR "wxl_add_mod: ${manifest}: \"abi\" is \"${abi}\" but the SDK headers "
-                "are ${abi_major}.${abi_minor}. Set \"abi\": \"${abi_major}.${abi_minor}\".")
+                "are ${abi_headers}: the manifest can ask for ${abi_major}.${abi_minor}.0 to "
+                "${abi_headers}. Set \"abi\": \"${abi_headers}\".")
         endif()
     endif()
 
@@ -168,11 +196,14 @@ function(_wxl_mod_check_manifest manifest archs output_name out_id)
                     "but the build writes it to \"${expected}\". A runtime would look in the "
                     "wrong place: make the two agree.")
             endif()
+        elseif(promised AND arch IN_LIST declared)
+            message(STATUS "wxl_add_mod: ${arch} is not built by this tree: the mod folder lacks "
+                "${promised} until a build for ${arch} writes it there")
         elseif(promised)
             message(FATAL_ERROR "wxl_add_mod: ${manifest} promises \"${arch}\": \"${promised}\" "
-                "but ${arch} is not being built (targets: ${archs}). A runtime on that "
+                "but the mod is not built for ${arch} (TARGETS: ${declared}). A runtime on that "
                 "architecture would load a file that is not there.\n"
-                "  Build it:           -DWXL_MOD_TARGETS=${archs};${arch}\n"
+                "  Build it:           add ${arch} to the TARGETS of wxl_add_mod\n"
                 "  or stop promising:  remove \"${arch}\" from \"binaries\"")
         endif()
     endforeach()
@@ -204,14 +235,15 @@ function(_wxl_mod_check_toolchain arch)
         "so ${arch} cannot be built. Install it: Visual Studio Installer > Modify > Individual "
         "components > \"MSVC v14x - VS 20xx C++ x64/x86 build tools (Latest)\" (one component "
         "carries both targets), then configure again.\n"
-        "To build without it: -DWXL_MOD_TARGETS=<the others>, and drop \"${arch}\" from the "
-        "manifest's \"binaries\".")
+        "To build the others without it: -DWXL_MOD_TARGETS=<the others>; the mod folder then "
+        "lacks ${arch} until a build that has that toolchain writes it.")
 endfunction()
 
 # --- wxl_add_mod ------------------------------------------------------------------------------
 
 function(wxl_add_mod name)
-    cmake_parse_arguments(PARSE_ARGV 1 arg "" "MANIFEST;OUTPUT_NAME;OUTPUT_DIR" "SOURCES;TARGETS")
+    cmake_parse_arguments(PARSE_ARGV 1 arg "" "MANIFEST;OUTPUT_NAME;OUTPUT_DIR;CXX_STANDARD"
+        "SOURCES;TARGETS")
 
     if(arg_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR "wxl_add_mod(${name}): unknown arguments: ${arg_UNPARSED_ARGUMENTS}")
@@ -231,14 +263,83 @@ function(wxl_add_mod name)
     if(NOT arg_TARGETS)
         set(arg_TARGETS ${_WXL_MOD_KNOWN_ARCHS})
     endif()
+    if(NOT arg_CXX_STANDARD)
+        set(arg_CXX_STANDARD 20)
+    elseif(NOT arg_CXX_STANDARD MATCHES "^(17|20|23|26)$")
+        message(FATAL_ERROR "wxl_add_mod(${name}): CXX_STANDARD is '${arg_CXX_STANDARD}'; the SDK "
+            "headers take 17 or later (17, 20, 23)")
+    endif()
+    set(_WXL_MOD_CXX_STANDARD "${arg_CXX_STANDARD}")
     get_filename_component(manifest "${arg_MANIFEST}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 
     if(WXL_MOD_ARCH)
         _wxl_mod_add_library("${name}" "${arg_OUTPUT_NAME}" "${arg_SOURCES}")
-    else()
+    elseif(CMAKE_GENERATOR MATCHES "^Visual Studio")
         _wxl_mod_add_superbuild("${name}" "${arg_OUTPUT_NAME}" "${manifest}" "${arg_TARGETS}"
             "${arg_OUTPUT_DIR}")
+    else()
+        _wxl_mod_add_single("${name}" "${arg_OUTPUT_NAME}" "${manifest}" "${arg_TARGETS}"
+            "${arg_OUTPUT_DIR}" "${arg_SOURCES}")
     endif()
+endfunction()
+
+# The architecture the compiler of this tree targets: win-x64 or win-x86.
+function(_wxl_mod_compiler_arch out)
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(${out} win-x64 PARENT_SCOPE)
+    else()
+        set(${out} win-x86 PARENT_SCOPE)
+    endif()
+endfunction()
+
+# Single-tree role: a generator that cannot switch architecture builds the one its compiler
+# targets, as a library target of this tree, straight into the mod folder.
+function(_wxl_mod_add_single name output_name manifest default_targets output_dir sources)
+    _wxl_mod_compiler_arch(arch)
+    if(WXL_MOD_TARGETS)
+        set(wanted ${WXL_MOD_TARGETS})
+    else()
+        set(wanted ${default_targets})
+    endif()
+    foreach(one IN LISTS wanted)
+        if(NOT one IN_LIST _WXL_MOD_KNOWN_ARCHS)
+            message(FATAL_ERROR "wxl_add_mod(${name}): unknown target '${one}'; "
+                "the choices are: ${_WXL_MOD_KNOWN_ARCHS}")
+        endif()
+    endforeach()
+
+    if(NOT arch IN_LIST wanted)
+        if(WXL_MOD_TARGETS)
+            message(FATAL_ERROR "wxl_add_mod(${name}): this tree's compiler targets ${arch}, and "
+                "'${CMAKE_GENERATOR}' builds that one architecture only, but WXL_MOD_TARGETS asks "
+                "for ${wanted}. Configure this tree with a compiler for ${wanted}: on Windows from "
+                "the matching \"Native Tools Command Prompt\", from Linux with that architecture's "
+                "toolchain file. Or use a Visual Studio generator, which builds both from one tree.")
+        endif()
+        message(STATUS "${name}: built for ${wanted} only, and this tree's compiler targets "
+            "${arch}: nothing to build here")
+        return()
+    endif()
+
+    _wxl_mod_check_manifest("${manifest}" "${arch}" "${default_targets}" "${output_name}" id)
+    set(mod_dir "${output_dir}/${id}")
+    _wxl_mod_arch_dir("${arch}" dir)
+
+    set(WXL_MOD_ARCH "${arch}")
+    _wxl_mod_add_library("${name}" "${output_name}" "${sources}")
+    # The DLL lands in the mod folder as it is built, the manifest beside it, as the superbuild
+    # lays them out. `cmake --install` still writes bin/<arch>/ under the prefix it is given.
+    set_target_properties(${name} PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${mod_dir}/bin/${dir}"
+        LIBRARY_OUTPUT_DIRECTORY_DEBUG "${mod_dir}/bin/${dir}"
+        LIBRARY_OUTPUT_DIRECTORY_RELEASE "${mod_dir}/bin/${dir}"
+        LIBRARY_OUTPUT_DIRECTORY_RELWITHDEBINFO "${mod_dir}/bin/${dir}"
+        LIBRARY_OUTPUT_DIRECTORY_MINSIZEREL "${mod_dir}/bin/${dir}")
+    add_custom_command(TARGET ${name} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${manifest}" "${mod_dir}/mod.json"
+        COMMENT "${name}: mod.json -> ${mod_dir}")
+    message(STATUS "${name}: ${arch}  -> ${mod_dir}/bin/${dir}/${output_name}.dll "
+        "(one architecture per tree with '${CMAKE_GENERATOR}')")
 endfunction()
 
 # Child role: the library itself.
@@ -261,7 +362,7 @@ function(_wxl_mod_add_library name output_name sources)
     set_target_properties(${name} PROPERTIES
         OUTPUT_NAME "${output_name}"
         PREFIX ""
-        CXX_STANDARD 17
+        CXX_STANDARD ${_WXL_MOD_CXX_STANDARD}
         CXX_STANDARD_REQUIRED ON
         CXX_EXTENSIONS OFF)
     if(MSVC)
@@ -288,23 +389,10 @@ function(_wxl_mod_add_superbuild name output_name manifest default_targets outpu
         endif()
     endforeach()
 
-    _wxl_mod_check_manifest("${manifest}" "${archs}" "${output_name}" id)
+    _wxl_mod_check_manifest("${manifest}" "${archs}" "${default_targets}" "${output_name}" id)
     set(mod_dir "${output_dir}/${id}")
 
-    # Two architectures from one tree needs a generator that takes the platform as a parameter.
-    # Any other generator can still build the one architecture its environment is set up for.
-    set(is_vs FALSE)
-    if(CMAKE_GENERATOR MATCHES "^Visual Studio")
-        set(is_vs TRUE)
-    endif()
-    list(LENGTH archs arch_count)
-    if(NOT is_vs AND arch_count GREATER 1)
-        message(FATAL_ERROR "wxl_add_mod(${name}): building ${archs} from one tree needs a Visual "
-            "Studio generator, which selects the architecture per child project; "
-            "'${CMAKE_GENERATOR}' cannot. Configure with -G \"Visual Studio 17 2022\" (or the "
-            "version installed), or build one architecture from a matching developer prompt "
-            "with -DWXL_MOD_TARGETS=win-x64 or win-x86.")
-    endif()
+    # Only a Visual Studio generator gets here: it takes the platform as a parameter, per child.
 
     # Settings the children must see as this tree saw them.
     set(forward)
@@ -332,11 +420,8 @@ function(_wxl_mod_add_superbuild name output_name manifest default_targets outpu
         endif()
         _wxl_mod_check_toolchain("${arch}")
 
-        set(platform_args)
-        if(is_vs)
-            _wxl_mod_vs_platform("${arch}" platform)
-            set(platform_args CMAKE_GENERATOR_PLATFORM "${platform}")
-        endif()
+        _wxl_mod_vs_platform("${arch}" platform)
+        set(platform_args CMAKE_GENERATOR_PLATFORM "${platform}")
 
         # BUILD_ALWAYS hands every build to the child, whose own dependency tracking decides
         # whether anything is recompiled; the configure step runs once and the child

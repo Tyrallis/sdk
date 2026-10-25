@@ -4,6 +4,8 @@ One source, one command, two binaries. A mod is written once against the SDK hea
 for both runtimes in a single step: a 64-bit DLL for the recompiled client and a 32-bit DLL for
 the stock `Wow.exe`. Architecture lives in the folder, never in the file name.
 
+A mod written in Lua has nothing to build: [Lua mods](lua-mods.md) covers it.
+
 ## What you need
 
 - **CMake 3.21 or newer.**
@@ -38,9 +40,11 @@ wxl_add_mod(my-mod
 | `TARGETS` | `win-x64`, `win-x86`, or both | both |
 | `OUTPUT_NAME` | the DLL's base name | the target name |
 | `OUTPUT_DIR` | where the mod folder is assembled | `build/dist` |
+| `CXX_STANDARD` | the C++ standard the mod is compiled as: `17`, `20` or `23` | `20` |
 
-`LANGUAGES NONE` is deliberate: the top level drives the per-architecture builds and never needs a
-compiler; each child enables C++ itself.
+`LANGUAGES NONE` is deliberate: with Visual Studio the top level drives the per-architecture builds
+and never needs a compiler; each child enables C++ itself. With another generator the tree builds
+one architecture, and `wxl_add_mod` enables C++ there.
 
 ## The one command
 
@@ -74,9 +78,11 @@ The manifest's `binaries` table is checked at configure time against what the bu
 }
 ```
 
-Every architecture built must be listed at that path, and every architecture listed must be
-built. A manifest that promises a binary the folder does not hold is a packaging bug; the build
-says so instead of letting a runtime discover it.
+Every architecture built must be listed at that path, and every architecture listed must be one
+of the mod's `TARGETS`. A manifest that promises a binary the mod is never built for is a
+packaging bug; the build says so instead of letting a runtime discover it. An architecture the
+mod is built for, but not by this tree (below), is only noted at configure time: the folder lacks
+that DLL until a build of that architecture writes it.
 
 ## Installing into a client
 
@@ -89,22 +95,43 @@ from.
 
 ## Building one architecture
 
-Narrow the targets from the command line, and make the manifest agree:
+**With Visual Studio**, narrow the targets from the command line:
 
 ```sh
 cmake -S . -B build -DWXL_MOD_TARGETS=win-x64
 ```
 
-The configure output names what it skipped:
+The configure output names what it skipped, and the manifest can go on listing both:
 
 ```
+-- wxl_add_mod: win-x86 is not built by this tree: the mod folder lacks bin/x86/my-mod.dll until a build for win-x86 writes it there
 -- my-mod: win-x64  -> .../build/dist/my.mod/bin/x64/my-mod.dll
 -- my-mod: win-x86  skipped (not in the targets: win-x64)
 ```
 
-The manifest still has to match the folder, so `binaries` must list only `win-x64` for this to
-configure. That is strictness about the package, not about iteration: for a quick loop on one
-architecture, configure a child tree by hand and skip the packaging entirely:
+**With Ninja or Makefiles**, a tree builds one architecture: the one its compiler targets. On
+Windows that is the architecture of the developer prompt (*x64 Native Tools Command Prompt*, or
+*x86*); from Linux, that of the toolchain file. The DLL lands in the same mod folder layout:
+
+```sh
+cmake -S . -B build-x64 -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-x64                          # build-x64/dist/<id>/bin/x64/<name>.dll
+```
+
+For the folder to hold both, configure a second tree with the other compiler and install it into
+the first one's folder:
+
+```sh
+cmake -S . -B build-x86 -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-x86
+cmake --install build-x86 --prefix build-x64/dist/<id>
+```
+
+A mod whose `TARGETS` leave out the compiler's architecture builds nothing in that tree, and the
+configure says so.
+
+**For a quick loop** on one architecture, configure a child tree by hand and skip the packaging
+entirely:
 
 ```sh
 cmake -S . -B build-x86 -A Win32 -DWXL_MOD_ARCH=win-x86
@@ -131,7 +158,8 @@ endif()
 `WXL_MOD_ARCH` holds `win-x64` or `win-x86` in a child, and is empty at the top level, for
 anything that differs per architecture.
 
-The mod is compiled as C++17 with `/W4 /permissive-` (MSVC) or `-Wall -Wextra`.
+The mod is compiled as C++20 (`CXX_STANDARD` above) with `/W4 /permissive-` (MSVC) or `-Wall
+-Wextra`. The SDK headers compile clean at that level, as C++17 and as C++20.
 
 ## The C++ layer
 
@@ -140,23 +168,119 @@ Everything under `include/wxl/*.hpp` compiles into the mod and resolves to the C
 
 ### The mod
 
-Derive from `wxl::Mod`, declare it once with `WXL_MOD`. Each boot stage has a named virtual:
+Derive from `wxl::Mod`, declare it once with `WXL_MOD(Class, "id", "Name")`: the id is the
+manifest's, and the version is the manifest's alone. Each boot stage has a named virtual:
 `OnEarly`, `OnStorageReady`, `OnGraphicsReady`, `OnScriptReady`, `OnReady`, `OnShutdown`.
 `OnStage(wxl_stage)` still runs after each of them, for every stage, including one appended to
 the contract after this SDK was built. `OnLoad` runs before any stage and may refuse to load;
 `OnUnload` runs last, and `wxl::ScriptMgr` is cleared right after it so no handler outlives the
 code it points into.
 
+`wxl::Log(level, tag, text)` writes a line; with arguments after the text it formats them with
+`std::format`, checked at compile time: `wxl::Log(WXL_LOG_INFO, "my-mod", "map {} at {:.1f}", id,
+x)`. `wxl::ResultName(result)` names a `wxl_result` for such a line, and `wxl::ModId()` is the id
+`WXL_MOD` declared.
+
+### What a throw costs
+
+No C++ exception crosses into the runtime. The SDK catches one where it called the mod's code,
+logs it as an error under the mod's id with its `what()`, and stops what it interrupted:
+
+| Thrown from | Costs |
+|---|---|
+| the mod's constructor, `OnLoad` | the load: the mod is not loaded |
+| a stage's virtual, `OnStage`, `OnUnload` | the mod: the runtime disables it as it disables a mod that faults (`wxl_host.disable`), and none of its code runs again |
+| a script's handler, a `wxl::Subscribe` handler | that call: the next script, the next handler and the next event still run |
+| a function registered with `wxl.script` | that call: it fails on the script side with `what()` as its error |
+| a panel registered with `wxl.ui` | that frame's drawing of it |
+
+A runtime older than abi `0.1.8` has no `disable`: there the mod stops itself, dropping its
+scripts and running none of its remaining stages or its unload, and says so in the log. A
+destructor that throws still ends the process: C++ makes destructors `noexcept`.
+
 ### Events
 
 Derive from a script family (`WorldScript`, `RenderScript`, `ObjectScript`, `AssetScript`,
-`NetScript`, `LuaScript`), override the events you want, `wxl::ScriptMgr::Add(&script)`. `Add`
-subscribes only the events the script overrides, decided at compile time, so an event you leave
-alone costs nothing at all. That needs the script's own type: pass `&script`, not a pointer to its
-family, which hides what it overrides and makes `Add` subscribe the whole family to be safe. For one
-event outside a family, `wxl::Subscribe<WXL_EV_TargetChanged>(&handler)` calls
-`(*handler)(const wxl_target_args&)` and returns a `wxl::Subscription` that unsubscribes in its
-destructor. `wxl::EventArgsOf<WXL_EV_...>` names the args struct of any event.
+`NetScript`, `LuaScript`, `CombatScript`, `PlayerScript`, `GlueScript`, `ChatScript`), override
+the events you want,
+`wxl::ScriptMgr::Add(&script)`. `Add` subscribes only the events the script overrides, decided at
+compile time, so an event you leave alone costs nothing at all. That needs the script's own type:
+pass `&script`, not a pointer to its family, which hides what it overrides and makes `Add`
+subscribe the whole family to be safe.
+
+A handler takes the event's args as parameters, one per member of its struct in `fields.def`
+order:
+
+```cpp
+void OnMessageReceived(uint32_t opcode, wxl::Bytes data, wxl::Answer suppressed) override
+{
+    if (opcode == 0x1234 && !data.empty()) suppressed.Set(); // the client never sees it
+}
+```
+
+| Kind in `fields.def` | Parameter |
+|---|---|
+| `u32`, `i32`, `u64`, `i64`, `f32` | `uint32_t`, `int32_t`, `uint64_t`, `int64_t`, `float` |
+| `bool` | `bool` |
+| `handle` | `wxl::Object`, the object as a value (below); `object.As<wxl::Unit>()` reads it as its kind |
+| `guid`, `vec3` | `wxl_guid`, `wxl_vec3` |
+| `str` | `std::string_view`, valid for the call |
+| `bytes` | `wxl::Bytes`: `data()`, `size()`, a range of `uint8_t`, `View()` as characters; valid for the call |
+| `answer` | `wxl::Answer`: `Value()` is what earlier handlers decided, `Set()` answers |
+| `buffer` | `wxl::Buffer`: `Value()` is what it holds, `Write(text)` answers when the text and its terminator fit in `Capacity()` |
+| `ptr` | the member's C type |
+| `enum` (a `WXL_ARGS_ENUM` row) | the C enum it names: `wxl_object_type`, `wxl_script_context`, ... ([`enums.def`](../include/wxl/enums.def)) |
+
+A member that only gives the length of a bytes member or the capacity of a buffer is not a
+parameter: the view carries it. `wxl::HandlerOf<WXL_EV_...>` is the whole list as a function type.
+A member function named like a handler but taking other parameters would hide the family's virtual
+instead of overriding it; `Add` refuses it at compile time.
+
+For one event outside a family, `wxl::Subscribe<WXL_EV_TargetChanged>(&handler)` calls the
+handler with the same parameters and returns a `wxl::Subscription` that unsubscribes in its
+destructor. `wxl::EventArgsOf<WXL_EV_...>` names the args struct of any event: what a C handler
+receives, and what `wxl::Emit` raises.
+`wxl::Raises(WXL_EV_...)` (abi `0.1.13`) says whether the runtime raises an event at all, for a
+mod that offers what the runtime has rather than asking for one event; it is false on an older
+runtime, which cannot say.
+
+### Loading and updates
+
+Seven events follow what the client loads and how objects change. Each is raised only while a
+mod listens to it -- until then the client does not read what it would carry -- so they cost
+nothing to the mods that leave them alone. Two are busy: `OnTextureLoad` runs for every texture
+reference, `OnFileOpened` for every open (on whichever thread opens the file).
+
+| Event | When | Parameters |
+|---|---|---|
+| `ObjectScript::OnObjectUpdate` | a server update changed an object's fields; once per object and packet, once the packet is applied | `wxl::Object`, its guid, its type |
+| `ObjectScript::OnDoodadSpawn` | the map placed a doodad (of a tile, of a building, or one the game puts down) | the doodad (`WXL_HANDLE_NONE`: it is not an object of `wxl.object`), the model's path, its position |
+| `AssetScript::OnModelLoad` | a model file has been read, before the client parses it | the path, the bytes, and two pointers to answer through |
+| `AssetScript::OnTextureLoad` | a texture is asked for by name, cached or not | the path |
+| `AssetScript::OnMapObjectLoad` | a building's root file has been read, before the client walks it | the path, the bytes |
+| `AssetScript::OnFileOpened` | an open finished, found or not | the path opened (after any `OnFileOpen` redirect), whether it was found, its size |
+| `AssetScript::OnClientDbLoaded` | the client has loaded its databases, once per table | the file's name, the records, their count and size |
+
+`OnModelLoad` can be answered with other bytes. Point `*replacement` at them and set
+`*replacement_size`: once every handler has run, the runtime copies them into a buffer of the
+client's own and the client parses that instead of the file. Your buffer only has to outlive the
+event. The last handler to write wins, so read `*replacement` first if another mod may answer
+too:
+
+```cpp
+void OnModelLoad(std::string_view path, wxl::Bytes data, const void** replacement,
+                 uint32_t* replacement_size) override
+{
+    if (path != "Creature\\Boar\\Boar.m2" || *replacement) return;
+    bigger_ = LoadMyBoar();                       // a std::vector<uint8_t> member of the script
+    *replacement      = bigger_.data();
+    *replacement_size = static_cast<uint32_t>(bigger_.size());
+}
+```
+
+The bytes have to be a model the client can parse: a file of the same version, as the client's
+own tools write it. If the runtime cannot make the copy, the log says so and the client parses
+the file as it read it.
 
 ### Reads that can fail
 
@@ -164,8 +288,8 @@ Every read through a service answers `wxl::Expected<T>` (`include/wxl/expected.h
 or the `wxl_result` that stood in for it.
 
 ```cpp
-wxl::Expected<uint32_t> hp = unit.Health();
-if (hp)                        // a value; 0 means the unit is dead
+wxl::Expected<int32_t> hp = unit.Health();
+if (hp)                        // a value; 0 or less means the unit is dead
 else if (hp.IsNotFound())      // the handle is stale: the unit is gone
 else if (hp.IsUnsupported())   // this runtime has no object service
 ```
@@ -195,12 +319,95 @@ auto alive = std::count_if(view.begin(), view.end(),
 `ObjectView<T>` holds handles and builds a `T` on access, so a unit that left between the
 snapshot and the visit reads as gone. `objects.Positions(view)` reads every position in one call.
 
+A handle names one visibility episode: from the `ObjectCreate` that announces the object to the
+`ObjectDestroy` that sees it leave. An object that leaves view and comes back is announced again,
+as another `wxl::Object` with the same `Guid()`. Key by `Guid()` what must outlast that; key by
+the object what belongs to one episode, with `wxl::ObjectMap<T>` (`wxl/objects/map.hpp`), which
+erases an entry when its object leaves -- after the mod's own `OnObjectDestroy` has run:
+
+```cpp
+wxl::ObjectMap<uint32_t> hits;                                // a member of the script
+void OnUnitDeath(wxl::Object unit) override { ++hits[unit]; } // gone with the unit
+```
+
+### Descriptor fields
+
+Every object carries a block of dwords the server fills: its descriptor fields, all of them in
+[`include/wxl/update_fields.def`](../include/wxl/update_fields.def) with the client's names, dword
+indices, sizes and what they hold. `wxl/objects/fields.hpp` turns each row into a typed constant,
+`wxl::field::<Kind>::<Name>` -- `UNIT_FIELD_HEALTH` is `wxl::field::Unit::Health`, `PLAYER_XP`
+`wxl::field::Player::Xp` -- and `Field` reads it as the type its row says (abi `0.1.9`; on an older
+runtime every call answers `WXL_E_UNSUPPORTED`):
+
+```cpp
+wxl::Expected<int32_t> health = unit.Field(wxl::field::Unit::Health);
+wxl::Expected<float>   arcane = unit.Field(wxl::field::Unit::Resistances, 6); // element 6 of 7
+wxl::Expected<wxl_guid> aim   = unit.Field(wxl::field::Unit::Target);
+auto bytes = unit.Field(wxl::field::Unit::Bytes0);  // std::array<uint8_t, 4>: race, class, sex, power
+```
+
+A field of a kind the object is not -- a unit's field asked of a game object -- answers
+`WXL_E_INVALID`, as does a player other than the active one asked for a field past
+`PLAYER_FIELD_PAD_0`: the client keeps those for the player it controls only. `Fields(field)`
+reads every element, `RawFields(first, count)` the dwords by index, and
+`wxl::ObjectService().Fields(view, field)` one field of a whole view in one call.
+
+`SetField(field, value)` writes the client's copy. The server's next update of the field puts its
+own value back, and nothing else learns of the write: no handler of the client runs and no model
+is rebuilt. The guid and the type are refused.
+
+To hear of a change, ask for the field once, then override `OnObjectFieldChanged` in an
+`ObjectScript`:
+
+```cpp
+wxl::ObjectService().Watch(wxl::field::Unit::Health);   // in the mod's OnLoad, say
+
+void OnObjectFieldChanged(wxl::Object object, wxl_object_type, uint32_t field, uint32_t,
+                          wxl::FieldValue was, wxl::FieldValue now) override
+{
+    if (field == wxl::field::Unit::Health.index && now.As(wxl::field::Unit::Health) == 0)
+        ... // a unit's health reached 0
+}
+```
+
+`Watch` takes the field's own kind -- units and players, here -- or the type given
+(`Watch(wxl::field::Unit::Health, WXL_OBJECT_PLAYER)`), and nothing is raised for a field nobody
+asked for. The client sees a change by comparing a field with a copy it keeps from before the
+update, which it keeps for most fields and not all: the `watch` column of `update_fields.def` says
+which, and `Watch` answers `WXL_E_UNSUPPORTED` for the others, naming them in the log.
+
+The watch is your mod's: your handlers receive the changes of the fields you watch, and another
+mod's watches do not reach them. Each `Watch` call is one watch, given back by one
+`Unwatch(wxl::field::Unit::Health)` (abi `0.1.10`), and every watch you still hold is given back
+when your mod is disabled or unloaded. The simplest way to hold one is a `wxl::FieldWatch`: it
+watches from its construction and gives the watch back in its destructor, so as a member of your
+script it lasts exactly as long as the script:
+
+```cpp
+class Health final : public wxl::ObjectScript
+{
+    wxl::FieldWatch watch_{wxl::field::Unit::Health};   // watched while this script lives
+
+    void OnObjectFieldChanged(wxl::Object, wxl_object_type, uint32_t field, uint32_t,
+                              wxl::FieldValue, wxl::FieldValue now) override { ... }
+};
+```
+
+`if (!watch_)` tells you the watch was refused, and `watch_.Result()` why.
+
+The short names of the constants are the client's names with the kind's prefix dropped and each
+word capitalised. Where the client runs words together, the name splits them the way the getters
+do: `UNIT_FIELD_MAXHEALTH` is `wxl::field::Unit::MaxHealth`, as `unit.MaxHealth()` reads it, and
+`UNIT_FIELD_BOUNDINGRADIUS` is `BoundingRadius`. A field and a getter of one name always read the
+same value, in the same type: health is an `int32_t` both ways, as the client holds it (it takes
+0 or less for dead).
+
 ### Services
 
 Each service has a typed facade with its name and version sealed in: `wxl::ObjectService`,
-`wxl::ScriptService`, `wxl::StorageService`, `wxl::NetService`, `wxl::UiService`,
-`wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService` (`include/wxl/services/*.hpp`,
-or all of them through `include/wxl/services.hpp`). A facade is stateless -- construct one
+`wxl::ScriptService`, `wxl::StorageService`, `wxl::DataService`, `wxl::NetService`,
+`wxl::UiService`, `wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService`
+(`include/wxl/services/*.hpp`, or all of them through `include/wxl/services.hpp`). A facade is stateless -- construct one
 wherever it is needed -- and resolves its table on first use. It tests false while the runtime
 does not publish the service, and every call through it then answers `WXL_E_UNSUPPORTED` or the
 empty object.
@@ -208,6 +415,7 @@ empty object.
 ```cpp
 wxl::ScriptService script;
 script.RegisterFunction<&Greet>("Greet");       // void Greet(wxl::ScriptCall&)
+script.RegisterFunction<&Api::Count>("Count", this); // this->Count(wxl::ScriptCall&)
 script.RegisterFunction("Add", &adder);          // (*adder)(wxl::ScriptCall&)
 script.FireEvent("MY_EVENT", {wxl::Value::Number(1), wxl::Value::String("x")});
 
@@ -215,13 +423,86 @@ wxl::StorageService storage;
 if (wxl::Expected<std::string> text = storage.ReadText("Interface\\x.lua")) ...
 ```
 
+The plain methods of a facade -- a string or a number in, a result, a bool, a string or an
+`Expected` out -- are not written in its header: each is a row of the service's table, beside its
+C header (`include/wxl/services/storage.def` for `wxl.storage`), and the facade takes it from
+there. The row names the C member and what it takes and answers, so the method calls the member
+when the runtime's table reaches it and answers as a missing service does when it does not:
+
+```cpp
+// storage.def:
+//   WXL_API(storage, add_search_path, AddSearchPath, result, (str directory, i32 priority), ...)
+wxl::StorageService storage;
+if (storage.AddSearchPath("Mods\\mymod\\assets", 1) != WXL_OK) ...   // a wxl_result
+wxl::Expected<uint64_t> size = storage.Size("Interface\\x.blp");       // out<u64>: an Expected
+
+wxl::DataService data;
+if (!data.IsLoaded("Spell.dbc")) data.ServeTable("Spell.dbc", "Mods\\mymod\\Spell.dbc");
+```
+
+A folder added to the search is your mod's. `storage.RemoveSearchPath("Mods\\mymod\\assets")`
+(abi `0.1.10`) takes it back out, and the runtime takes out every folder your mod still has in the
+search when the mod is disabled or unloaded: a mod that goes leaves no folder behind for the
+others to trip on. A folder another mod added is its own; removing it answers `WXL_E_NOT_FOUND`.
+
+To have the client open one file in place of another, redirect the name rather than answer
+`OnFileOpen`: the client opens most files on its loading threads, and a redirect is answered by the
+runtime on every thread, before any handler runs. `storage.Redirect(name, other)` (abi `0.1.15`)
+makes every open of `name` open `other`, found as any name is; `storage.Unredirect(name)` takes it
+back, and the runtime takes back what your mod still holds when it is disabled or unloaded. Names
+are compared as the client compares them, in any case and with either slash; when two mods
+redirect one name, the later wins and taking it back uncovers the earlier. An `OnFileOpen` handler
+sees the redirect's answer in `redirect` and may still write its own.
+
+What C++ does better than the raw table stays written by hand in the header: `Read` into a
+vector, `Open` as a `wxl::File` that closes itself, `Find` as a vector of strings, the templates
+of `RegisterFunction`. The same rows build the Lua modules of `wxl.lua`, so a member reaches C++
+and Lua alike from its one row.
+
 `wxl::Service<T>(name, version)` still gives the raw table, for a service these do not cover.
+
+### Profiling memory
+
+`wxl::FootprintService` (abi `0.1.11`) measures where the client's memory goes: Storm's
+allocations by the source file that asked, the big consumers outside Storm, and the address space,
+whose largest free block is what the 32-bit client runs out of first. Counting Storm's allocations
+costs about a tenth of a microsecond on each, so it waits for a mod to start it; start it early,
+in `OnLoad`, to follow everything after:
+
+```cpp
+const wxl::FootprintService footprint;
+footprint.Start();                                   // Storm's allocations from now on
+footprint.WatchPressure(256ull * 1024 * 1024);       // OnMemoryPressure under 256 MB free in one block
+
+// later, on the main thread
+footprint.Snapshot();
+for (const wxl::footprint::Source& source : footprint.Sources())        // largest first
+    wxl::Log(WXL_LOG_INFO, "mymod", "%s: %llu bytes in %llu blocks", source.file.c_str(),
+             (unsigned long long)source.bytes, (unsigned long long)source.count);
+for (const wxl::footprint::Region& region : footprint.Regions())
+    if (region.state == "free")
+        wxl::Log(WXL_LOG_INFO, "mymod", "largest free block: %llu", (unsigned long long)region.largest);
+```
+
+`Categories()`, `Archives()` and `Tables()` read the same picture. To show what your own mod
+holds next to the client's numbers, report it: `footprint.Report("cache", bytes, count)` appears
+among the categories under your mod's id until you report it again or the mod goes. The
+categories overlap (the client's Lua, its databases and its archives' tables are Storm
+allocations too); `include/wxl/services/footprint.h` says what each one counts. The Lua example
+`examples/memory-report/` turns all of it into a report you can read.
+
+### Profiling time
+
+The runtime carries the Tracy profiler: connect its viewer and every event, every mod's handler
+and every frame shows on a timeline. `wxl/services/profile.hpp` (abi `0.1.12`) adds your own
+zones, `WXL_PROFILE_ZONE("Journal::Flush");` for the rest of a block, and graphs, messages and
+frame sets through `wxl::ProfileService`. [Profiling](profiling.md) walks through it.
 
 ### Resources
 
 Whatever the C boundary hands back as a token comes back as a move-only object that releases in
 its destructor: `wxl::Subscription`, `wxl::Hook`, `wxl::Patch`, `wxl::File`, `wxl::OpcodeClaim`,
-`wxl::Panel`. Each has `Reset()` to release early (safe to repeat) and `Release()` to disown the
+`wxl::Panel`, and `wxl::FieldWatch`, which holds a watch rather than a token. Each has `Reset()` to release early (safe to repeat) and `Release()` to disown the
 token for code that manages it by hand. Keep them as members of the mod or of a script, and they
 go when it goes -- before the DLL does.
 
@@ -234,8 +515,9 @@ false when a write is refused, so a mod can stop and let what went before undo i
 Studio Installer > Modify > Individual components > *MSVC v14x - C++ x64/x86 build tools*. Or
 build `win-x64` alone, as above.
 
-**`mod.json promises "win-x86" ... but win-x86 is not being built`** -- the targets were narrowed
-and the manifest was not. Remove the entry, or build both.
+**`mod.json promises "win-x86" ... but the mod is not built for win-x86`** -- the `TARGETS` of
+`wxl_add_mod` leave out an architecture the manifest lists. Add it to `TARGETS`, or remove the
+entry.
 
 **`mod.json promises no binary for win-x86, which this build produces`** -- the opposite: add the
 entry, at the path the message gives.
@@ -244,13 +526,21 @@ entry, at the path the message gives.
 path in the manifest is not where the DLL lands. `OUTPUT_NAME` sets the file name; the folder is
 always `bin/<arch>/`.
 
-**`"abi" is "x.y" but the SDK headers are a.b`** -- the manifest claims a contract version the
-headers it was built against do not carry. Set it to what the message says.
+**`"abi" is "x.y.z" but the SDK headers are a.b.c`** -- the manifest asks for a contract version
+the headers it was built against do not carry: another major or minor, or a later feature. Set it
+to what the message says.
 
-**`building win-x64;win-x86 from one tree needs a Visual Studio generator`** -- with Ninja or
-Makefiles, CMake cannot pick the architecture per child project. Use `-G "Visual Studio 17 2022"`
-(any installed version), or build one architecture from a developer prompt of that architecture
-with `-DWXL_MOD_TARGETS=`.
+**`"abi" is "x.y", the two-part numbering the SDK used before 0.1.5`** -- the manifest predates
+the three-part version. Set it to what the message says.
+
+**`this tree's compiler targets win-x86, and 'Ninja' builds that one architecture only, but
+WXL_MOD_TARGETS asks for win-x64`** -- with Ninja or Makefiles the compiler decides the
+architecture. Configure the tree from a prompt, or with a toolchain file, of the architecture you
+want, and drop `WXL_MOD_TARGETS`; or use `-G "Visual Studio 17 2022"` to build both from one tree.
+
+**`wxl::Log with arguments formats them with std::format, which this standard library does not
+have`** -- the mod is compiled as C++17, or with a standard library older than `std::format`. Use
+`CXX_STANDARD 20` (the default), or log a text you build yourself.
 
 **`this tree is WXL_MOD_ARCH=win-x64 (64-bit) but the compiler targets 32-bit`** -- a hand-made
 child tree with the wrong `-A`. Match them.

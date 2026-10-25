@@ -5,11 +5,14 @@
 // passes the same file by linking its own host in place of the fake one.
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "fake_host.hpp"
@@ -88,35 +91,34 @@ namespace
         float    lastDelta   = 0.0f;
         uint32_t lastMap     = 0;
 
-        void OnUpdate(const wxl_update_args& args) override
+        void OnUpdate(float delta) override
         {
             ++updates;
-            lastDelta = args.delta;
+            lastDelta = delta;
         }
 
-        void OnWorldEnter(const wxl_world_args& args) override
+        void OnWorldEnter(uint32_t map_id, wxl_vec3) override
         {
             ++worldEnters;
-            lastMap = args.map_id;
+            lastMap = map_id;
         }
 
-        void OnInput(const wxl_input_args& args) override
+        void OnInput(uint32_t message, uint64_t, int64_t, wxl::Answer handled) override
         {
-            if (args.handled && *args.handled == WXL_FALSE && args.message == 0x100)
-                *args.handled = WXL_TRUE;
+            if (!handled.Value() && message == 0x100) handled.Set();
         }
     };
 
     struct CountingRenderScript final : wxl::RenderScript
     {
         int frames = 0;
-        void OnFrameBegin(const wxl_frame_args&) override { ++frames; }
+        void OnFrameBegin(uint64_t, float) override { ++frames; }
     };
 
     struct SecondWorldScript final : wxl::WorldScript
     {
         int updates = 0;
-        void OnUpdate(const wxl_update_args&) override { ++updates; }
+        void OnUpdate(float) override { ++updates; }
     };
 
     struct CountingNetScript final : wxl::NetScript
@@ -124,11 +126,11 @@ namespace
         int      received   = 0;
         uint32_t lastOpcode = 0;
 
-        void OnMessageReceived(const wxl_message_args& args) override
+        void OnMessageReceived(uint32_t opcode, wxl::Bytes, wxl::Answer suppressed) override
         {
             ++received;
-            lastOpcode = args.opcode;
-            if (args.suppressed && args.opcode == 0xF001) *args.suppressed = WXL_TRUE;
+            lastOpcode = opcode;
+            if (opcode == 0xF001) suppressed.Set();
         }
     };
 
@@ -141,7 +143,7 @@ namespace
     struct LeaveWorldScript final : wxl::WorldScript
     {
         int leaves = 0;
-        void OnWorldLeave(const wxl_world_args&) override { ++leaves; }
+        void OnWorldLeave(uint32_t, wxl_vec3) override { ++leaves; }
     };
 
     struct PrivateWorldScript final : wxl::WorldScript
@@ -149,7 +151,7 @@ namespace
         int clicks = 0;
 
     private:
-        void OnWorldClick(const wxl_world_click_args&) override { ++clicks; }
+        void OnWorldClick(wxl_vec3, wxl::Object, wxl_mouse_button) override { ++clicks; }
     };
 
     struct ProtectedWorldScript final : wxl::WorldScript
@@ -157,13 +159,13 @@ namespace
         int sounds = 0;
 
     protected:
-        void OnSoundPlay(const wxl_sound_args&) override { ++sounds; }
+        void OnSoundPlay(uint32_t, std::string_view, wxl::Answer) override { ++sounds; }
     };
 
     struct MidWorldScript : wxl::WorldScript
     {
         int updates = 0;
-        void OnUpdate(const wxl_update_args&) override { ++updates; }
+        void OnUpdate(float) override { ++updates; }
     };
 
     struct LeafWorldScript final : MidWorldScript
@@ -178,7 +180,7 @@ namespace
         SecondWorldScript* remove     = nullptr;
         bool               removeSelf = false;
 
-        void OnUpdate(const wxl_update_args&) override
+        void OnUpdate(float) override
         {
             ++updates;
             if (add) wxl::ScriptMgr::Add(std::exchange(add, nullptr));
@@ -193,13 +195,13 @@ namespace
         int      closing     = 0;
         uint32_t lastContext = 0;
 
-        void OnScriptVmReady(const wxl_script_vm_args& args) override
+        void OnScriptVmReady(wxl_script_context context, void*) override
         {
             ++ready;
-            lastContext = args.context;
+            lastContext = context;
         }
 
-        void OnScriptVmClosing(const wxl_script_vm_args&) override { ++closing; }
+        void OnScriptVmClosing(wxl_script_context, void*) override { ++closing; }
     };
 
     /// A typed handler for the free-standing Subscribe.
@@ -207,10 +209,44 @@ namespace
     {
         int   ticks = 0;
         float last  = 0.0f;
-        void  operator()(const wxl_update_args& args)
+        void  operator()(float delta)
         {
             ++ticks;
-            last = args.delta;
+            last = delta;
+        }
+    };
+
+    /// Reads every kind of parameter a handler can be given, and answers through the writable ones.
+    struct ParameterScript final : wxl::AssetScript
+    {
+        std::string path;
+        std::string redirectSeen;
+        uint32_t    capacity = 0;
+        bool        wrote    = false;
+        std::string body;
+
+        void OnFileOpen(std::string_view asked, wxl::Buffer redirect) override
+        {
+            path         = std::string(asked);
+            redirectSeen = std::string(redirect.Value());
+            capacity     = redirect.Capacity();
+            wrote        = redirect.Write("Textures\\swapped.blp");
+        }
+
+        void OnMapObjectLoad(std::string_view, wxl::Bytes data) override
+        {
+            body.assign(data.View());
+            for (uint8_t byte : data) body += static_cast<char>('0' + byte % 10);
+        }
+    };
+
+    /// Sees what an earlier handler answered.
+    struct LateNetScript final : wxl::NetScript
+    {
+        bool sawAnswer = false;
+        void OnMessageReceived(uint32_t, wxl::Bytes, wxl::Answer suppressed) override
+        {
+            sawAnswer = suppressed.Value();
         }
     };
 
@@ -220,21 +256,64 @@ namespace
     {
         static inline std::vector<std::string> trace;
         static inline CountingWorldScript*     script = nullptr;
+        static inline std::string              throwIn; ///< the method that throws; OnStage throws an int
+
+        static void Trace(const char* step, const char* method)
+        {
+            trace.push_back(step);
+            if (throwIn != method) return;
+            if (throwIn == "OnStage") throw 42;
+            throw std::runtime_error(std::string("boom in ") + method);
+        }
 
         wxl_result OnLoad() override
         {
-            trace.push_back("load");
             if (script) wxl::ScriptMgr::Add(script);
+            Trace("load", "OnLoad");
             return WXL_OK;
         }
-        void OnEarly() override { trace.push_back("early"); }
-        void OnStorageReady() override { trace.push_back("storage"); }
-        void OnGraphicsReady() override { trace.push_back("graphics"); }
-        void OnScriptReady() override { trace.push_back("script"); }
-        void OnReady() override { trace.push_back("ready"); }
-        void OnShutdown() override { trace.push_back("shutdown"); }
-        void OnStage(wxl_stage stage) override { trace.push_back("stage" + std::to_string(stage)); }
-        void OnUnload() override { trace.push_back("unload"); }
+        void OnEarly() override { Trace("early", "OnEarly"); }
+        void OnStorageReady() override { Trace("storage", "OnStorageReady"); }
+        void OnGraphicsReady() override { Trace("graphics", "OnGraphicsReady"); }
+        void OnScriptReady() override { Trace("script", "OnScriptReady"); }
+        void OnReady() override { Trace("ready", "OnReady"); }
+        void OnShutdown() override { Trace("shutdown", "OnShutdown"); }
+        void OnStage(wxl_stage stage) override
+        {
+            Trace(("stage" + std::to_string(stage)).c_str(), "OnStage");
+        }
+        void OnUnload() override { Trace("unload", "OnUnload"); }
+    };
+
+    /// A script that throws from its handler, every time.
+    struct ThrowingWorldScript final : wxl::WorldScript
+    {
+        int  calls = 0;
+        void OnUpdate(float) override
+        {
+            ++calls;
+            throw std::runtime_error("tick");
+        }
+    };
+
+    /// A handler for wxl::Subscribe that throws what is not a std::exception.
+    struct ThrowingHandler
+    {
+        int  calls = 0;
+        void operator()(float)
+        {
+            ++calls;
+            throw 7;
+        }
+    };
+
+    /// Script functions as members of an object, one of them throwing.
+    struct Counter
+    {
+        int  count = 0;
+        void Next(wxl::ScriptCall& call) { call.PushNumber(++count); }
+        void Peek(wxl::ScriptCall& call) const { call.PushNumber(count); }
+        void Throws(wxl::ScriptCall&) { throw std::runtime_error("no counting today"); }
     };
 
     // --- script-side functions --------------------------------------------------------------
@@ -276,10 +355,13 @@ namespace
 } // namespace
 
 // The entry points the WXL_MOD macro writes, exercised in-process.
-WXL_MOD(LifecycleMod, "wxl.contract", "Contract", 1)
+WXL_MOD(LifecycleMod, "wxl.contract", "Contract")
 
 int main()
 {
+    // Unbuffered, so the last line printed before a crash is never held back in a buffer.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+
     wxltest::FakeHost host;
     wxl::detail::HostRef() = host.Table();
 
@@ -296,13 +378,63 @@ int main()
               "EventArgs binds each id to its args struct");
     }
 
+    Section("handler parameters");
+    {
+        Check(std::is_same_v<wxl::HandlerOf<WXL_EV_Update>, void(float)>,
+              "a handler takes the members as parameters");
+        Check(std::is_same_v<wxl::HandlerOf<WXL_EV_MessageReceived>,
+                             void(uint32_t, wxl::Bytes, wxl::Answer)>,
+              "a bytes member is a view, and the member holding its length is not a parameter");
+        Check(std::is_same_v<wxl::HandlerOf<WXL_EV_FileOpen>, void(std::string_view, wxl::Buffer)>,
+              "a str is a string_view, a buffer a view whose capacity is not a parameter");
+        Check(std::is_same_v<wxl::HandlerOf<WXL_EV_WorldEnter>, void(uint32_t, wxl_vec3)> &&
+                  std::is_same_v<wxl::HandlerOf<WXL_EV_UnitAuraChanged>,
+                                 void(wxl::Object, uint32_t, bool)>,
+              "values, vectors, objects and booleans keep their order");
+        Check(std::is_same_v<wxl::HandlerOf<WXL_EV_ScriptVmReady>, void(wxl_script_context, void*)> &&
+                  std::is_same_v<wxl::HandlerOf<WXL_EV_WorldClick>,
+                                 void(wxl_vec3, wxl::Object, wxl_mouse_button)>,
+              "a member holding an enumeration's values arrives as that enum");
+        Check(std::is_same_v<wxl::HandlerOf<WXL_EV_ModelLoad>,
+                             void(std::string_view, wxl::Bytes, const void**, uint32_t*)>,
+              "a ptr member keeps its C type");
+
+        uint8_t     raw[3] = {1, 2, 3};
+        wxl::Bytes  bytes(raw, 3);
+        wxl::Bytes  none(nullptr, 5);
+        Check(bytes.size() == 3 && bytes[2] == 3 && !bytes.empty() && none.empty() &&
+                  none.View().empty(),
+              "Bytes is a range, and empty over a null pointer whatever the length says");
+
+        wxl_bool    flag = WXL_FALSE;
+        wxl::Answer answer(&flag);
+        Check(!answer.Value() && answer.Set() && flag == WXL_TRUE && answer.Value(),
+              "Answer reads the flag and sets it");
+        Check(!wxl::Answer(nullptr).Set() && !wxl::Answer(nullptr).Value(),
+              "an Answer without a flag answers nothing");
+
+        char        storage[8] = {};
+        wxl::Buffer buffer(storage, sizeof storage);
+        Check(buffer.Value().empty() && buffer.Capacity() == 8, "a Buffer starts empty");
+        Check(buffer.Write("1234567") && buffer.Value() == "1234567" && storage[7] == '\0',
+              "a string that fits with its terminator is written");
+        Check(!buffer.Write("12345678") && buffer.Value() == "1234567",
+              "one that does not is refused and leaves the buffer as it was");
+        Check(!wxl::Buffer(nullptr, 8).Write("") && wxl::Buffer(nullptr, 8).Capacity() == 0,
+              "a Buffer without storage takes nothing");
+    }
+
     Section("version negotiation");
     {
         const wxl_runtime_info* info = host.Table()->runtime();
         Check(info != nullptr, "the runtime describes itself");
         Check(info->abi_major == WXL_ABI_VERSION_MAJOR, "majors agree");
-        Check(info->abi_minor >= WXL_ABI_VERSION_MINOR,
+        Check(info->abi_minor == WXL_ABI_VERSION_MINOR, "and, under major 0, minors");
+        Check(info->abi_feature >= WXL_ABI_VERSION_FEATURE,
               "the runtime is not older than what this mod was built against");
+        Check(host.Table()->abi_major == info->abi_major && host.Table()->abi_minor == info->abi_minor &&
+                  host.Table()->abi_feature == info->abi_feature,
+              "the table and the runtime info say the same version");
         Check(info->struct_size == sizeof(wxl_runtime_info), "struct_size is filled in");
     }
 
@@ -358,6 +490,20 @@ int main()
 
         Check(!wxl::Subscribe<WXL_EV_Update>(static_cast<TickHandler*>(nullptr)),
               "a null handler yields an empty subscription");
+
+        uint32_t seenOpcode = 0, seenSize = 0;
+        auto     onMessage  = [&](uint32_t opcode, wxl::Bytes data, wxl::Answer suppressed) {
+            seenOpcode = opcode;
+            seenSize   = data.size();
+            suppressed.Set();
+        };
+        wxl::Subscription message = wxl::Subscribe<WXL_EV_MessageReceived>(&onMessage);
+        wxl_bool               kept    = WXL_FALSE;
+        const uint8_t          body[2] = {7, 8};
+        const wxl_message_args args{0x42, body, sizeof body, &kept};
+        host.Raise(WXL_EV_MessageReceived, &args);
+        Check(seenOpcode == 0x42 && seenSize == 2 && kept == WXL_TRUE,
+              "a lambda takes the parameters and answers through them");
     }
 
     Section("script dispatch");
@@ -406,6 +552,30 @@ int main()
         host.Raise(WXL_EV_MessageReceived, &message);
         Check(net.received == 1 && net.lastOpcode == 0xF001, "the net family runs");
         Check(suppressed == WXL_TRUE, "a mod can take an opcode the client does not know");
+
+        LateNetScript late;
+        wxl::ScriptMgr::Add(&late);
+        suppressed = WXL_FALSE;
+        host.Raise(WXL_EV_MessageReceived, &message);
+        Check(late.sawAnswer, "a later handler sees the answer an earlier one gave");
+        wxl::ScriptMgr::Remove(&late);
+
+        ParameterScript asset;
+        wxl::ScriptMgr::Add(&asset);
+        char                     redirect[32] = "Textures\\first.blp";
+        const char*              asked        = "Textures\\asked.blp";
+        const wxl_file_open_args open{wxl::Str(asked), redirect, sizeof redirect};
+        host.Raise(WXL_EV_FileOpen, &open);
+        Check(asset.path == asked && asset.redirectSeen == "Textures\\first.blp" &&
+                  asset.capacity == sizeof redirect,
+              "a str and a buffer arrive as views, with what an earlier handler wrote");
+        Check(asset.wrote && std::strcmp(redirect, "Textures\\swapped.blp") == 0,
+              "and a handler answers by writing into the buffer");
+        const uint8_t             root[3] = {'a', 1, 12};
+        const wxl_map_object_args mapObject{wxl::Str("x.wmo"), root, sizeof root};
+        host.Raise(WXL_EV_MapObjectLoad, &mapObject);
+        Check(asset.body == std::string("a\x01\x0c", 3) + "712", "bytes arrive with their length");
+        wxl::ScriptMgr::Remove(&asset);
 
         const wxl_script_vm_args vm{WXL_SCRIPT_CONTEXT_GAME, nullptr};
         host.Raise(WXL_EV_ScriptVmReady, &vm);
@@ -542,7 +712,10 @@ int main()
         const size_t before = host.LiveSubscriptions();
         LifecycleMod::script = &world;
 
-        Check(wxl_mod_query()->abi_major == WXL_ABI_VERSION_MAJOR &&
+        Check(wxl_mod_query()->struct_size == sizeof(wxl_mod_info) &&
+                  wxl_mod_query()->abi_major == WXL_ABI_VERSION_MAJOR &&
+                  wxl_mod_query()->abi_minor == WXL_ABI_VERSION_MINOR &&
+                  wxl_mod_query()->abi_feature == WXL_ABI_VERSION_FEATURE &&
                   std::strcmp(wxl_mod_query()->id, "wxl.contract") == 0,
               "WXL_MOD reports the mod");
         Check(wxl_mod_load(host.Table()) == WXL_OK, "load runs OnLoad");
@@ -574,7 +747,7 @@ int main()
         const wxl::Unit unit(wxltest::FakeObjects::kPlayer);
         Check(!unit.IsValid() && !unit, "no object is valid without the service");
 
-        const wxl::Expected<uint32_t> health = unit.Health();
+        const wxl::Expected<int32_t> health = unit.Health();
         Check(!health && health.IsUnsupported() && health.Error() == WXL_E_UNSUPPORTED,
               "a read without the service is unsupported, not zero");
         Check(health.ValueOr(7) == 7, "ValueOr answers the fallback");
@@ -590,6 +763,10 @@ int main()
         Check(!wxl::HookService().Attach("Thing", &ThingDetour, static_cast<ThingFn*>(nullptr)),
               "so is a Hook");
         Check(wxl::NetService().Claim(0x600).IsUnsupported(), "and a claim says why");
+        Check(wxl::DataService::ServeTable("Spell.dbc", "x") == WXL_E_UNSUPPORTED &&
+                  !wxl::DataService::IsLoaded("Spell.dbc") && wxl::DataService::ServedFrom("Spell.dbc").empty() &&
+                  wxl::StorageService::Size("x").IsUnsupported(),
+              "a generated method without its service answers as the hand-written ones did");
         Check(wxl::UiService().AddPanel<&DrawPanel>("P").IsUnsupported(), "as does a panel");
     }
 
@@ -620,6 +797,7 @@ int main()
         host.Table()->publish_service(WXL_HOOK_SERVICE, WXL_HOOK_SERVICE_VERSION, wxltest::FakeHooks::Table());
         host.Table()->publish_service(WXL_HOOK_RAW_SERVICE, WXL_HOOK_RAW_SERVICE_VERSION, wxltest::FakeHooks::RawTable());
         host.Table()->publish_service(WXL_PATCH_SERVICE, WXL_PATCH_SERVICE_VERSION, wxltest::FakePatch::Table());
+        host.Table()->publish_service(WXL_DATA_SERVICE, WXL_DATA_SERVICE_VERSION, wxltest::FakeData::Table());
     }
 
     Section("reads that can fail");
@@ -630,14 +808,14 @@ int main()
         Check(me.IsValid() && me.Handle() == FakeObjects::kPlayer, "the local player resolves");
         Check(me.Type() && *me.Type() == WXL_OBJECT_PLAYER, "and reports its type");
 
-        const wxl::Expected<uint32_t> dead = me.Health();
+        const wxl::Expected<int32_t> dead = me.Health();
         Check(dead && *dead == 0, "a dead unit reads as a value of zero");
         Check(me.MaxHealth().ValueOr(0) == 5000 && me.Level().ValueOr(0) == 80, "other reads arrive");
         Check(me.HealthFraction() && *me.HealthFraction() == 0.0f, "a fraction of zero is a value");
 
         const wxl::Unit stale(FakeObjects::kStale);
         Check(!stale.IsValid(), "a stale handle is not valid");
-        const wxl::Expected<uint32_t> gone = stale.Health();
+        const wxl::Expected<int32_t> gone = stale.Health();
         Check(!gone && gone.IsNotFound(), "a read through a stale handle is absent, not zero");
         Check(gone.Error() == WXL_E_NOT_FOUND, "and says it is not found");
         Check(stale.Name().IsNotFound() && stale.Position().IsNotFound() &&
@@ -733,6 +911,149 @@ int main()
               "positions read in bulk for a whole view");
     }
 
+    Section("descriptor fields");
+    {
+        using wxltest::FakeObjects;
+        const wxl::ObjectService objects;
+        const wxl::Unit          boar(FakeObjects::kBoar);
+        const wxl::Player        me(FakeObjects::kPlayer);
+        const wxl::GameObject    chest(FakeObjects::kChest);
+
+        const wxl::Expected<int32_t> health = boar.Field(wxl::field::Unit::Health);
+        Check(health && *health == 90, "a field reads through its constant, as the type its row says");
+        const wxl::Expected<std::array<uint8_t, 4>> bytes = me.Field(wxl::field::Unit::Bytes0);
+        Check(bytes && (*bytes)[0] == 1 && (*bytes)[1] == 2 && (*bytes)[3] == 1, "a field of bytes, low first");
+        const wxl::Expected<float> radius = boar.Field(wxl::field::Unit::BoundingRadius);
+        Check(radius && *radius == 1.5f, "a float");
+        const wxl::Expected<wxl_guid> target = me.Field(wxl::field::Unit::Target);
+        Check(target && *target == 0x200, "a guid, from its two dwords");
+        Check(chest.Field(wxl::field::Unit::Health).IsInvalid(), "a field of another kind is invalid");
+        Check(boar.Field(wxl::field::Unit::Resistances, 7).IsInvalid(), "as is an element past the last");
+        Check(wxl::Unit(FakeObjects::kStale).Field(wxl::field::Unit::Health).IsNotFound(), "a stale handle is not found");
+        const wxl::Expected<std::vector<int32_t>> resistances = boar.Fields(wxl::field::Unit::Resistances);
+        Check(resistances && resistances->size() == 7, "Fields reads every element");
+        Check(boar.FieldCount().ValueOr(0) == 0x94 && chest.Field(wxl::field::Object::Entry).HasValue(),
+              "a block's size, and the object's own fields on every kind");
+
+        Check(boar.SetField(wxl::field::Unit::Health, 33) == WXL_OK && boar.Field(wxl::field::Unit::Health).ValueOr(0) == 33,
+              "SetField writes an element and Field reads it back");
+        Check(boar.SetField(wxl::field::Object::Guid, wxl_guid(1)) == WXL_E_INVALID, "the guid is not written");
+        const wxl::Expected<std::vector<uint32_t>> raw = boar.RawFields(0x18, 2);
+        Check(raw && (*raw)[0] == 33 && (*raw)[1] == 0, "the raw dwords by index");
+
+        const std::vector<wxl::Expected<int32_t>> many =
+            objects.Fields(objects.InView<>(), wxl::field::Unit::Health);
+        Check(many.size() == 3 && many[0].ValueOr(-1) == 0 && many[1].ValueOr(-1) == 33 && many[2].IsInvalid(),
+              "a field of a whole view in one call, the chest's invalid");
+
+        FakeObjects::Watches().clear();
+        Check(objects.Watch(wxl::field::Unit::Health) == WXL_OK &&
+                  objects.Watch(wxl::field::Unit::Target, WXL_OBJECT_PLAYER) == WXL_OK &&
+                  FakeObjects::Watches().size() == 2 && FakeObjects::Watches()[0].type == WXL_OBJECT_UNIT &&
+                  FakeObjects::Watches()[1].type == WXL_OBJECT_PLAYER && FakeObjects::Watches()[1].count == 2,
+              "Watch asks for the field's kind, or the type named, over the field's dwords");
+        Check(objects.Watch(wxl::field::Unit::CreatedBy) == WXL_E_UNSUPPORTED, "and passes on a refusal");
+        Check(objects.Unwatch(wxl::field::Unit::Target, WXL_OBJECT_PLAYER) == WXL_OK &&
+                  FakeObjects::Watches().size() == 1,
+              "Unwatch gives one back, by the same field and type");
+        {
+            wxl::FieldWatch held(wxl::field::Unit::MaxHealth);
+            Check(held && held.Result() == WXL_OK && FakeObjects::Watches().size() == 2 &&
+                      FakeObjects::Watches()[1].first == wxl::field::Unit::MaxHealth.index,
+                  "a FieldWatch takes a watch when it is made");
+            wxl::FieldWatch moved = std::move(held);
+            Check(!held && moved && FakeObjects::Watches().size() == 2, "and moves without a second one");
+            wxl::FieldWatch refused(wxl::field::Unit::CreatedBy);
+            Check(!refused && refused.Result() == WXL_E_UNSUPPORTED, "a refused one holds nothing");
+            wxl::FieldWatch kept(wxl::field::Unit::Level);
+            kept.Release();
+            Check(!kept && FakeObjects::Watches().size() == 3, "Release lets a watch go without giving it back");
+        }
+        Check(FakeObjects::Watches().size() == 2 && FakeObjects::Watches()[1].first == wxl::field::Unit::Level.index,
+              "and one gives its watch back when it goes");
+        objects.Unwatch(wxl::field::Unit::Level);
+
+        struct Changes final : wxl::ObjectScript
+        {
+            int32_t was = 0, now = 0;
+            void    OnObjectFieldChanged(wxl::Object, wxl_object_type, uint32_t field, uint32_t,
+                                         wxl::FieldValue old_value, wxl::FieldValue new_value) override
+            {
+                if (field != wxl::field::Unit::Health.index) return;
+                was = old_value.As(wxl::field::Unit::Health);
+                now = new_value.As(wxl::field::Unit::Health);
+            }
+        } changes;
+        wxl::ScriptMgr::Add(&changes);
+        const wxl_object_field_args lost{FakeObjects::kBoar, WXL_OBJECT_UNIT, 0x18, 1, 33, uint64_t(uint32_t(-5))};
+        host.Raise(WXL_EV_ObjectFieldChanged, &lost);
+        Check(changes.was == 33 && changes.now == -5, "ObjectFieldChanged hands the values, read by the field's constant");
+        Check(std::is_same_v<wxl::HandlerOf<WXL_EV_ObjectFieldChanged>,
+                             void(wxl::Object, wxl_object_type, uint32_t, uint32_t, wxl::FieldValue, wxl::FieldValue)>,
+              "its handler takes the object, its type, the field, its size and the two values");
+        wxl::ScriptMgr::Remove(&changes);
+    }
+
+    Section("objects in handlers, and data kept per object");
+    {
+        using wxltest::FakeObjects;
+
+        struct Watcher final : wxl::ObjectScript
+        {
+            wxl::Object created;
+            bool        sawUnit = false;
+            void        OnObjectCreate(wxl::Object object, wxl_guid, wxl_object_type) override
+            {
+                created = object;
+                sawUnit = object.As<wxl::Unit>().has_value();
+            }
+        } watcher;
+        wxl::ScriptMgr::Add(&watcher);
+        const wxl_object_args boarCreated{FakeObjects::kBoar, 0x200, WXL_OBJECT_UNIT};
+        host.Raise(WXL_EV_ObjectCreate, &boarCreated);
+        Check(watcher.created == wxl::Object(FakeObjects::kBoar) && watcher.sawUnit,
+              "a handle member reaches a handler as a wxl::Object, viewable as its class");
+        Check(std::is_same_v<wxl::HandlerOf<WXL_EV_ObjectCreate>,
+                             void(wxl::Object, wxl_guid, wxl_object_type)>,
+              "an object event's handler takes the object, its guid and its type, as the enum");
+        Check(wxl::Unit::Accepts(boarCreated.type) && !wxl::GameObject::Accepts(boarCreated.type) &&
+                  wxl::Unit(watcher.created).Handle() == FakeObjects::kBoar,
+              "the event's type picks the class, and an Object views as it unchecked");
+        wxl::ScriptMgr::Remove(&watcher);
+
+        wxl::ObjectMap<int> seen;
+        Check(!seen.Watching() && seen.Empty(), "a map subscribes nothing until it holds something");
+        seen[wxl::Unit(FakeObjects::kBoar)] = 3;
+        seen.Set(wxl::Object(FakeObjects::kPlayer), 7);
+        Check(seen.Watching() && seen.Size() == 2, "the first entry subscribes it to ObjectDestroy");
+        Check(seen.Find(wxl::Object(FakeObjects::kBoar)) && *seen.Find(wxl::Object(FakeObjects::kBoar)) == 3,
+              "a unit and the same object as an Object are one key");
+
+        // A handler of default priority, subscribed after the map, still sees the entry.
+        struct Reader
+        {
+            wxl::ObjectMap<int>* map;
+            int                  read = -1;
+            void operator()(wxl::Object object, wxl_guid, uint32_t)
+            {
+                const int* value = map->Find(object);
+                read             = value ? *value : 0;
+            }
+        } reader{&seen};
+        wxl::Subscription reading = wxl::Subscribe<WXL_EV_ObjectDestroy>(&reader);
+
+        const wxl_object_args boarGone{FakeObjects::kBoar, 0x200, WXL_OBJECT_UNIT};
+        host.Raise(WXL_EV_ObjectDestroy, &boarGone);
+        Check(reader.read == 3, "a mod's ObjectDestroy handler runs before the map lets the entry go");
+        Check(!seen.Contains(wxl::Object(FakeObjects::kBoar)) && seen.Size() == 1,
+              "and the entry is gone once the event has passed");
+        Check(seen.Contains(wxl::Object(FakeObjects::kPlayer)), "the other objects keep theirs");
+
+        seen[wxl::Object(FakeObjects::kStale)] = 1;
+        Check(seen.Prune() == 1 && seen.Size() == 1, "Prune drops what no longer resolves");
+        reading.Reset();
+    }
+
     Section("wxl.script");
     {
         wxl::ScriptService script;
@@ -764,12 +1085,40 @@ int main()
         wxltest::FakeScript::Invoke("Add", add);
         Check(adder.total == 4.0, "a callable object keeps its state between calls");
 
+        Counter counter;
+        Check(script.RegisterFunction<&Counter::Next>("Next", &counter) == WXL_OK &&
+                  script.RegisterFunction<&Counter::Peek>("Peek", &counter) == WXL_OK,
+              "a member function registers with its object, const or not");
+        wxl_script_call next, peek;
+        wxltest::FakeScript::Invoke("Next", next);
+        wxltest::FakeScript::Invoke("Next", next);
+        wxltest::FakeScript::Invoke("Peek", peek);
+        Check(counter.count == 2 && peek.results.size() == 1 && peek.results[0].as.number == 2.0,
+              "and is called on that object");
+        Check(script.RegisterFunction<&Counter::Next>("Null", static_cast<Counter*>(nullptr)) ==
+                  WXL_E_INVALID,
+              "a null object is refused");
+
         Check(script.RegisterEvent("MY_EVENT") == WXL_OK, "an event registers");
         Check(script.FireEvent("MY_EVENT", {wxl::Value::Number(1), wxl::Value::String("x"), wxl::Value::Nil()}) == WXL_OK,
               "and fires with a list of values");
         Check(wxltest::FakeScript::Events().back() == "MY_EVENT n s -", "which arrive typed");
         Check(script.Run("print(1)", "chunk") == WXL_OK && wxltest::FakeScript::Chunks().back() == "chunk: print(1)",
               "a chunk runs with its name");
+
+        const wxltest::FakeScript::Raise raise = [&](wxl_event event, const void* args) {
+            host.Raise(event, args);
+        };
+        wxltest::FakeScript::Close(raise);
+        Check(wxltest::FakeScript::Functions().empty() &&
+                  script.RegisterFunction<&Greet>("Greet") == WXL_E_FAILED &&
+                  script.FireEvent("MY_EVENT", {}) == WXL_E_FAILED,
+              "a closed context takes its functions with it, and nothing registers until the next");
+        wxltest::FakeScript::Open(WXL_SCRIPT_CONTEXT_GLUE, raise);
+        Check(script.Context().ValueOr(WXL_SCRIPT_CONTEXT_GAME) == WXL_SCRIPT_CONTEXT_GLUE &&
+                  script.RegisterFunction<&Greet>("Greet") == WXL_OK &&
+                  script.FireEvent("MY_EVENT", {}) == WXL_E_NOT_FOUND,
+              "the next starts empty: a name registers again, an event is declared again");
     }
 
     Section("wxl.storage");
@@ -807,6 +1156,34 @@ int main()
         }
         Check(wxltest::FakeStorage::Closes() == closes + 2, "a scoped file closes at the end of its scope");
         Check(!storage.Open("nope"), "a missing file opens as an empty File");
+
+        Check(storage.AddSearchPath("no such folder", 1) == WXL_E_NOT_FOUND,
+              "a generated method passes the runtime's answer through");
+        Check(storage.MountArchive("Data\\patch-x.MPQ", 2) == WXL_OK, "and its arguments");
+    }
+
+    Section("wxl.data: methods generated from data.def");
+    {
+        const wxl::DataService data;
+        Check(data.IsLoaded("Spell.dbc") && !data.IsLoaded("DBFilesClient\\Item.dbc"),
+              "IsLoaded answers a bool");
+        Check(data.ServeTable("Item.dbc", "Interface\\hello.txt") == WXL_OK &&
+                  data.ServeTable("item.dbc", "Interface\\hello.txt") == WXL_E_FAILED,
+              "ServeTable answers the runtime's wxl_result");
+        Check(data.ServedFrom("DBFilesClient\\Item.dbc") == "Interface\\hello.txt" && data.ServedFrom("x.dbc").empty(),
+              "ServedFrom copies the path into a std::string, empty for the client's own file");
+        Check(data.RestoreTable("Item.dbc") == WXL_OK && data.RestoreTable("Item.dbc") == WXL_E_NOT_FOUND,
+              "RestoreTable gives it back once");
+
+        // A runtime whose table stops short of a member answers for it as for no service.
+        static wxl_data_api shorter = *wxltest::FakeData::Table();
+        shorter.struct_size         = offsetof(wxl_data_api, served_from);
+        static wxl_data_api holed   = *wxltest::FakeData::Table();
+        holed.is_loaded             = nullptr;
+        Check(!wxl::detail::Carries(&shorter, &wxl_data_api::served_from) &&
+                  wxl::detail::Carries(&shorter, &wxl_data_api::restore_table) &&
+                  !wxl::detail::Carries(&holed, &wxl_data_api::is_loaded),
+              "what the generated methods check before calling: the table's size, then the member");
     }
 
     Section("wxl.net");
@@ -1016,6 +1393,113 @@ int main()
               "a log line crosses with its tag and its length");
         wxl::Log(WXL_LOG_INFO, "contract", std::string_view("sliced", 5));
         Check(host.LogLines().back() == "[contract] slice", "a view crosses with its own length");
+        wxl::Log(WXL_LOG_INFO, "contract", "{} of 0x{:04X}, {:.1f}", 3, 0x85u, 2.3);
+        Check(host.LogLines().back() == "[contract] 3 of 0x0085, 2.3",
+              "a line with arguments is formatted with std::format");
+        wxl::Log(WXL_LOG_INFO, "contract", "50% {kept}");
+        Check(host.LogLines().back() == "[contract] 50% {kept}", "one without is written as it is");
+        Check(std::string_view(wxl::ResultName(WXL_E_NOT_FOUND)) == "WXL_E_NOT_FOUND" &&
+                  std::string_view(wxl::ResultName(static_cast<wxl_result>(77))) ==
+                      "an unknown wxl_result",
+              "ResultName names a result, and says when it does not know one");
+    }
+
+    Section("what a throw costs");
+    {
+        size_t     from   = host.LogLines().size();
+        const auto logged = [&](const std::string& line) {
+            for (size_t i = from; i < host.LogLines().size(); ++i)
+                if (host.LogLines()[i] == line) return true;
+            return false;
+        };
+
+        ThrowingWorldScript thrower;
+        CountingWorldScript counter;
+        wxl::ScriptMgr::Add(&thrower);
+        wxl::ScriptMgr::Add(&counter);
+        const wxl_update_args tick{0.5f};
+        host.Raise(WXL_EV_Update, &tick);
+        Check(thrower.calls == 1 && counter.updates == 1,
+              "a script that throws loses that call, and the next script still gets it");
+        Check(logged("[wxl.contract] WorldScript::OnUpdate threw an exception: tick; that call "
+                     "ended there, and the mod goes on receiving events"),
+              "logged under the mod's id, with the handler and what()");
+        host.Raise(WXL_EV_Update, &tick);
+        Check(thrower.calls == 2 && host.Disables().empty(), "it gets the next event: nothing is disabled");
+        wxl::ScriptMgr::Clear();
+
+        ThrowingHandler   handler;
+        wxl::Subscription subscription = wxl::Subscribe<WXL_EV_Update>(&handler);
+        host.Raise(WXL_EV_Update, &tick);
+        Check(handler.calls == 1 &&
+                  logged("[wxl.contract] a wxl::Subscribe handler for Update threw something that "
+                         "is not a std::exception; that call ended there, and the mod goes on "
+                         "receiving events"),
+              "a handler given to Subscribe is caught too, and a throw of another type is named so");
+        subscription.Reset();
+
+        Counter         object;
+        wxl_script_call call;
+        Check(wxl::ScriptService().RegisterFunction<&Counter::Throws>("Throws", &object) == WXL_OK &&
+                  wxltest::FakeScript::Invoke("Throws", call) && call.error == "no counting today" &&
+                  call.results.empty(),
+              "a script function that throws fails the call, with what() as the script's error");
+        Check(logged("[wxl.contract] a function registered with wxl.script threw an exception: no "
+                     "counting today; the call fails on the script side with that message"),
+              "and is logged");
+
+        LifecycleMod::throwIn = "OnLoad";
+        LifecycleMod::trace.clear();
+        const size_t before   = host.LiveSubscriptions();
+        LifecycleMod::script  = &counter;
+        Check(wxl_mod_load(host.Table()) == WXL_E_FAILED &&
+                  logged("[wxl.contract] OnLoad threw an exception: boom in OnLoad; the mod is not "
+                         "loaded"),
+              "OnLoad throwing fails the load, and says why");
+        Check(host.LiveSubscriptions() == before, "what it subscribed before throwing is dropped");
+        LifecycleMod::script = nullptr;
+        wxl_mod_stage(WXL_STAGE_EARLY);
+        Check(LifecycleMod::trace.size() == 1, "and none of its code runs after");
+
+        LifecycleMod::throwIn = "OnReady";
+        LifecycleMod::trace.clear();
+        Check(wxl_mod_load(host.Table()) == WXL_OK, "a mod that throws later loads");
+        for (int stage = WXL_STAGE_EARLY; stage <= WXL_STAGE_SHUTDOWN; ++stage)
+            wxl_mod_stage(static_cast<wxl_stage>(stage));
+        wxl_mod_unload();
+        const std::vector<std::string> stopped = {"load",   "early",    "stage0", "storage", "stage1",
+                                                  "graphics", "stage2", "script", "stage3", "ready"};
+        Check(LifecycleMod::trace == stopped,
+              "a stage that throws stops the mod there: no OnStage after it, no later stage, no "
+              "unload");
+        Check(host.Disables().size() == 1 &&
+                  host.Disables().back() == "OnReady threw an exception: boom in OnReady",
+              "and asks the runtime to disable it, with the stage's virtual and what()");
+
+        LifecycleMod::throwIn = "OnStage";
+        LifecycleMod::trace.clear();
+        wxl_mod_load(host.Table());
+        wxl_mod_stage(WXL_STAGE_EARLY);
+        wxl_mod_stage(WXL_STAGE_STORAGE);
+        Check(LifecycleMod::trace == std::vector<std::string>{"load", "early", "stage0"} &&
+                  host.Disables().back() ==
+                      "OnStage(early) threw something that is not a std::exception",
+              "OnStage is named with its stage");
+
+        host.WithoutDisable();
+        from                  = host.LogLines().size();
+        LifecycleMod::throwIn = "OnUnload";
+        LifecycleMod::trace.clear();
+        wxl_mod_load(host.Table());
+        wxl_mod_unload();
+        Check(host.Disables().size() == 2 &&
+                  logged("[wxl.contract] OnUnload threw an exception: boom in OnUnload; this "
+                         "runtime cannot disable a mod (it predates abi 0.1.8), so the mod stops "
+                         "itself: its scripts are dropped, and its remaining stages and its "
+                         "unload do nothing"),
+              "on a runtime without disable, the mod says so and stops itself");
+        host.WithDisable();
+        LifecycleMod::throwIn.clear();
     }
 
     if (g_failures == 0)

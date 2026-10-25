@@ -12,6 +12,24 @@
 
 #include "wxl/sdk.hpp"
 #include "wxl/services/hook.h"
+#include "wxl/services/rows.hpp"
+
+namespace wxl::api::facade
+{
+    template <>
+    struct Methods<wxl_hook_api>
+    {
+#define WXL_API_TABLE "wxl/services/hook.def"
+#include "wxl/services/methods.inc"
+    };
+
+    template <>
+    struct Methods<wxl_hook_raw_api>
+    {
+#define WXL_API_TABLE "wxl/services/hook_raw.def"
+#include "wxl/services/methods.inc"
+    };
+} // namespace wxl::api::facade
 
 namespace wxl
 {
@@ -81,8 +99,10 @@ namespace wxl
      * @brief The typed facade over wxl.hook: detours on points the runtime names.
      *
      * An empty Hook means the point is not named by this runtime, or the service is absent.
+     * HasPoint(name), whether this runtime names a point, is a row of hook.def.
      */
-    class HookService : public detail::Facade<HookService, wxl_hook_api>
+    class HookService : public detail::Facade<HookService, wxl_hook_api>,
+                        public api::facade::Methods<wxl_hook_api>
     {
     public:
         static constexpr const char* kName    = WXL_HOOK_SERVICE;
@@ -105,12 +125,6 @@ namespace wxl
             for (uint32_t i = 0; i < written && i < count; ++i)
                 points.push_back(HookPoint{std::string(View(raw[i].name)), std::string(View(raw[i].signature))});
             return points;
-        }
-
-        bool HasPoint(const char* name) const
-        {
-            const wxl_hook_api* api = Raw();
-            return api && name && api->has_point(name) == WXL_TRUE;
         }
 
         /// Attaches a raw detour; @p original receives the next link in the chain.
@@ -142,29 +156,16 @@ namespace wxl
      * @brief The typed facade over wxl.hook.raw: detours at an address.
      *
      * Published only by a runtime that loads into a binary whose addresses mean something. A mod
-     * that uses it is pinned to one binary and says so in its manifest.
+     * that uses it is pinned to one binary and says so in its manifest. ImageBase(), the image
+     * the addresses are relative to, and ImageBuild(), the build it reports, are rows of
+     * hook_raw.def: each an Expected.
      */
-    class RawHookService : public detail::Facade<RawHookService, wxl_hook_raw_api>
+    class RawHookService : public detail::Facade<RawHookService, wxl_hook_raw_api>,
+                           public api::facade::Methods<wxl_hook_raw_api>
     {
     public:
         static constexpr const char* kName    = WXL_HOOK_RAW_SERVICE;
         static constexpr uint32_t    kVersion = WXL_HOOK_RAW_SERVICE_VERSION;
-
-        /// The image the addresses are relative to.
-        Expected<uintptr_t> ImageBase() const
-        {
-            const wxl_hook_raw_api* api = Raw();
-            if (!api) return Unexpected{WXL_E_UNSUPPORTED};
-            return api->image_base();
-        }
-
-        /// The build the loaded image reports.
-        Expected<uint32_t> ImageBuild() const
-        {
-            const wxl_hook_raw_api* api = Raw();
-            if (!api) return Unexpected{WXL_E_UNSUPPORTED};
-            return api->image_build();
-        }
 
         /// Attaches a raw detour at an address; @p name is a label for the log.
         Hook AttachAt(const char* name, uintptr_t target, void* detour, void** original,

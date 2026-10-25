@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 WarcraftXL
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
 //
 // The Lua mods together: found and ordered by the host's rules, each in its own state, fed from
-// one native subscription per event, reloaded when their files change.
+// one native subscription per event, reloaded when the files their code comes from change.
 
 #ifndef WXL_LUA_RUNTIME_HPP
 #define WXL_LUA_RUNTIME_HPP
@@ -63,10 +63,16 @@ namespace wxl::lua
 
         const wxl_host* Host() const { return host_; }
 
+        /// The contract a Lua mod is served: the runtime's, no further than what this binary
+        /// was built against, since its event table ends there.
+        host::AbiVersion Abi() const;
+
         // --- what a mod's Observe and Override do -------------------------------------------
 
         /// Keeps a handler for an event and returns its id. @p self is the table a family
-        /// method is called on, as a registry ref, or LUA_NOREF for a plain function.
+        /// method is called on, as a registry ref, or LUA_NOREF for a plain function. Handlers
+        /// run by the mods' load order, then in the order each mod subscribed them; a mod that
+        /// reloads keeps its place.
         uint32_t Observe(ScriptMod& mod, const reflect::Event& event, int ref, bool override,
                          int self = LUA_NOREF);
 
@@ -82,6 +88,8 @@ namespace wxl::lua
         // --- the service ------------------------------------------------------------------
 
         uint32_t   Count() const { return static_cast<uint32_t>(mods_.size()); }
+        /// Every script mod, running or not, in load order.
+        const std::vector<std::unique_ptr<ScriptMod>>& Mods() const { return mods_; }
         uint32_t   Poll();
         wxl_result Reload(const char* id);
 
@@ -96,17 +104,20 @@ namespace wxl::lua
             bool       override; ///< its answer is taken
             uint32_t   id;
             bool       live;
+            uintptr_t  zone;     ///< the location of its profiler zone, "<mod>: On<Event>"
         };
 
         /// One event: the native subscription and the Lua handlers it feeds, in order.
         struct Slot
         {
-            Runtime*              runtime = nullptr;
-            const reflect::Event* event   = nullptr;
-            wxl::Subscription     native;
-            std::vector<Handler>  handlers;
-            int                   depth = 0;     ///< dispatches walking `handlers` right now
-            bool                  dirty = false; ///< a handler died during a dispatch
+            Runtime*                           runtime = nullptr;
+            const reflect::Event*              event   = nullptr;
+            std::vector<const reflect::Field*> writable; ///< what an Override answers through, in order
+            wxl::Subscription                  native;
+            std::vector<Handler>               handlers; ///< by the mod's rank, then subscription order
+            std::vector<Handler>               arriving; ///< subscribed during a dispatch, placed after it
+            int                                depth = 0;     ///< dispatches walking `handlers` right now
+            bool                               dirty = false; ///< a handler died or arrived during a dispatch
         };
 
         /// An event raised off the main thread, waiting for the next Update.
@@ -120,10 +131,20 @@ namespace wxl::lua
 
         static void WXL_CALL OnNativeEvent(void* user, const void* args);
 
+        /// ObjectDestroy, after every handler: each state forgets the object (ForgetObject).
+        static void WXL_CALL OnObjectGone(void* user, const void* args);
+
         void OnEvent(Slot& slot, const void* args);
         void Dispatch(Slot& slot, const void* args, bool answerable);
-        void TakeAnswer(lua_State* L, ScriptMod& mod, const reflect::Event& event, const void* args);
+        /// Writes an Override's return values, at @p first on the stack, through the slot's
+        /// writable members: the first value to the first member, and so on.
+        void TakeAnswers(lua_State* L, ScriptMod& mod, const Slot& slot, const void* args, int first,
+                         int count);
+        /// Drops the dead handlers and places the arriving ones. Never during a dispatch.
         void Compact(Slot& slot);
+
+        /// Puts a handler after every handler of its mod and of the mods ranked before it.
+        static void Place(Slot& slot, const Handler& handler);
 
         /// Subscribes the native handler for a slot when it has none. @p requester names the
         /// mod in the warning when the runtime does not raise the event; null for nobody.
@@ -148,6 +169,10 @@ namespace wxl::lua
         /// Checks a candidate the way the host checks a binary mod, and keeps it when it passes.
         void Admit(const host::ModCandidate& candidate);
 
+        /// Why a script mod's manifest cannot be served, or empty: what Admit checks, and what a
+        /// reload checks again when the manifest changed.
+        std::string Refusal(const host::Manifest& manifest) const;
+
         /// Adds the folders holding an init.lua and no manifest, as mods named after them.
         void AddBareFolders(const std::filesystem::path& directory,
                             std::vector<host::ModCandidate>& candidates);
@@ -158,6 +183,9 @@ namespace wxl::lua
         const wxl_host* host_;
         std::thread::id mainThread_;
         Slot            slots_[WXL_EV_COUNT];
+
+        /// ObjectDestroy at the lowest priority, so every mod's handlers see the object first.
+        wxl::Subscription objectGone_;
 
         std::vector<std::unique_ptr<ScriptMod>> mods_;
         std::vector<ScriptMod*>                 pendingReloads_;

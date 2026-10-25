@@ -4,7 +4,8 @@
 // The args table: every struct an event of events.def carries, member by member, with what each
 // member holds. events.h declares the structs from these rows, and a runtime that hands events to
 // something other than C -- a script VM, a log, a recorder -- reads them through the same rows
-// (wxl/reflect.hpp), so the struct and its description are one text.
+// (wxl/reflect.hpp), so the struct and its description are one text. The rows are also a
+// handler's parameters, in C++ (sdk.hpp) and in Lua: one per member, in this order.
 //
 //   WXL_ARGS(args)                            opens a struct
 //   WXL_ARGS_FIELD(args, member, kind)        a value, read as it is
@@ -13,6 +14,13 @@
 //   WXL_ARGS_BUFFER(args, member, capacity)   `char*` a handler writes a NUL-terminated string
 //                                             into, at most `capacity` bytes with the terminator
 //   WXL_ARGS_PTR(args, member, type)          an address of C type `type`, for native code only
+//   WXL_ARGS_ENUM(args, member, type)         a `uint32_t` holding a value of the enumeration
+//                                             `type` of enums.def
+//   WXL_ARGS_VALUE(args, member, type, field) a `uint64_t` holding the dwords of an update
+//                                             field, low first: the field whose dword index the
+//                                             member `field` holds, of an object of the
+//                                             wxl_object_type the member `type` holds
+//                                             (update_fields.def says what the value is)
 //   WXL_ARGS_END(args)                        closes it
 //
 // Columns:
@@ -26,7 +34,8 @@
 //             guid                  wxl_guid: the server's id for an object
 //             vec3                  wxl_vec3
 //             str                   wxl_str, valid for the call
-//   size, capacity   the member of the same struct holding the length
+//   size, capacity   the member of the same struct holding the length; a handler gets it through
+//                    the bytes or the buffer, not as a parameter of its own
 //
 // The rows of a struct are its members in declaration order, so a member is appended at the end
 // of its struct and never moved: the struct is part of the ABI. A new struct gets its block here,
@@ -34,7 +43,8 @@
 //
 // Include with WXL_ARGS_FIELD defined. WXL_ARGS and WXL_ARGS_END default to nothing; the other
 // shapes default to WXL_ARGS_FIELD with their own kind -- bytes, answer, buffer, ptr -- for a
-// consumer that only wants the members.
+// consumer that only wants the members, an enum to WXL_ARGS_FIELD with kind u32 and a value to
+// WXL_ARGS_FIELD with kind u64, which is what the struct holds.
 
 #ifndef WXL_ARGS_FIELD
 #error "define WXL_ARGS_FIELD(args, member, kind) before including fields.def"
@@ -55,6 +65,14 @@
 #ifndef WXL_ARGS_PTR
     #define WXL_ARGS_PTR(args, member, type) WXL_ARGS_FIELD(args, member, ptr)
     #define WXL_ARGS_PTR_DEFAULTED
+#endif
+#ifndef WXL_ARGS_ENUM
+    #define WXL_ARGS_ENUM(args, member, type) WXL_ARGS_FIELD(args, member, u32)
+    #define WXL_ARGS_ENUM_DEFAULTED
+#endif
+#ifndef WXL_ARGS_VALUE
+    #define WXL_ARGS_VALUE(args, member, type, field) WXL_ARGS_FIELD(args, member, u64)
+    #define WXL_ARGS_VALUE_DEFAULTED
 #endif
 #ifndef WXL_ARGS
     #define WXL_ARGS(args)
@@ -86,7 +104,7 @@ WXL_ARGS_END(wxl_world_args)
 WXL_ARGS(wxl_world_click_args)
 WXL_ARGS_FIELD(wxl_world_click_args, point, vec3)    ///< where the ray met the world
 WXL_ARGS_FIELD(wxl_world_click_args, object, handle) ///< what was hit, or WXL_HANDLE_NONE for bare ground
-WXL_ARGS_FIELD(wxl_world_click_args, button, u32)    ///< 0 left, 1 right, 2 middle
+WXL_ARGS_ENUM(wxl_world_click_args, button, wxl_mouse_button)
 WXL_ARGS_END(wxl_world_click_args)
 
 /// A platform input message, before the client sees it.
@@ -114,7 +132,7 @@ WXL_ARGS_END(wxl_swapchain_args)
 WXL_ARGS(wxl_object_args)
 WXL_ARGS_FIELD(wxl_object_args, object, handle)
 WXL_ARGS_FIELD(wxl_object_args, guid, guid)
-WXL_ARGS_FIELD(wxl_object_args, type, u32)      ///< a wxl_object_type value
+WXL_ARGS_ENUM(wxl_object_args, type, wxl_object_type)
 WXL_ARGS_END(wxl_object_args)
 
 /// The player's target moving from one object to another.
@@ -123,11 +141,12 @@ WXL_ARGS_FIELD(wxl_target_args, previous, handle) ///< WXL_HANDLE_NONE when noth
 WXL_ARGS_FIELD(wxl_target_args, current, handle)  ///< WXL_HANDLE_NONE when the target was cleared
 WXL_ARGS_END(wxl_target_args)
 
-/// A doodad placed by the map.
+/// A doodad placed by the map: a model of a terrain tile, of a map object's doodad set, or one
+/// the game places itself.
 WXL_ARGS(wxl_doodad_args)
-WXL_ARGS_FIELD(wxl_doodad_args, doodad, handle)
-WXL_ARGS_FIELD(wxl_doodad_args, path, str)      ///< the model it was built from
-WXL_ARGS_FIELD(wxl_doodad_args, position, vec3)
+WXL_ARGS_FIELD(wxl_doodad_args, doodad, handle)  ///< WXL_HANDLE_NONE: a doodad is not an object of wxl.object
+WXL_ARGS_FIELD(wxl_doodad_args, path, str)       ///< the model it was built from
+WXL_ARGS_FIELD(wxl_doodad_args, position, vec3)  ///< where it stands, in world coordinates
 WXL_ARGS_END(wxl_doodad_args)
 
 /// A unit's visible equipment changing.
@@ -137,16 +156,23 @@ WXL_ARGS_FIELD(wxl_equipment_args, slot, u32)
 WXL_ARGS_FIELD(wxl_equipment_args, item_id, u32) ///< 0 when the slot was cleared
 WXL_ARGS_END(wxl_equipment_args)
 
-/// A model's bytes, before the parse.
+/**
+ * @brief A model file's bytes, read whole, before the client parses them.
+ *
+ * Pointing `*replacement` at other bytes and setting `*replacement_size` has the client parse
+ * those instead: once every handler has run, the runtime copies them into a buffer of the
+ * client's own, which takes the place of the file's. The bytes only have to outlive the event.
+ * The last handler to write wins, so a handler that cares reads `*replacement` first.
+ */
 WXL_ARGS(wxl_model_load_args)
-WXL_ARGS_FIELD(wxl_model_load_args, path, str)
+WXL_ARGS_FIELD(wxl_model_load_args, path, str)                 ///< the path the model was opened by
 WXL_ARGS_BYTES(wxl_model_load_args, data, size)                ///< the bytes as read; valid for the call only
 WXL_ARGS_FIELD(wxl_model_load_args, size, u32)
-WXL_ARGS_PTR(wxl_model_load_args, replacement, const void**)   ///< write a buffer here to parse it instead of @ref data
-WXL_ARGS_PTR(wxl_model_load_args, replacement_size, uint32_t*) ///< its length; the writer keeps it alive until the next load
+WXL_ARGS_PTR(wxl_model_load_args, replacement, const void**)   ///< null on entry; write other bytes here to have them parsed instead of @ref data
+WXL_ARGS_PTR(wxl_model_load_args, replacement_size, uint32_t*) ///< 0 on entry; their length
 WXL_ARGS_END(wxl_model_load_args)
 
-/// A texture requested by name.
+/// A texture requested by name, before the client looks in its cache.
 WXL_ARGS(wxl_texture_load_args)
 WXL_ARGS_FIELD(wxl_texture_load_args, path, str)
 WXL_ARGS_END(wxl_texture_load_args)
@@ -160,9 +186,9 @@ WXL_ARGS_FIELD(wxl_terrain_chunk_args, chunk_x, i32) ///< the chunk inside that 
 WXL_ARGS_FIELD(wxl_terrain_chunk_args, chunk_y, i32) ///< the chunk inside that tile
 WXL_ARGS_END(wxl_terrain_chunk_args)
 
-/// A map object's root, before its sub-chunks are walked.
+/// A map object's root file, read whole, before its chunks are walked.
 WXL_ARGS(wxl_map_object_args)
-WXL_ARGS_FIELD(wxl_map_object_args, path, str)
+WXL_ARGS_FIELD(wxl_map_object_args, path, str)  ///< the file it was read from
 WXL_ARGS_BYTES(wxl_map_object_args, data, size) ///< the root bytes; valid for the call only
 WXL_ARGS_FIELD(wxl_map_object_args, size, u32)
 WXL_ARGS_END(wxl_map_object_args)
@@ -180,7 +206,7 @@ WXL_ARGS_BUFFER(wxl_file_open_args, redirect, redirect_capacity) ///< empty on e
 WXL_ARGS_FIELD(wxl_file_open_args, redirect_capacity, u32)       ///< bytes available in @ref redirect, terminator included
 WXL_ARGS_END(wxl_file_open_args)
 
-/// The result of an open.
+/// The result of an open, found or not. Raised on the thread that opened the file.
 WXL_ARGS(wxl_file_opened_args)
 WXL_ARGS_FIELD(wxl_file_opened_args, path, str)   ///< the path actually opened, after any redirect
 WXL_ARGS_FIELD(wxl_file_opened_args, found, bool)
@@ -232,7 +258,7 @@ WXL_ARGS_END(wxl_connection_args)
  * portable way to register a function.
  */
 WXL_ARGS(wxl_script_vm_args)
-WXL_ARGS_FIELD(wxl_script_vm_args, context, u32)      ///< a wxl_script_context value
+WXL_ARGS_ENUM(wxl_script_vm_args, context, wxl_script_context)
 WXL_ARGS_PTR(wxl_script_vm_args, native_state, void*) ///< the VM's state, or NULL when the runtime does not expose one
 WXL_ARGS_END(wxl_script_vm_args)
 
@@ -344,7 +370,7 @@ WXL_ARGS_END(wxl_ui_event_args)
 
 /// An error the interface's Lua raised, as the VM reports it, before the client's handler sees it.
 WXL_ARGS(wxl_script_error_args)
-WXL_ARGS_FIELD(wxl_script_error_args, context, u32) ///< a wxl_script_context value: which interface raised it
+WXL_ARGS_ENUM(wxl_script_error_args, context, wxl_script_context) ///< which interface raised it
 WXL_ARGS_FIELD(wxl_script_error_args, message, str) ///< the error value as text; "UNKNOWN ERROR" when it is not text
 WXL_ARGS_END(wxl_script_error_args)
 
@@ -400,7 +426,7 @@ WXL_ARGS(wxl_spell_cooldown_change_args)
 WXL_ARGS_FIELD(wxl_spell_cooldown_change_args, unit, handle)    ///< the player or the pet; WXL_HANDLE_NONE when not in view
 WXL_ARGS_FIELD(wxl_spell_cooldown_change_args, unit_guid, guid)
 WXL_ARGS_FIELD(wxl_spell_cooldown_change_args, spell_id, u32)
-WXL_ARGS_FIELD(wxl_spell_cooldown_change_args, change, u32)     ///< 0 the held cooldown starts now, 1 cleared, 2 shifted by @ref delay
+WXL_ARGS_ENUM(wxl_spell_cooldown_change_args, change, wxl_cooldown_change) ///< WXL_COOLDOWN_SHIFTED moves it by @ref delay
 WXL_ARGS_FIELD(wxl_spell_cooldown_change_args, delay, i32)      ///< milliseconds, for a shift; 0 otherwise
 WXL_ARGS_END(wxl_spell_cooldown_change_args)
 
@@ -444,8 +470,8 @@ WXL_ARGS_FIELD(wxl_combat_damage_args, source_guid, guid)   ///< 0 for the envir
 WXL_ARGS_FIELD(wxl_combat_damage_args, target, handle)      ///< WXL_HANDLE_NONE when not in view
 WXL_ARGS_FIELD(wxl_combat_damage_args, target_guid, guid)
 WXL_ARGS_FIELD(wxl_combat_damage_args, spell_id, u32)       ///< 0 for a plain melee swing and for the environment
-WXL_ARGS_FIELD(wxl_combat_damage_args, kind, u32)           ///< 0 melee, 1 spell, 2 periodic, 3 environment
-WXL_ARGS_FIELD(wxl_combat_damage_args, environment, u32)    ///< kind 3 only: 0 exhaustion, 1 drowning, 2 fall, 3 lava, 4 slime, 5 fire
+WXL_ARGS_ENUM(wxl_combat_damage_args, kind, wxl_damage_kind)
+WXL_ARGS_ENUM(wxl_combat_damage_args, environment, wxl_environment) ///< meaningful for WXL_DAMAGE_ENVIRONMENT only
 WXL_ARGS_FIELD(wxl_combat_damage_args, amount, u32)         ///< damage dealt
 WXL_ARGS_FIELD(wxl_combat_damage_args, overkill, u32)       ///< damage past the target's health; 0 when it survived
 WXL_ARGS_FIELD(wxl_combat_damage_args, school, u32)         ///< the school mask: 1 physical, 2 holy, 4 fire, 8 nature, 16 frost, 32 shadow, 64 arcane
@@ -490,6 +516,360 @@ WXL_ARGS_FIELD(wxl_combat_miss_args, reason, u32)
 WXL_ARGS_FIELD(wxl_combat_miss_args, hit_info, u32)       ///< the server's hit flags for a melee round; 0 for a spell
 WXL_ARGS_END(wxl_combat_miss_args)
 
+/**
+ * @brief The player's zone, subzone or indoor state changing, as the client announces it to its
+ * interface (ZONE_CHANGED, ZONE_CHANGED_INDOORS, ZONE_CHANGED_NEW_AREA).
+ *
+ * Raised once per change, before the client's own state and texts move: @ref new_area says the
+ * area id itself changed. The texts are what the interface will show; empty when the client has
+ * none.
+ */
+WXL_ARGS(wxl_zone_args)
+WXL_ARGS_FIELD(wxl_zone_args, area_id, u32)         ///< the zone's AreaTable id
+WXL_ARGS_FIELD(wxl_zone_args, subzone_id, u32)      ///< the subzone's AreaTable id, 0 for none
+WXL_ARGS_FIELD(wxl_zone_args, wmo_group_id, i32)    ///< the map object group the player is in, -1 outside one
+WXL_ARGS_FIELD(wxl_zone_args, zone_text, str)       ///< the zone's name
+WXL_ARGS_FIELD(wxl_zone_args, subzone_text, str)    ///< the subzone's name, empty for none
+WXL_ARGS_FIELD(wxl_zone_args, real_zone_text, str)  ///< the zone's name for the chat's zone channels
+WXL_ARGS_FIELD(wxl_zone_args, indoors, bool)        ///< WXL_TRUE inside a map object
+WXL_ARGS_FIELD(wxl_zone_args, new_area, bool)       ///< WXL_TRUE when the area id changed
+WXL_ARGS_END(wxl_zone_args)
+
+/// The object under the mouse changing, from one object to another or to none.
+WXL_ARGS(wxl_mouseover_args)
+WXL_ARGS_FIELD(wxl_mouseover_args, previous, handle)    ///< WXL_HANDLE_NONE when nothing was under the mouse, or it left view
+WXL_ARGS_FIELD(wxl_mouseover_args, previous_guid, guid) ///< 0 when nothing was under the mouse
+WXL_ARGS_FIELD(wxl_mouseover_args, current, handle)     ///< WXL_HANDLE_NONE when nothing is, or it is not in view
+WXL_ARGS_FIELD(wxl_mouseover_args, current_guid, guid)  ///< 0 when nothing is
+WXL_ARGS_END(wxl_mouseover_args)
+
+/**
+ * @brief A console variable changing, as the client is about to write the new value.
+ *
+ * Raised for every set that changes the value as a string, whoever asked -- the console, the
+ * interface's SetCVar, the client's own options, a reset to default -- and not for a set that
+ * leaves it as it is. The strings are valid for the call only.
+ */
+WXL_ARGS(wxl_cvar_args)
+WXL_ARGS_FIELD(wxl_cvar_args, name, str)
+WXL_ARGS_FIELD(wxl_cvar_args, previous, str) ///< the value being replaced; empty when the variable had none yet
+WXL_ARGS_FIELD(wxl_cvar_args, value, str)    ///< the value being set
+WXL_ARGS_END(wxl_cvar_args)
+
+/**
+ * @brief The local player's own movement, as the client sends it to the server.
+ *
+ * Raised once per movement message sent, for the unit the player moves: itself, or the vehicle
+ * or charmed unit it controls. @ref opcode is the message: PlayerMoveStart carries a
+ * MSG_MOVE_START_*, MSG_MOVE_JUMP, MSG_MOVE_START_ASCEND or MSG_MOVE_START_DESCEND;
+ * PlayerMoveStop a MSG_MOVE_STOP*, MSG_MOVE_STOP_ASCEND or MSG_MOVE_FALL_LAND. @ref flags is the
+ * client's movement flags after the change, @ref position and @ref facing where the unit is.
+ */
+WXL_ARGS(wxl_player_move_args)
+WXL_ARGS_FIELD(wxl_player_move_args, unit, handle)   ///< the unit that moves; WXL_HANDLE_NONE when it is not tracked
+WXL_ARGS_FIELD(wxl_player_move_args, unit_guid, guid)
+WXL_ARGS_FIELD(wxl_player_move_args, opcode, u32)    ///< the MSG_MOVE_* sent
+WXL_ARGS_FIELD(wxl_player_move_args, flags, u32)     ///< the movement flags: forward 1, backward 2, strafe left 4, strafe right 8, ...
+WXL_ARGS_FIELD(wxl_player_move_args, position, vec3)
+WXL_ARGS_FIELD(wxl_player_move_args, facing, f32)    ///< radians
+WXL_ARGS_END(wxl_player_move_args)
+
+/**
+ * @brief The local player gaining a level: SMSG_LEVELUP_INFO, read before the client parses it.
+ *
+ * The amounts are what the level added, as the server sent them: health, one per power type in
+ * the client's order, and the five stats.
+ */
+WXL_ARGS(wxl_level_up_args)
+WXL_ARGS_FIELD(wxl_level_up_args, level, u32)       ///< the level reached
+WXL_ARGS_FIELD(wxl_level_up_args, health, u32)      ///< health added
+WXL_ARGS_FIELD(wxl_level_up_args, mana, u32)        ///< power added, by type: mana
+WXL_ARGS_FIELD(wxl_level_up_args, rage, u32)
+WXL_ARGS_FIELD(wxl_level_up_args, focus, u32)
+WXL_ARGS_FIELD(wxl_level_up_args, energy, u32)
+WXL_ARGS_FIELD(wxl_level_up_args, happiness, u32)
+WXL_ARGS_FIELD(wxl_level_up_args, runes, u32)
+WXL_ARGS_FIELD(wxl_level_up_args, runic_power, u32)
+WXL_ARGS_FIELD(wxl_level_up_args, strength, u32)    ///< stats added
+WXL_ARGS_FIELD(wxl_level_up_args, agility, u32)
+WXL_ARGS_FIELD(wxl_level_up_args, stamina, u32)
+WXL_ARGS_FIELD(wxl_level_up_args, intellect, u32)
+WXL_ARGS_FIELD(wxl_level_up_args, spirit, u32)
+WXL_ARGS_END(wxl_level_up_args)
+
+/**
+ * @brief The local player gaining experience: SMSG_LOG_XPGAIN, read before the client parses it.
+ *
+ * @ref source is the unit the experience came from, for a kill; the player itself for the rest
+ * (a quest, an exploration), which the client logs without a source.
+ */
+WXL_ARGS(wxl_xp_gain_args)
+WXL_ARGS_FIELD(wxl_xp_gain_args, source, handle)          ///< WXL_HANDLE_NONE when not in view
+WXL_ARGS_FIELD(wxl_xp_gain_args, source_guid, guid)
+WXL_ARGS_FIELD(wxl_xp_gain_args, amount, u32)             ///< experience gained, the bonus included
+WXL_ARGS_ENUM(wxl_xp_gain_args, kind, wxl_xp_source)
+WXL_ARGS_FIELD(wxl_xp_gain_args, bonus, u32)              ///< the rested part of a kill's experience; 0 otherwise
+WXL_ARGS_FIELD(wxl_xp_gain_args, group_multiplier, f32)   ///< the group's rate on a kill; 1 otherwise
+WXL_ARGS_FIELD(wxl_xp_gain_args, refer_a_friend, bool)    ///< WXL_TRUE when the refer-a-friend bonus applied
+WXL_ARGS_END(wxl_xp_gain_args)
+
+/// The local player's money changing, raised when the server writes the field.
+WXL_ARGS(wxl_money_args)
+WXL_ARGS_FIELD(wxl_money_args, player, handle) ///< WXL_HANDLE_NONE when the player is not tracked
+WXL_ARGS_FIELD(wxl_money_args, previous, u32)  ///< copper, before
+WXL_ARGS_FIELD(wxl_money_args, current, u32)   ///< copper, after
+WXL_ARGS_END(wxl_money_args)
+
+/// The glue moving to another screen, before the new one is shown.
+WXL_ARGS(wxl_glue_screen_args)
+WXL_ARGS_FIELD(wxl_glue_screen_args, screen, str)   ///< "login", "charselect", "charcreate", "realmwizard", "patchdownload", "movie", ...
+WXL_ARGS_FIELD(wxl_glue_screen_args, previous, str) ///< the screen being left; empty at the first
+WXL_ARGS_END(wxl_glue_screen_args)
+
+/**
+ * @brief The character list of the realm, as SMSG_CHAR_ENUM carries it, before the client
+ * parses it.
+ *
+ * Raised once with the count, then a GlueCharacter per entry in the message's order. A message
+ * the client would refuse -- more than ten characters -- raises the list with @ref valid clear
+ * and no entries.
+ */
+WXL_ARGS(wxl_character_list_args)
+WXL_ARGS_FIELD(wxl_character_list_args, count, u32)
+WXL_ARGS_FIELD(wxl_character_list_args, valid, bool) ///< WXL_FALSE for a list the client refuses
+WXL_ARGS_END(wxl_character_list_args)
+
+/// One character of the list. The items, the pet and the looks are not read.
+WXL_ARGS(wxl_character_args)
+WXL_ARGS_FIELD(wxl_character_args, index, u32)           ///< its place in the list
+WXL_ARGS_FIELD(wxl_character_args, count, u32)           ///< the list's size
+WXL_ARGS_FIELD(wxl_character_args, guid, guid)
+WXL_ARGS_FIELD(wxl_character_args, name, str)
+WXL_ARGS_FIELD(wxl_character_args, race, u32)            ///< ChrRaces id
+WXL_ARGS_FIELD(wxl_character_args, class_id, u32)        ///< ChrClasses id
+WXL_ARGS_FIELD(wxl_character_args, sex, u32)             ///< 0 male, 1 female
+WXL_ARGS_FIELD(wxl_character_args, level, u32)
+WXL_ARGS_FIELD(wxl_character_args, zone_id, u32)         ///< AreaTable id
+WXL_ARGS_FIELD(wxl_character_args, map_id, u32)
+WXL_ARGS_FIELD(wxl_character_args, position, vec3)
+WXL_ARGS_FIELD(wxl_character_args, guild_id, u32)        ///< 0 for none
+WXL_ARGS_FIELD(wxl_character_args, flags, u32)           ///< the server's character flags
+WXL_ARGS_FIELD(wxl_character_args, customize_flags, u32) ///< the pending recustomisation, 0 for none
+WXL_ARGS_FIELD(wxl_character_args, first_login, bool)    ///< WXL_TRUE for a character never logged in
+WXL_ARGS_END(wxl_character_args)
+
+/**
+ * @brief The realm list from the logon server, as the client received it: from a Grunt logon
+ * server, or built by the Battle.net login from its own realm list.
+ *
+ * Raised once with the count, then a GlueRealm per entry in the list's order. Both may be raised
+ * on the logon connection's thread.
+ */
+WXL_ARGS(wxl_realm_list_args)
+WXL_ARGS_FIELD(wxl_realm_list_args, count, u32)
+WXL_ARGS_END(wxl_realm_list_args)
+
+/// One realm of the list.
+WXL_ARGS(wxl_realm_args)
+WXL_ARGS_FIELD(wxl_realm_args, index, u32)        ///< its place in the list
+WXL_ARGS_FIELD(wxl_realm_args, count, u32)        ///< the list's size
+WXL_ARGS_FIELD(wxl_realm_args, name, str)
+WXL_ARGS_FIELD(wxl_realm_args, address, str)      ///< "host:port"
+WXL_ARGS_FIELD(wxl_realm_args, type, u32)         ///< 0 normal, 1 PvP, 6 RP, 8 RP-PvP
+WXL_ARGS_FIELD(wxl_realm_args, flags, u32)        ///< the server's realm flags: 2 offline, 4 a version follows, 32 recommended, 64 new, 128 full
+WXL_ARGS_FIELD(wxl_realm_args, locked, bool)      ///< WXL_TRUE for a locked realm
+WXL_ARGS_FIELD(wxl_realm_args, population, f32)   ///< the server's figure, before the client maps 200/400/600 to flags
+WXL_ARGS_FIELD(wxl_realm_args, characters, u32)   ///< the account's characters there
+WXL_ARGS_FIELD(wxl_realm_args, category, u32)     ///< the timezone / category
+WXL_ARGS_FIELD(wxl_realm_args, realm_id, u32)
+WXL_ARGS_FIELD(wxl_realm_args, version_major, u32)    ///< the realm's version, when flags has 4; 0 otherwise
+WXL_ARGS_FIELD(wxl_realm_args, version_minor, u32)
+WXL_ARGS_FIELD(wxl_realm_args, version_revision, u32)
+WXL_ARGS_FIELD(wxl_realm_args, version_build, u32)
+WXL_ARGS_FIELD(wxl_realm_args, region_id, u32)        ///< Battle.net's region; 0 from a Grunt logon server
+WXL_ARGS_FIELD(wxl_realm_args, battlegroup_id, u32)   ///< Battle.net's battlegroup; 0 from a Grunt logon server
+WXL_ARGS_FIELD(wxl_realm_args, build, u32)            ///< the build Battle.net lists for the realm; 0 from a Grunt logon server
+WXL_ARGS_END(wxl_realm_args)
+
+/**
+ * @brief The world server's answer to the login: SMSG_AUTH_RESPONSE, before the client parses
+ * it.
+ *
+ * @ref result is the server's code: 12 (AUTH_OK) and 27 (AUTH_WAIT_QUEUE) carry the billing
+ * block when the message holds it, and 27 the queue position too; any other result carries
+ * nothing more.
+ */
+WXL_ARGS(wxl_auth_result_args)
+WXL_ARGS_FIELD(wxl_auth_result_args, result, u32)
+WXL_ARGS_FIELD(wxl_auth_result_args, queue_position, u32)          ///< for result 27; 0 otherwise
+WXL_ARGS_FIELD(wxl_auth_result_args, billing_time_remaining, u32)
+WXL_ARGS_FIELD(wxl_auth_result_args, billing_flags, u32)
+WXL_ARGS_FIELD(wxl_auth_result_args, billing_time_rested, u32)
+WXL_ARGS_FIELD(wxl_auth_result_args, expansion, u32)               ///< the account's expansion level: 0 classic, 1 TBC, 2 WotLK
+WXL_ARGS_FIELD(wxl_auth_result_args, free_character_migration, bool)
+WXL_ARGS_END(wxl_auth_result_args)
+
+/// The client asking to enter the world with a character, before CMSG_PLAYER_LOGIN is sent.
+WXL_ARGS(wxl_enter_world_args)
+WXL_ARGS_FIELD(wxl_enter_world_args, character_guid, guid)
+WXL_ARGS_END(wxl_enter_world_args)
+
+/**
+ * @brief A line of the chat that a chat message of the server became: the line the client shows.
+ *
+ * Raised when the client commits the line, after every filter it runs and just before the chat
+ * frames receive it as their CHAT_MSG_* event, and only then. A message the client drops raises
+ * nothing: one from an ignored player (a GM's excepted), a creature's said to an ignored player,
+ * a whisper the client's stranger filter refuses, a message with bytes left over, a line the spam
+ * filter or the UTF-8 check refuses. A line the client holds until it knows a name (the sender's
+ * or the target's is not in its name cache yet, or the world is still loading) is raised when it
+ * is shown, from the copy the client kept; one it then gives up on raises nothing. An addon
+ * message is not a line: it raises ChatAddonMessage.
+ *
+ * @ref type is the CHAT_MSG_* code the line is shown under: a foreign whisper (8 on the wire)
+ * is a whisper, 7; a say or a yell with no text is an emote, 10. @ref text is the text as the
+ * server sent it, @ref shown_text the line as the frames receive it: in the languages the
+ * player knows, with the profanity filter applied. @ref sender_name is the name the line shows,
+ * the message's own or the client's name cache's; @ref target_name only as the message carries
+ * it. The strings are valid for the call only.
+ */
+WXL_ARGS(wxl_chat_args)
+WXL_ARGS_FIELD(wxl_chat_args, type, u32)            ///< CHAT_MSG_*: 0 system, 1 say, 2 party, 5 officer, 6 yell, 7 whisper, 10 emote, 17 channel, ...
+WXL_ARGS_FIELD(wxl_chat_args, language, u32)        ///< Languages id the message was said in
+WXL_ARGS_FIELD(wxl_chat_args, sender, handle)       ///< WXL_HANDLE_NONE when the sender is not in view
+WXL_ARGS_FIELD(wxl_chat_args, sender_guid, guid)    ///< 0 for a system message
+WXL_ARGS_FIELD(wxl_chat_args, sender_name, str)     ///< empty when the line shows none
+WXL_ARGS_FIELD(wxl_chat_args, target_guid, guid)    ///< the unit the message is said to, 0 for none
+WXL_ARGS_FIELD(wxl_chat_args, target_name, str)     ///< empty when the message carries none
+WXL_ARGS_FIELD(wxl_chat_args, channel, str)         ///< the channel's name for type 17, empty otherwise
+WXL_ARGS_FIELD(wxl_chat_args, text, str)            ///< as the server sent it
+WXL_ARGS_FIELD(wxl_chat_args, tag, u32)             ///< the sender's chat tag: 1 AFK, 2 DND, 4 GM, 16 dev
+WXL_ARGS_FIELD(wxl_chat_args, achievement_id, u32)  ///< for an achievement message, 0 otherwise
+WXL_ARGS_FIELD(wxl_chat_args, gm, bool)             ///< WXL_TRUE for SMSG_GM_MESSAGECHAT
+WXL_ARGS_FIELD(wxl_chat_args, line_id, u32)         ///< the client's number for the line, the lineID of its CHAT_MSG_* event
+WXL_ARGS_FIELD(wxl_chat_args, shown_text, str)      ///< as the chat frames receive it
+WXL_ARGS_END(wxl_chat_args)
+
+/**
+ * @brief An addon message of the server, as the client delivers it to the interface as
+ * CHAT_MSG_ADDON.
+ *
+ * A chat message in the addon language (0xFFFFFFFF) is not shown: the client splits its text at
+ * the first tab into the prefix and the message and fires CHAT_MSG_ADDON with them. Raised just
+ * before it does, with what the interface receives, and only then: a message the client drops
+ * raises nothing (one from an ignored player, a message with bytes left over), and one it holds
+ * until it knows the sender's name is raised when it delivers it, with that name. The spam
+ * filter and the UTF-8 check do not apply to addon messages. The strings are valid for the call
+ * only.
+ */
+WXL_ARGS(wxl_chat_addon_args)
+WXL_ARGS_FIELD(wxl_chat_addon_args, type, u32)          ///< the CHAT_MSG_* code it came as: 2 party, 3 raid, 4 guild, 7 whisper, 44 battleground, ...
+WXL_ARGS_FIELD(wxl_chat_addon_args, sender, handle)     ///< WXL_HANDLE_NONE when the sender is not in view
+WXL_ARGS_FIELD(wxl_chat_addon_args, sender_guid, guid)
+WXL_ARGS_FIELD(wxl_chat_addon_args, sender_name, str)   ///< the name CHAT_MSG_ADDON carries; empty when the client has none
+WXL_ARGS_FIELD(wxl_chat_addon_args, prefix, str)        ///< the text before the first tab
+WXL_ARGS_FIELD(wxl_chat_addon_args, text, str)          ///< the text after it; empty without a tab
+WXL_ARGS_FIELD(wxl_chat_addon_args, channel, str)       ///< "PARTY", "RAID", "GUILD", "WHISPER", "BATTLEGROUND" or "UNKNOWN"
+WXL_ARGS_FIELD(wxl_chat_addon_args, gm, bool)           ///< WXL_TRUE for SMSG_GM_MESSAGECHAT
+WXL_ARGS_END(wxl_chat_addon_args)
+
+/**
+ * @brief The local player sending a message from the interface: SendChatMessage or
+ * SendAddonMessage, as the script called them, before the client checks or sends anything.
+ *
+ * The strings are the script's arguments as they were passed, @ref type the chat type's name
+ * ("SAY", "WHISPER", ...) or empty for the default. Writing WXL_TRUE through @ref suppressed
+ * answers the script as a message that was not sent: nothing is checked, nothing is sent, no
+ * error is raised. A handler that wants the text changed suppresses the message and sends its
+ * own through the script service; the arguments cannot be rewritten in place.
+ */
+WXL_ARGS(wxl_chat_send_args)
+WXL_ARGS_FIELD(wxl_chat_send_args, text, str)
+WXL_ARGS_FIELD(wxl_chat_send_args, type, str)       ///< "SAY", "YELL", "PARTY", "WHISPER", "CHANNEL", ...; empty for the default
+WXL_ARGS_FIELD(wxl_chat_send_args, language, str)   ///< the language's name; empty for the default
+WXL_ARGS_FIELD(wxl_chat_send_args, target, str)     ///< the player whispered or the channel; empty for none
+WXL_ARGS_FIELD(wxl_chat_send_args, prefix, str)     ///< the addon prefix; empty for a chat message
+WXL_ARGS_FIELD(wxl_chat_send_args, addon, bool)     ///< WXL_TRUE for SendAddonMessage
+WXL_ARGS_ANSWER(wxl_chat_send_args, suppressed)     ///< write WXL_TRUE to keep the client from sending it
+WXL_ARGS_END(wxl_chat_send_args)
+
+/**
+ * @brief Power given or drained, as the server reported it: SMSG_SPELLENERGIZELOG, or an
+ * energize or drain tick of SMSG_PERIODICAURALOG.
+ *
+ * @ref amount is the power moved, of @ref power_type (0 mana, 1 rage, 2 focus, 3 energy, 4
+ * happiness, 5 runes, 6 runic power). A drain takes it from @ref target; @ref multiplier is
+ * the share the caster gains, as the server sent it.
+ */
+WXL_ARGS(wxl_combat_energize_args)
+WXL_ARGS_FIELD(wxl_combat_energize_args, source, handle)      ///< WXL_HANDLE_NONE when not in view
+WXL_ARGS_FIELD(wxl_combat_energize_args, source_guid, guid)
+WXL_ARGS_FIELD(wxl_combat_energize_args, target, handle)      ///< WXL_HANDLE_NONE when not in view
+WXL_ARGS_FIELD(wxl_combat_energize_args, target_guid, guid)
+WXL_ARGS_FIELD(wxl_combat_energize_args, spell_id, u32)
+WXL_ARGS_FIELD(wxl_combat_energize_args, power_type, u32)
+WXL_ARGS_FIELD(wxl_combat_energize_args, amount, u32)
+WXL_ARGS_FIELD(wxl_combat_energize_args, periodic, bool)      ///< WXL_TRUE for a tick
+WXL_ARGS_FIELD(wxl_combat_energize_args, drain, bool)         ///< WXL_TRUE when the power was taken from the target
+WXL_ARGS_FIELD(wxl_combat_energize_args, multiplier, f32)     ///< for a drain; 0 otherwise
+WXL_ARGS_END(wxl_combat_energize_args)
+
+/**
+ * @brief An element of a descriptor field changed on an object, as an update of the server
+ * applied it: only for a field wxl_object_api's watch_field asked for.
+ *
+ * @ref field is the dword index of the element (update_fields.def): the field's first dword for
+ * a field of one element, the element's own for an array, such as one power of
+ * UNIT_FIELD_POWER_REGEN_FLAT_MODIFIER. @ref count is the element's size in dwords, 2 for a guid
+ * or another 64-bit value and 1 for the others; the values hold that many dwords, low first,
+ * and zeros above.
+ */
+WXL_ARGS(wxl_object_field_args)
+WXL_ARGS_FIELD(wxl_object_field_args, object, handle)
+WXL_ARGS_ENUM(wxl_object_field_args, type, wxl_object_type)
+WXL_ARGS_FIELD(wxl_object_field_args, field, u32)                 ///< the element's dword index
+WXL_ARGS_FIELD(wxl_object_field_args, count, u32)                 ///< its size in dwords, 1 or 2
+WXL_ARGS_VALUE(wxl_object_field_args, old_value, type, field)     ///< before the update
+WXL_ARGS_VALUE(wxl_object_field_args, new_value, type, field)     ///< as the update left it
+WXL_ARGS_END(wxl_object_field_args)
+
+/**
+ * @brief An archive the client mounted or let go of.
+ *
+ * @ref path is the path it was opened by. The table sizes are its header's: how many entries its
+ * hash and block tables hold. @ref bytes is what its tables and listfile hold in memory when the
+ * event is raised: for a mount the tables just read, for an unmount all it held.
+ */
+WXL_ARGS(wxl_archive_args)
+WXL_ARGS_FIELD(wxl_archive_args, path, str)            ///< as it was opened; a folder opened as an archive ends in a backslash
+WXL_ARGS_FIELD(wxl_archive_args, priority, i32)        ///< higher wins a name
+WXL_ARGS_FIELD(wxl_archive_args, hash_entries, u32)
+WXL_ARGS_FIELD(wxl_archive_args, block_entries, u32)
+WXL_ARGS_FIELD(wxl_archive_args, bytes, u64)
+WXL_ARGS_END(wxl_archive_args)
+
+/**
+ * @brief The address space is running short.
+ *
+ * Raised when the largest free block falls under the highest threshold a mod asked
+ * wxl.footprint's watch_pressure for, and again only once it has risen back above. An
+ * allocation larger than @ref largest_free fails, however much is free in all.
+ */
+WXL_ARGS(wxl_memory_pressure_args)
+WXL_ARGS_FIELD(wxl_memory_pressure_args, largest_free, u64) ///< the largest free block, in bytes
+WXL_ARGS_FIELD(wxl_memory_pressure_args, free, u64)         ///< every free block together
+WXL_ARGS_FIELD(wxl_memory_pressure_args, committed, u64)    ///< what the process has committed
+WXL_ARGS_FIELD(wxl_memory_pressure_args, threshold, u64)    ///< the threshold it fell under
+WXL_ARGS_END(wxl_memory_pressure_args)
+
+#ifdef WXL_ARGS_ENUM_DEFAULTED
+    #undef WXL_ARGS_ENUM
+    #undef WXL_ARGS_ENUM_DEFAULTED
+#endif
+#ifdef WXL_ARGS_VALUE_DEFAULTED
+    #undef WXL_ARGS_VALUE
+    #undef WXL_ARGS_VALUE_DEFAULTED
+#endif
 #ifdef WXL_ARGS_BYTES_DEFAULTED
     #undef WXL_ARGS_BYTES
     #undef WXL_ARGS_BYTES_DEFAULTED

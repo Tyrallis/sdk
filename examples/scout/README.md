@@ -1,20 +1,29 @@
-# 🧭 Scout
+# Scout
 
-A mod that watches what happens around you, keeps a short journal of it, and hands that journal
-to the game's interface.
+A mod that notes the units appearing, leaving and dying around you, keeps the last 64 of those
+notes in a journal, hands the journal to the game's interface, and counts the messages between
+the client and the server.
 
-It is the worked example behind [docs/your-first-mod.md](../../docs/your-first-mod.md), which
-builds it up one file at a time. Read that if you are starting out; read this if you just want
-to run it.
+[docs/your-first-mod.md](../../docs/your-first-mod.md) builds it from an empty folder, one file
+at a time, and explains each idea as it comes up. This page is for running it.
 
 ## What it does
 
-- notes units arriving, leaving, dying, and what you target, within 60 yards
-- clears the journal when you enter a world, so what you read is what happened *here*
-- registers five functions and one event on the client's own Lua, in **both** of its contexts
-  (the login screen and the game), re-registering every time a context is created
-- counts every message crossing to and from the server, by opcode, and can drop an incoming
-  opcode on request
+- notes every creature or player that appears, leaves or dies within 60 yards, and each new
+  target, at any distance; entering a world starts a new journal
+- registers five functions and one event on the client's Lua, in both of its contexts (the
+  login screens and the game), again each time a context is created
+- counts the messages and bytes of each opcode, in each direction, and drops an incoming opcode
+  when asked to
+
+| File | What it holds |
+|---|---|
+| `src/Journal.h`, `.cpp` | the clock and the journal, plain C++ |
+| `src/WorldWatch.h`, `.cpp` | a `WorldScript`: the client's tick, entering and leaving a world |
+| `src/UnitWatch.h`, `.cpp` | an `ObjectScript`: the units around you, read through `wxl.object` |
+| `src/Traffic.h`, `.cpp` | a `NetScript`: the counts, under a lock, and the drops |
+| `src/ScriptApi.h`, `.cpp` | a `LuaScript`: the functions and the event on the client's Lua |
+| `src/Scout.cpp` | the mod: owns the rest and registers the scripts |
 
 ## Build
 
@@ -23,8 +32,6 @@ cmake -S . -B build
 cmake --build build --config Release
 ```
 
-Out comes a mod folder, both architectures from the one command:
-
 ```
 build/dist/wxl.scout/
     mod.json
@@ -32,60 +39,45 @@ build/dist/wxl.scout/
     bin/x86/scout.dll
 ```
 
-## Install
-
-Copy the whole `wxl.scout` folder into `Mods/` beside the client's executable. Do not flatten
-it: the runtime looks for `Mods/<id>/mod.json` and `Mods/<id>/bin/<arch>/<name>.dll`.
+Copy the `wxl.scout` folder, whole, into `Mods/` beside the game's executable.
 
 ## Use
 
-From any script console or addon, once you are in the world:
+In the game's chat box:
 
-```lua
-print(ScoutCount(), "notes")
-
-local what, who, level = ScoutLast()
-if what then print(who, "("..level..")", what) end
-
-print(ScoutNearby(), "units in view")
-print(ScoutTraffic(0x0085), "SMSG_MONSTER_MOVE seen")
+```
+/run print(ScoutCount(), "lines in the journal")
+/run print(ScoutEntry())
+/run print(ScoutNearby(), "units in view")
+/run print(ScoutTraffic(0xA9))
 ```
 
-An addon can react instead of polling:
+| Function | Answers |
+|---|---|
+| `ScoutCount()` | how many lines the journal holds |
+| `ScoutEntry([index])` | what, who, level, whole seconds ago; 1, the default, is the newest line, and nothing past the oldest |
+| `ScoutNearby()` | how many units the client holds, you included |
+| `ScoutTraffic(opcode [, "sent"])` | the messages and bytes of that opcode received, or sent |
+| `ScoutDrop(opcode, drop)` | whether that incoming opcode was dropped before; `true` starts dropping it, `false` stops |
+
+An addon can listen instead of asking:
 
 ```lua
-local f = CreateFrame("Frame")
-f:RegisterEvent("SCOUT_UPDATED")
-f:SetScript("OnEvent", function(self, event, what, who, level)
-    print(who, what)
+local frame = CreateFrame("Frame")
+frame:RegisterEvent("SCOUT_UPDATED")
+frame:SetScript("OnEvent", function(self, event, what, who, level)
+    print(who, level, what)
 end)
 ```
 
-## The one dangerous function
+A dropped opcode never reaches the client's own code: the client and the server stop agreeing on
+whatever it carried. Scout drops nothing unless asked by number, logs each change as a warning,
+and never drops what the client sends.
 
-```lua
-ScoutMute(0x0085, true)   -- the client never sees that opcode again
-ScoutMute(0x0085, false)  -- back to normal
-```
+## What it needs
 
-A muted opcode is dropped before the client's own handler runs. That is how a mod serves an
-opcode the client does not know; it is also how a mod makes the client disagree with the server
-about the state of the world. Only incoming messages can be muted, and nothing is muted unless
-you ask for it by number.
-
-## What depends on the runtime
-
-| | stock `Wow.exe` 3.3.5a | the recompiled client |
-|---|---|---|
-| everything Scout watches, and the whole journal | yes | yes |
-| every stage, `OnGraphicsReady` included | yes | yes |
-
-Four of the functions these events sit on take their argument in a register rather than on the
-stack on the stock client -- the tick and the three of the object manager. The compiler chose
-that, because each has internal linkage and one or two callers, and a generated detour cannot
-hold a register across its own body. The runtime carries a thunk written by hand for each of
-the four, so they are seams like any other on both runtimes; what that costs is in the core's
-`src/seams/RegparmX86.cpp`, not in anything a mod writes.
-
-`mod.json` requires `wxl.object` -- without it there is nothing to watch, and a runtime that
-lacks it refuses the mod with a reason instead of loading it to do nothing.
+`mod.json` requires `wxl.object`: without it there is nothing to watch, and a runtime that lacks
+it refuses Scout with that reason. `wxl.script` is optional: without it Scout keeps its journal
+and says once in the log that the interface cannot read it. It asks for ABI `0.1.5`, the lowest
+version with everything it uses. Both runtimes publish both services and raise every event Scout
+handles.

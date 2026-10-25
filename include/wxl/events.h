@@ -41,7 +41,9 @@ extern "C" {
 #define WXL_ARGS_ANSWER(args, member)           wxl_bool* member;
 #define WXL_ARGS_BUFFER(args, member, capacity) char* member;
 #define WXL_ARGS_PTR(args, member, type)        type member;
+#define WXL_ARGS_ENUM(args, member, type)       uint32_t member;
 #include "wxl/fields.def"
+#undef WXL_ARGS_ENUM
 #undef WXL_ARGS_PTR
 #undef WXL_ARGS_BUFFER
 #undef WXL_ARGS_ANSWER
@@ -61,27 +63,20 @@ extern "C" {
 #undef WXL_ARGS_TYPE_i32
 #undef WXL_ARGS_TYPE_u32
 
-/// The class of a world object, as the server classifies it.
-typedef enum wxl_object_type
-{
-    WXL_OBJECT_UNKNOWN    = 0,
-    WXL_OBJECT_ITEM       = 1,
-    WXL_OBJECT_CONTAINER  = 2,
-    WXL_OBJECT_UNIT       = 3,
-    WXL_OBJECT_PLAYER     = 4,
-    WXL_OBJECT_GAMEOBJECT = 5,
-    WXL_OBJECT_DYNAMIC    = 6,
-    WXL_OBJECT_CORPSE     = 7
-} wxl_object_type;
+// --- The enumerations ----------------------------------------------------------------------
+//
+// What an args member declared with WXL_ARGS_ENUM holds, declared by enums.def: the values, their
+// meanings and the names a script sees are there. The member itself is a uint32_t.
 
-/// Which script context the client is running.
-typedef enum wxl_script_context
-{
-    WXL_SCRIPT_CONTEXT_GLUE = 0, ///< the login and character-select screens
-    WXL_SCRIPT_CONTEXT_GAME = 1  ///< in the world
-} wxl_script_context;
+#define WXL_ENUM(type)                              typedef enum type {
+#define WXL_ENUM_VALUE(type, constant, value, name) constant = value,
+#define WXL_ENUM_END(type)                          } type;
+#include "wxl/enums.def"
+#undef WXL_ENUM_END
+#undef WXL_ENUM_VALUE
+#undef WXL_ENUM
 
-// --- The enum ------------------------------------------------------------------------------
+// --- The event ids -------------------------------------------------------------------------
 
 /// Event ids. The numbers are the ABI; see events.def.
 typedef enum wxl_event

@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 WarcraftXL
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
 
 #include "ScriptMod.hpp"
 
@@ -10,8 +10,13 @@
 
 #include "Args.hpp"
 #include "Objects.hpp"
+#include "Profile.hpp"
 #include "Runtime.hpp"
 #include "Sandbox.hpp"
+#include "Services.hpp"
+#include "Shims.hpp"
+#include "wxl/host/admission.hpp"
+#include "wxl/host/manifest.hpp"
 #include "wxl/reflect.hpp"
 
 namespace wxl::lua
@@ -84,9 +89,12 @@ namespace wxl::lua
         }
     } // namespace
 
-    ScriptMod::ScriptMod(Runtime& runtime, host::ModCandidate candidate)
-        : runtime_(runtime), candidate_(std::move(candidate))
+    ScriptMod::ScriptMod(Runtime& runtime, host::ModCandidate candidate, uint32_t rank)
+        : runtime_(runtime), candidate_(std::move(candidate)), rank_(rank)
     {
+        // A folder is found by its init.lua alone only when it has no mod.json.
+        std::error_code ignored;
+        manifested_ = std::filesystem::exists(candidate_.directory / host::kManifestFileName, ignored);
     }
 
     ScriptMod::~ScriptMod() { Close(); }
@@ -94,6 +102,33 @@ namespace wxl::lua
     std::filesystem::path ScriptMod::Entry() const
     {
         return candidate_.directory / std::filesystem::u8path(candidate_.manifest.lua);
+    }
+
+    bool ScriptMod::Reread(std::string& problem)
+    {
+        if (!manifested_) return true;
+        host::Manifest manifest;
+        if (!host::ReadManifest(candidate_.directory / host::kManifestFileName, manifest, problem))
+        {
+            problem = "its mod.json no longer reads: " + problem;
+        }
+        else if (manifest.id != Id())
+        {
+            problem = "its mod.json now gives the id '" + manifest.id +
+                      "', and a mod's id cannot change while the client runs; restart the client "
+                      "to load it under the new one";
+        }
+        else if (manifest.lua.empty())
+        {
+            problem = "its mod.json no longer names a 'lua' entry; restart the client for the "
+                      "runtime to take it as a native mod";
+        }
+        else
+        {
+            candidate_.manifest = std::move(manifest);
+            return true;
+        }
+        return false;
     }
 
     // --- loading -----------------------------------------------------------------------------
@@ -104,6 +139,9 @@ namespace wxl::lua
         disabled_ = false;
         errors_   = 0;
 
+        // Recorded before anything is read: a change made while the mod loads is a change.
+        Rewatch();
+
         state_ = luaL_newstate();
         if (!state_)
         {
@@ -111,8 +149,8 @@ namespace wxl::lua
             return false;
         }
 
-        OpenSandbox(state_, candidate_.directory, Id());
-        OpenArgs(state_);
+        OpenSandbox(state_, candidate_.directory, Id(),
+                    [this](const std::filesystem::path& file) { Watch(file); });
         OpenObjects(state_);
         Install();
 
@@ -123,7 +161,12 @@ namespace wxl::lua
         const std::string entry = candidate_.manifest.lua;
         lua_rawgeti(L, LUA_REGISTRYINDEX, traceback_);
         const int msgh = lua_gettop(L);
-        if (LoadFile(L, Entry(), Id() + "/" + entry) != 0 || lua_pcall(L, 0, 0, msgh) != 0)
+        bool loaded = false;
+        {
+            const profile::Call zone(profile::Location(*this, entry));
+            loaded = LoadFile(L, Entry(), Id() + "/" + entry) == 0 && lua_pcall(L, 0, 0, msgh) == 0;
+        }
+        if (!loaded)
         {
             runtime_.Log(WXL_LOG_ERROR, "mod " + Id() + " failed to load " + entry + ": " +
                                             (lua_tostring(L, -1) ? lua_tostring(L, -1) : "?"));
@@ -141,7 +184,8 @@ namespace wxl::lua
             return false;
         }
         runtime_.Log(WXL_LOG_INFO, "loaded " + Id() + " " + candidate_.manifest.version.text +
-                                       " (" + candidate_.manifest.name + ") from " + entry);
+                                       " (" + candidate_.manifest.name + ") from " + entry +
+                                       ", abi " + host::AbiText(candidate_.manifest.abi));
         return true;
     }
 
@@ -181,9 +225,15 @@ namespace wxl::lua
                     lua_pop(L, 3);
                     return false;
                 }
+                if (const std::string newer = TooNew(*event); !newer.empty())
+                {
+                    error = family + "." + key + " " + newer;
+                    lua_pop(L, 3);
+                    return false;
+                }
                 lua_pushvalue(L, -1);
                 const int ref = luaL_ref(L, LUA_REGISTRYINDEX);
-                runtime_.Observe(*this, *event, ref, AnswerOf(*event) || BufferOf(*event), self);
+                runtime_.Observe(*this, *event, ref, Answerable(*event), self);
                 lua_pop(L, 1);
             }
             lua_pop(L, 1);
@@ -193,10 +243,25 @@ namespace wxl::lua
 
     void ScriptMod::Close()
     {
-        if (state_) lua_close(state_);
+        if (state_)
+        {
+            // Its patches and its field watches go back before its state does; its files close
+            // with the state.
+            CloseServiceResources(state_);
+            fieldWatches_.Release();
+            shims::Forget(*this);
+            lua_close(state_);
+        }
         state_     = nullptr;
         traceback_ = LUA_NOREF;
         for (std::vector<int>& refs : callbacks_) refs.clear();
+    }
+
+    void ScriptMod::Disable()
+    {
+        disabled_ = true;
+        fieldWatches_.Release();
+        shims::ReleaseHeld(*this);
     }
 
     // --- calling in ------------------------------------------------------------------------
@@ -209,8 +274,11 @@ namespace wxl::lua
         // By index over the count there was: a callback registered by a callback waits.
         std::vector<int>& refs  = callbacks_[static_cast<size_t>(which)];
         const size_t      count = refs.size();
+        uintptr_t& location = zones_[static_cast<size_t>(which)];
+        if (!location) location = profile::Location(*this, kCallbackNames[static_cast<size_t>(which)]);
         for (size_t i = 0; i < count && Runs(); ++i)
         {
+            const profile::Call zone(location);
             const int base = lua_gettop(L);
             lua_rawgeti(L, LUA_REGISTRYINDEX, traceback_);
             lua_rawgeti(L, LUA_REGISTRYINDEX, refs[i]);
@@ -238,24 +306,55 @@ namespace wxl::lua
                                         " times since it was loaded");
     }
 
-    // --- the folder watch ------------------------------------------------------------------
+    // --- the files its code comes from ------------------------------------------------------
 
-    ScriptMod::Signature ScriptMod::Scan() const
+    ScriptMod::Watched ScriptMod::Look(const std::filesystem::path& file)
     {
-        namespace fs = std::filesystem;
-        Signature       signature;
+        Watched         seen;
         std::error_code ec;
-        for (fs::recursive_directory_iterator it(candidate_.directory, ec), end; it != end && !ec;
-             it.increment(ec))
-        {
-            std::error_code ignored;
-            if (!it->is_regular_file(ignored)) continue;
-            ++signature.files;
-            signature.bytes += it->file_size(ignored);
-            const int64_t written = it->last_write_time(ignored).time_since_epoch().count();
-            if (written > signature.newest) signature.newest = written;
-        }
-        return signature;
+        seen.file   = file;
+        seen.exists = std::filesystem::is_regular_file(file, ec);
+        if (!seen.exists) return seen;
+        const uintmax_t size = std::filesystem::file_size(file, ec);
+        seen.size            = ec ? 0 : static_cast<uint64_t>(size);
+        const auto written   = std::filesystem::last_write_time(file, ec);
+        seen.written         = ec ? 0 : static_cast<int64_t>(written.time_since_epoch().count());
+        return seen;
+    }
+
+    void ScriptMod::Watch(const std::filesystem::path& file)
+    {
+        for (const Watched& known : watched_)
+            if (known.file == file) return;
+        watched_.push_back(Look(file));
+    }
+
+    void ScriptMod::Rewatch()
+    {
+        watched_.clear();
+        if (manifested_) Watch(candidate_.directory / host::kManifestFileName);
+        Watch(Entry());
+    }
+
+    std::filesystem::path ScriptMod::Changed() const
+    {
+        for (const Watched& known : watched_)
+            if (!Look(known.file).Same(known)) return known.file.lexically_relative(candidate_.directory);
+        return std::filesystem::path();
+    }
+
+    std::string ScriptMod::TooNew(const reflect::Event& event) const { return TooNew(host::EventSince(event.id)); }
+
+    std::string ScriptMod::TooNew(const host::AbiVersion& since) const
+    {
+        const host::AbiVersion asked = candidate_.manifest.abi;
+        if (host::AtLeast(asked, since)) return std::string();
+        if (!manifested_)
+            return "came with abi " + host::AbiText(since) + ", newer than the " +
+                   host::AbiText(asked) + " this runtime serves";
+        return "came with abi " + host::AbiText(since) + ", and this mod's mod.json asks for " +
+               host::AbiText(asked) + "; to use it, set \"abi\": \"" + host::AbiText(since) +
+               "\" there";
     }
 
     // --- the API -----------------------------------------------------------------------------
@@ -298,10 +397,11 @@ namespace wxl::lua
 
         PushClosure(&L_log);
         lua_setfield(L, -2, "log");
-        lua_pushcfunction(L, &ToTable);
-        lua_setfield(L, -2, "totable");
-        PushObjectModule(L);
+        PushObjectModule(L, fieldWatches_);
         lua_setfield(L, -2, "object");
+        PushFieldModule(L);
+        lua_setfield(L, -2, "field");
+        PushServiceModules(L, *this);
 
         lua_createtable(L, 0, 4); // wxl.mod
         lua_pushstring(L, Id().c_str());
@@ -315,7 +415,7 @@ namespace wxl::lua
         lua_setfield(L, -2, "directory");
         lua_setfield(L, -2, "mod");
 
-        lua_createtable(L, 0, 5); // wxl.runtime
+        lua_createtable(L, 0, 7); // wxl.runtime
         if (const wxl_runtime_info* info = runtime_.Host()->runtime())
         {
             lua_pushlstring(L, info->id.data ? info->id.data : "", info->id.data ? info->id.size : 0);
@@ -324,11 +424,20 @@ namespace wxl::lua
             lua_setfield(L, -2, "name");
             lua_pushnumber(L, info->version);
             lua_setfield(L, -2, "version");
-            lua_pushnumber(L, info->abi_major);
-            lua_setfield(L, -2, "abi_major");
-            lua_pushnumber(L, info->abi_minor);
-            lua_setfield(L, -2, "abi_minor");
         }
+        // The contract this mod is served, which wxl.lua may cap below the runtime's own.
+        const host::AbiVersion abi = runtime_.Abi();
+        lua_pushnumber(L, abi.major);
+        lua_setfield(L, -2, "abi_major");
+        lua_pushnumber(L, abi.minor);
+        lua_setfield(L, -2, "abi_minor");
+        lua_pushnumber(L, abi.feature);
+        lua_setfield(L, -2, "abi_feature");
+        const std::string abiText = host::AbiText(abi);
+        lua_pushlstring(L, abiText.data(), abiText.size());
+        lua_setfield(L, -2, "abi");
+        PushClosure(&L_Raises);
+        lua_setfield(L, -2, "Raises");
         lua_setfield(L, -2, "runtime");
 
         lua_newtable(L); // wxl.events: family -> { "OnX", ... }
@@ -406,13 +515,9 @@ namespace wxl::lua
 
     int ScriptMod::L_Override(lua_State* L) { return Self(L).Subscribe(L, true); }
 
-    int ScriptMod::Subscribe(lua_State* L, bool override)
+    const reflect::Event& ScriptMod::Resolve(lua_State* L, const char* verb, const char* family,
+                                             const char* method)
     {
-        const char* verb   = override ? "Override" : "Observe";
-        const char* family = luaL_checkstring(L, 1);
-        const char* method = luaL_checkstring(L, 2);
-        luaL_checktype(L, 3, LUA_TFUNCTION);
-
         // "WorldScript" names the family "World" of reflect.hpp; "OnUpdate" its event "Update".
         const size_t familyLength = std::strlen(family);
         std::string  stem;
@@ -422,16 +527,29 @@ namespace wxl::lua
         for (const std::string& known : Families())
             if (known == family) knownFamily = true;
         if (!knownFamily)
-            return luaL_error(L, "%s: unknown family '%s'; the families are %s", verb, family,
-                              Join(Families()).c_str());
+            luaL_error(L, "%s: unknown family '%s'; the families are %s", verb, family,
+                       Join(Families()).c_str());
 
         const reflect::Event* event =
             std::strncmp(method, "On", 2) == 0 ? reflect::Find(stem.c_str(), method + 2) : nullptr;
         if (!event)
-            return luaL_error(L, "%s: %s has no '%s'; its events are %s", verb, family, method,
-                              MethodsOf(stem.c_str()).c_str());
+            luaL_error(L, "%s: %s has no '%s'; its events are %s", verb, family, method,
+                       MethodsOf(stem.c_str()).c_str());
+        return *event;
+    }
 
-        if (override && !AnswerOf(*event) && !BufferOf(*event))
+    int ScriptMod::Subscribe(lua_State* L, bool override)
+    {
+        const char* verb   = override ? "Override" : "Observe";
+        const char* family = luaL_checkstring(L, 1);
+        const char* method = luaL_checkstring(L, 2);
+        luaL_checktype(L, 3, LUA_TFUNCTION);
+        const reflect::Event* event = &Resolve(L, verb, family, method);
+
+        if (const std::string newer = TooNew(*event); !newer.empty())
+            return luaL_error(L, "%s: %s of %s %s", verb, method, family, newer.c_str());
+
+        if (override && !Answerable(*event))
             return luaL_error(L, "Override: %s of %s cannot be overridden: its args carry no "
                                  "answer or buffer member; use Observe",
                               method, family);
@@ -440,6 +558,24 @@ namespace wxl::lua
         const int      ref = luaL_ref(L, LUA_REGISTRYINDEX);
         const uint32_t id  = runtime_.Observe(*this, *event, ref, override);
         lua_pushnumber(L, id);
+        return 1;
+    }
+
+    int ScriptMod::L_Raises(lua_State* L)
+    {
+        ScriptMod&            self   = Self(L);
+        const char*           family = luaL_checkstring(L, 1);
+        const char*           method = luaL_checkstring(L, 2);
+        const reflect::Event& event  = Resolve(L, "Raises", family, method);
+        const wxl_host*       host   = self.runtime_.Host();
+        const size_t          needed = offsetof(wxl_host, raises) + sizeof(host->raises);
+        if (!host || host->struct_size < needed || !host->raises)
+        {
+            lua_pushnil(L);
+            lua_pushliteral(L, "unsupported");
+            return 2;
+        }
+        lua_pushboolean(L, host->raises(event.id) != 0);
         return 1;
     }
 

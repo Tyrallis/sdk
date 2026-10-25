@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 WarcraftXL
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 WarcraftXL
 #
 # LuaJIT 2.1 as a static library for the architecture of this build tree.
 #
@@ -9,9 +9,43 @@
 # CMake is using, for the architecture CMake is targeting. CL=/MD makes the objects use the
 # dynamic CRT, which is what the mod is built with in every configuration.
 #
-# Provides the imported target luajit::lib and the variable WXL_LUAJIT_SOURCE_DIR.
+# WXL_LUAJIT_LIBRARY and WXL_LUAJIT_INCLUDE_DIR take an already-built LuaJIT instead (lua51.lib
+# for this tree's architecture, static, /MD; the directory holding luajit.h, lua.h, lualib.h and
+# lauxlib.h): nothing is fetched or built, which is how a tree without msvcbuild.bat gets one.
+#
+# Provides the imported target luajit::lib and the variable WXL_LUAJIT_SOURCE_DIR (empty with a
+# prebuilt LuaJIT).
 
 include_guard(GLOBAL)
+
+set(WXL_LUAJIT_LIBRARY "" CACHE FILEPATH
+    "A prebuilt static LuaJIT (lua51.lib) for this tree's architecture, instead of building it")
+set(WXL_LUAJIT_INCLUDE_DIR "" CACHE PATH
+    "The directory of the prebuilt LuaJIT's headers (luajit.h, lua.h, lualib.h, lauxlib.h)")
+
+if(WXL_LUAJIT_LIBRARY OR WXL_LUAJIT_INCLUDE_DIR)
+    if(NOT WXL_LUAJIT_LIBRARY OR NOT WXL_LUAJIT_INCLUDE_DIR)
+        message(FATAL_ERROR "wxl.lua: a prebuilt LuaJIT needs both WXL_LUAJIT_LIBRARY (the "
+            "library) and WXL_LUAJIT_INCLUDE_DIR (its headers); only one is set")
+    endif()
+    if(NOT EXISTS "${WXL_LUAJIT_LIBRARY}" OR IS_DIRECTORY "${WXL_LUAJIT_LIBRARY}")
+        message(FATAL_ERROR "wxl.lua: WXL_LUAJIT_LIBRARY is not a file: ${WXL_LUAJIT_LIBRARY}")
+    endif()
+    foreach(_header luajit.h lua.h lualib.h lauxlib.h)
+        if(NOT EXISTS "${WXL_LUAJIT_INCLUDE_DIR}/${_header}")
+            message(FATAL_ERROR "wxl.lua: WXL_LUAJIT_INCLUDE_DIR has no ${_header}: "
+                "${WXL_LUAJIT_INCLUDE_DIR}")
+        endif()
+    endforeach()
+
+    add_library(luajit::lib STATIC IMPORTED GLOBAL)
+    set_target_properties(luajit::lib PROPERTIES
+        IMPORTED_LOCATION "${WXL_LUAJIT_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${WXL_LUAJIT_INCLUDE_DIR}")
+    set(WXL_LUAJIT_SOURCE_DIR "")
+    message(STATUS "wxl.lua: LuaJIT prebuilt, ${WXL_LUAJIT_LIBRARY}")
+    return()
+endif()
 
 set(WXL_LUAJIT_COMMIT 04dca7911ea255f37be799c18d74c305b921c1a6 CACHE STRING
     "The LuaJIT commit wxl.lua is built with (v2.1, 2024-07-04)")

@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 WarcraftXL
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
 //
 // wxl::Player: a player-controlled unit.
 
@@ -40,7 +40,7 @@ namespace wxl
     {
     public:
         static constexpr wxl_object_type kKinds[] = {WXL_OBJECT_PLAYER};
-        static constexpr bool Accepts(wxl_object_type type) { return type == WXL_OBJECT_PLAYER; }
+        static constexpr bool Accepts(uint32_t type) { return type == WXL_OBJECT_PLAYER; }
 
         using Unit::Unit;
 

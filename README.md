@@ -5,7 +5,7 @@
 **The contract a WarcraftXL mod is written against**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![ABI](https://img.shields.io/badge/ABI-0.5-blue.svg)](include/wxl/abi.h)
+[![ABI](https://img.shields.io/badge/ABI-0.1.15-blue.svg)](include/wxl/abi.h)
 [![C++](https://img.shields.io/badge/C%2B%2B-17%20and%20up-blue.svg)](#-getting-started)
 [![Header only](https://img.shields.io/badge/header--only-yes-lightgrey.svg)](include/wxl)
 
@@ -14,7 +14,7 @@
 ---
 
 > [!IMPORTANT]
-> ABI major 0 means the contract is still moving: any release may break any other. Ids and stage
+> ABI major 0 means the contract is still moving: any minor may break any other. Ids and stage
 > numbers are already append-only, but signatures are not frozen until 1.0.
 
 ## 🚀 Overview
@@ -27,7 +27,9 @@ and the rules of the boundary between them. There is nothing to link and nothing
 
 - **One source, every target.** `wxl_add_mod()` builds a mod for each architecture in one command.
 - **Object-oriented.** Derive from `wxl::Mod` and the script families; world objects are C++
-  values you can compare, hash and iterate, not handles you dereference by hand.
+  values you can compare, hash and iterate, not handles you dereference by hand, and a handler
+  receives them as `wxl::Object`. A handle names one stay of an object in view; its guid is what
+  lasts.
 - **A read that can fail says so.** Every read answers `wxl::Expected<T>`: the value, or the
   `wxl_result` that stood in for it. A dead unit, a gone one and a runtime without the service
   are three different answers.
@@ -59,7 +61,8 @@ and the rules of the boundary between them. There is nothing to link and nothing
 ### Prerequisites
 
 - CMake 3.21 or newer
-- A C++17 compiler (MSVC 19.3+, GCC 11+, Clang 14+)
+- A C++ compiler: the SDK headers take C++17 (MSVC 19.3+, GCC 11+, Clang 14+); a mod builds as
+  C++20 by default, for `std::format` (MSVC 19.3+, GCC 13+, Clang 17+)
 - The runtime you are targeting, to run what you build
 
 ### Build the template
@@ -86,6 +89,64 @@ cmake --build build --config Debug
 ctest --test-dir build -C Debug
 ```
 
+### Run the tests from Linux
+
+The suites are Windows executables. From Linux they build with clang-cl and run under Wine, one
+architecture per tree. Two environment variables set this up: a toolchain file that drives
+clang-cl and lld-link against the MSVC CRT and the Windows SDK (which
+[xwin](https://github.com/Jake-Shadle/xwin) downloads), and an emulator that ctest puts in front
+of every test, as does the build in front of the tools it runs (CMake 3.28 or newer reads it from
+the environment):
+
+```sh
+export CMAKE_TOOLCHAIN_FILE=<toolchain for x86_64-pc-windows-msvc>
+export CMAKE_CROSSCOMPILING_EMULATOR=<path to the wrapper below>
+cmake -S . -B build-x64 -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DWXL_LUAJIT_LIBRARY=<luajit>/src/lua51.lib -DWXL_LUAJIT_INCLUDE_DIR=<luajit>/src
+cmake --build build-x64
+ctest --test-dir build-x64 --output-on-failure
+```
+
+The wrapper runs its arguments under Wine; 32-bit Wine is needed for the x86 tree:
+
+```sh
+#!/bin/sh
+export WINEDEBUG="${WINEDEBUG:--all}"
+exec wine "$@"
+```
+
+`wxl.lua` links LuaJIT, which the tree otherwise fetches and builds with LuaJIT's
+`msvcbuild.bat`. `WXL_LUAJIT_LIBRARY` and `WXL_LUAJIT_INCLUDE_DIR` take one built beforehand
+instead: a static `lua51.lib` for the tree's architecture, built against the dynamic CRT (`/MD`),
+and the directory of its headers. `-DWXL_SDK_LUA=OFF` leaves `wxl.lua` and its tests out
+altogether.
+
+To build that LuaJIT, do the steps of `msvcbuild.bat static` by hand in a checkout's `src/`. The
+host tools are built with the Linux compiler, at the target's pointer size and told the target is
+Windows; the library is compiled with clang-cl, `XWIN` being where xwin put the CRT and the SDK:
+
+```sh
+git show -s --format=%ct > luajit_relver.txt
+gcc -O2 -o minilua host/minilua.c -lm
+./minilua ../dynasm/dynasm.lua -LN -D WIN -D JIT -D FFI -D ENDIAN_LE -D FPU -D P64 \
+    -o host/buildvm_arch.h vm_x64.dasc
+./minilua host/genversion.lua
+gcc -O2 -DLUAJIT_OS=LUAJIT_OS_WINDOWS -I. -I../dynasm -o buildvm host/buildvm*.c
+LIBS="lib_base.c lib_math.c lib_bit.c lib_string.c lib_table.c lib_io.c lib_os.c
+      lib_package.c lib_debug.c lib_jit.c lib_ffi.c lib_buffer.c"
+./buildvm -m peobj -o lj_vm.obj
+for m in bcdef ffdef libdef recdef; do ./buildvm -m $m -o lj_$m.h $LIBS; done
+./buildvm -m vmdef -o jit/vmdef.lua $LIBS
+./buildvm -m folddef -o lj_folddef.h lj_opt_fold.c
+clang-cl --target=x86_64-pc-windows-msvc /vctoolsdir $XWIN/crt /winsdkdir $XWIN/sdk \
+    /nologo /c /O2 /MD /D_CRT_SECURE_NO_DEPRECATE \
+    "/D_CRT_STDIO_INLINE=__declspec(dllexport)__inline" lj_*.c lib_*.c
+llvm-lib /nologo /OUT:lua51.lib lj_*.obj lib_*.obj
+```
+
+For x86: `gcc -m32` for both host tools (a multilib gcc), no `-D P64`, `vm_x86.dasc`, and
+`--target=i686-pc-windows-msvc /arch:SSE2`.
+
 ## 🧩 A mod
 
 ```cpp
@@ -94,11 +155,11 @@ ctest --test-dir build -C Debug
 
 class Greeter final : public wxl::WorldScript
 {
-    void OnWorldEnter(const wxl_world_args&) override
+    void OnWorldEnter(uint32_t map_id, wxl_vec3) override
     {
         const wxl::Player me = wxl::Player::Local();
         if (wxl::Expected<std::string> name = me.Name())
-            wxl::Log(WXL_LOG_INFO, "greeter", "hello, " + *name);
+            wxl::Log(WXL_LOG_INFO, "greeter", "hello, {}, on map {}", *name, map_id);
     }
 };
 
@@ -106,6 +167,7 @@ Greeter g_greeter;
 
 class GreeterMod final : public wxl::Mod
 {
+public:
     wxl_result OnLoad() override
     {
         wxl::ScriptMgr::Add(&g_greeter);
@@ -115,7 +177,7 @@ class GreeterMod final : public wxl::Mod
     void OnReady() override { wxl::Log(WXL_LOG_INFO, "greeter", "client is up"); }
 };
 
-WXL_MOD(GreeterMod, "wxl.greeter", "Greeter", 1)
+WXL_MOD(GreeterMod, "wxl.greeter", "Greeter")
 ```
 
 Or write it in Lua, with nothing to build: a folder with an `init.lua`, run by the `wxl.lua`
@@ -129,9 +191,11 @@ serves the client's own Lua and watches the server traffic -- and
 
 ## 🔌 What a runtime offers
 
-Events are grouped into seven script families: `WorldScript`, `RenderScript`, `ObjectScript`,
-`AssetScript`, `NetScript`, `LuaScript` and `CombatScript`. Override the hooks you want; the rest
-cost nothing.
+Events are grouped into ten script families: `WorldScript`, `RenderScript`, `ObjectScript`,
+`AssetScript`, `NetScript`, `LuaScript`, `CombatScript`, `PlayerScript`, `GlueScript` and
+`ChatScript`. Override the hooks you want; the rest cost nothing. A hook takes its event's
+arguments as parameters, `OnMessageReceived(uint32_t opcode, wxl::Bytes data, wxl::Answer
+suppressed)`, in C++ and in Lua alike.
 
 Beyond events, a runtime publishes services, and a mod asks for the ones it needs:
 
@@ -139,7 +203,8 @@ Beyond events, a runtime publishes services, and a mod asks for the ones it need
 |---|---|---|
 | `wxl.object` | units, players, game objects | yes |
 | `wxl.script` | the client's Lua | yes |
-| `wxl.storage` | archives and files | yes |
+| `wxl.storage` | archives and files, and folders a mod adds to them | yes |
+| `wxl.data` | the client's databases, served from a mod's files | yes |
 | `wxl.net` | messages to and from the server | yes; no runtime publishes it yet |
 | `wxl.ui` | frames and the interface | yes; no runtime publishes it yet |
 | `wxl.gx` | the client's D3D9 device and the model batches it draws | no: the x64 runtime, on a D3D9 device |
@@ -149,9 +214,11 @@ Beyond events, a runtime publishes services, and a mod asks for the ones it need
 | `wxl.patch` | bytes written into the image | no: runtimes that load into a shipped binary |
 
 Each service has a typed facade with its name and version sealed in -- `wxl::ObjectService`,
-`wxl::ScriptService`, `wxl::StorageService`, `wxl::NetService`, `wxl::UiService`,
-`wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService` -- taking and returning C++ types.
-`wxl::Service<T>` is still there for the raw table.
+`wxl::ScriptService`, `wxl::StorageService`, `wxl::DataService`, `wxl::NetService`,
+`wxl::UiService`, `wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService` -- taking and
+returning C++ types. `wxl::Service<T>` is still there for the raw table. Lua mods reach the same
+services as `wxl.storage`, `wxl.data`, `wxl.script`, `wxl.hook` and `wxl.patch`, built from the
+same tables.
 
 **Portable means a runtime may serve it, not that yours does.** A facade tests false and every
 call through it answers `WXL_E_UNSUPPORTED` while the service is absent; require it in your
@@ -168,16 +235,26 @@ include/wxl/
     events.def     the event table -- the single source of ids, names and args
     events.h       the event enum, and the argument structs fields.def declares
     fields.def     every argument struct, member by member, with what each member carries
+    enums.def      the enumerations those members hold, with the name a script sees for each
+    update_fields.def
+                   every descriptor field of every kind of object, by the client's names, with
+                   its dword index, size and value; generated from the client fork
     reflect.hpp    the events and their members as data, for a runtime that is not C++
     host.h         what a runtime offers a mod
     mod.h          what a mod exposes to a runtime
     expected.hpp   Expected<T>: a value or the wxl_result that stood in for it
-    sdk.hpp        the C++ layer: Mod, the script families, Subscription, Service, WXL_MOD
+    base.hpp       what every C++ header rests on: the runtime table, strings, the log, Service
+    sdk.hpp        the C++ layer: Mod, the script families and their parameters, Subscription,
+                   WXL_MOD
     objects.hpp    world objects as C++ values: the umbrella over objects/
     objects/       one header per kind the client knows: Object, Item, Container, Unit, Player,
-                   GameObject, DynamicObject, Corpse; plus the view and the ObjectService facade
+                   GameObject, DynamicObject, Corpse; plus the view, the ObjectService facade,
+                   ObjectMap, data kept per object until it leaves, and fields.hpp, the update
+                   fields as typed constants (wxl::field::Unit::Health)
     services.hpp   every typed facade at once
-    services/      one C header per service, and one .hpp with its typed facade
+    services/      one C header per service, its table (<service>.def: every member with the
+                   kinds it takes and answers) and one .hpp with its typed facade; rows.hpp
+                   reads the tables, for wxl.lua's modules and the facades' plain methods
 host/              the mod host: discovery, manifests, load order, registry, event bus
 runtime/           service scaffolding every runtime shares: handles, wxl.object over a table of
                    reads (object_reads.def) each runtime implements
@@ -188,6 +265,10 @@ lua/               wxl.lua: the Lua mod runtime, a mod itself (LuaJIT, one state
 template/          a buildable mod to start from
 examples/scout/    a worked example: the world, the client's Lua, the server traffic
 examples/lua-hello/ the same in Lua: a folder, no build
+examples/lua-services/ a Lua mod using the services: files, a search path, databases, the
+                   client's own script
+examples/memory-report/ a Lua mod that writes where the client's memory goes into a report
+examples/probe/    a Lua test tool: every event the runtime raises, and /mark, into the log
 tests/             the contract, the mod host, the shared runtime and wxl.lua, each against fakes
 ```
 
@@ -196,12 +277,18 @@ supplies only the bindings that reach its own client.
 
 ## 🔢 Versioning
 
-`major.minor`, in [`abi.h`](include/wxl/abi.h).
+`major.minor.feature`, in [`abi.h`](include/wxl/abi.h): today `0.1.15`.
 
 - **Major** changes when an existing field, signature or id changes meaning. A runtime refuses a
   mod built against a different major.
-- **Minor** changes when something is appended. A runtime accepts a minor at or below its own and
-  refuses a higher one.
+- **Minor** is a stage of the platform: `0.1` is the first scope. While the major is 0, a runtime
+  refuses a mod of a different minor.
+- **Feature** changes when something is appended: an event, a service, a field at the end of a
+  struct. A runtime accepts a mod that needs a feature at or below its own and refuses a higher
+  one.
+
+A manifest's `"abi"` is the lowest version the mod needs. A mod built against newer headers may
+ask for less and check `wxl_host.abi_feature` before it uses what came in between.
 
 Event ids and stage numbers are appended, never renumbered, never removed.
 
@@ -210,6 +297,8 @@ Event ids and stage numbers are appended, never renumbered, never removed.
 - [Your first mod](docs/your-first-mod.md) -- a tutorial, from an empty folder to a mod that does real work
 - [Building a mod](docs/building-a-mod.md) -- the manifest, the targets, the C++ layer
 - [Lua mods](docs/lua-mods.md) -- a mod with nothing to build: the folder, the API, reload, the sandbox
+- [Profiling](docs/profiling.md) -- where frame time goes, mod by mod, in the Tracy viewer, and zones of your own
+- [Reading the log](docs/the-log.md) -- where the log is, what a launch says, the level setting, marking a test with `/mark`
 - [`schema/mod.json`](schema/mod.json) -- the manifest schema, for your editor
 - [`template/`](template/) -- a working mod to copy
 - [`examples/scout/`](examples/scout/) -- the worked example the tutorial builds

@@ -1,0 +1,99 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
+//
+// The enumerations an args struct member can hold: each one's values, with the name a runtime
+// that is not C shows for each. events.h declares the C enums from these rows, a WXL_ARGS_ENUM
+// row of fields.def names one of them, and wxl/reflect.hpp reads the names, so the C enum and
+// what a script sees are one text.
+//
+//   WXL_ENUM(type)                          opens an enumeration: `type` is its C typedef
+//   WXL_ENUM_VALUE(type, constant, value, name)
+//                                           one value: the C constant, its number, and the name
+//                                           a script runtime shows for it (Lua: a string)
+//   WXL_ENUM_END(type)                      closes it
+//
+// A member of an args struct that holds one of these is a uint32_t whatever the enum: the C
+// struct's layout does not depend on how a compiler sizes an enum. A value is appended to its
+// enumeration and never renumbered; a runtime may raise a value newer than the headers a mod was
+// built against, which that mod reads as a number it does not name.
+//
+// Include with WXL_ENUM_VALUE defined; WXL_ENUM and WXL_ENUM_END default to nothing.
+
+#ifndef WXL_ENUM_VALUE
+#error "define WXL_ENUM_VALUE(type, constant, value, name) before including enums.def"
+#endif
+
+#ifndef WXL_ENUM
+    #define WXL_ENUM(type)
+    #define WXL_ENUM_DEFAULTED
+#endif
+#ifndef WXL_ENUM_END
+    #define WXL_ENUM_END(type)
+    #define WXL_ENUM_END_DEFAULTED
+#endif
+
+/// The class of a world object, as the server classifies it. The names are the kinds of object
+/// a script sees, as an object's Type() answers them.
+WXL_ENUM(wxl_object_type)
+WXL_ENUM_VALUE(wxl_object_type, WXL_OBJECT_UNKNOWN,    0, Unknown)
+WXL_ENUM_VALUE(wxl_object_type, WXL_OBJECT_ITEM,       1, Item)
+WXL_ENUM_VALUE(wxl_object_type, WXL_OBJECT_CONTAINER,  2, Container)
+WXL_ENUM_VALUE(wxl_object_type, WXL_OBJECT_UNIT,       3, Unit)
+WXL_ENUM_VALUE(wxl_object_type, WXL_OBJECT_PLAYER,     4, Player)
+WXL_ENUM_VALUE(wxl_object_type, WXL_OBJECT_GAMEOBJECT, 5, GameObject)
+WXL_ENUM_VALUE(wxl_object_type, WXL_OBJECT_DYNAMIC,    6, DynamicObject)
+WXL_ENUM_VALUE(wxl_object_type, WXL_OBJECT_CORPSE,     7, Corpse)
+WXL_ENUM_END(wxl_object_type)
+
+/// Which script context the client is running.
+WXL_ENUM(wxl_script_context)
+WXL_ENUM_VALUE(wxl_script_context, WXL_SCRIPT_CONTEXT_GLUE, 0, glue) ///< the login and character-select screens
+WXL_ENUM_VALUE(wxl_script_context, WXL_SCRIPT_CONTEXT_GAME, 1, game) ///< in the world
+WXL_ENUM_END(wxl_script_context)
+
+/// A mouse button.
+WXL_ENUM(wxl_mouse_button)
+WXL_ENUM_VALUE(wxl_mouse_button, WXL_MOUSE_LEFT,   0, left)
+WXL_ENUM_VALUE(wxl_mouse_button, WXL_MOUSE_RIGHT,  1, right)
+WXL_ENUM_VALUE(wxl_mouse_button, WXL_MOUSE_MIDDLE, 2, middle)
+WXL_ENUM_END(wxl_mouse_button)
+
+/// What happened to a cooldown the client was holding.
+WXL_ENUM(wxl_cooldown_change)
+WXL_ENUM_VALUE(wxl_cooldown_change, WXL_COOLDOWN_STARTED, 0, started) ///< the held cooldown starts now
+WXL_ENUM_VALUE(wxl_cooldown_change, WXL_COOLDOWN_CLEARED, 1, cleared) ///< it is gone
+WXL_ENUM_VALUE(wxl_cooldown_change, WXL_COOLDOWN_SHIFTED, 2, shifted) ///< it moved, by the delay the event carries
+WXL_ENUM_END(wxl_cooldown_change)
+
+/// How damage was dealt.
+WXL_ENUM(wxl_damage_kind)
+WXL_ENUM_VALUE(wxl_damage_kind, WXL_DAMAGE_MELEE,       0, melee)       ///< a melee round
+WXL_ENUM_VALUE(wxl_damage_kind, WXL_DAMAGE_SPELL,       1, spell)       ///< a spell's direct damage
+WXL_ENUM_VALUE(wxl_damage_kind, WXL_DAMAGE_PERIODIC,    2, periodic)    ///< a tick of an aura
+WXL_ENUM_VALUE(wxl_damage_kind, WXL_DAMAGE_ENVIRONMENT, 3, environment) ///< the world itself: see wxl_environment
+WXL_ENUM_END(wxl_damage_kind)
+
+/// What in the world dealt environmental damage.
+WXL_ENUM(wxl_environment)
+WXL_ENUM_VALUE(wxl_environment, WXL_ENVIRONMENT_EXHAUSTION, 0, exhaustion) ///< too far out at sea
+WXL_ENUM_VALUE(wxl_environment, WXL_ENVIRONMENT_DROWNING,   1, drowning)
+WXL_ENUM_VALUE(wxl_environment, WXL_ENVIRONMENT_FALL,       2, fall)
+WXL_ENUM_VALUE(wxl_environment, WXL_ENVIRONMENT_LAVA,       3, lava)
+WXL_ENUM_VALUE(wxl_environment, WXL_ENVIRONMENT_SLIME,      4, slime)
+WXL_ENUM_VALUE(wxl_environment, WXL_ENVIRONMENT_FIRE,       5, fire)
+WXL_ENUM_END(wxl_environment)
+
+/// Where experience came from.
+WXL_ENUM(wxl_xp_source)
+WXL_ENUM_VALUE(wxl_xp_source, WXL_XP_KILL,  0, kill)  ///< a kill
+WXL_ENUM_VALUE(wxl_xp_source, WXL_XP_OTHER, 1, other) ///< anything else: a quest, an exploration
+WXL_ENUM_END(wxl_xp_source)
+
+#ifdef WXL_ENUM_DEFAULTED
+    #undef WXL_ENUM
+    #undef WXL_ENUM_DEFAULTED
+#endif
+#ifdef WXL_ENUM_END_DEFAULTED
+    #undef WXL_ENUM_END
+    #undef WXL_ENUM_END_DEFAULTED
+#endif

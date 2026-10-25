@@ -3,6 +3,8 @@
 add_executable(wxl-contract contract.cpp)
 target_link_libraries(wxl-contract PRIVATE wxl::sdk)
 target_include_directories(wxl-contract PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# C++20, as wxl_add_mod builds a mod: wxl::Log's formatting is std::format.
+set_target_properties(wxl-contract PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
 
 if(MSVC)
     target_compile_options(wxl-contract PRIVATE /W4 /permissive-)
@@ -43,7 +45,8 @@ if(TARGET wxl-lua)
     target_link_libraries(wxl-lua-tests PRIVATE wxl::host)
     target_include_directories(wxl-lua-tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_CURRENT_SOURCE_DIR}/../lua/include)
+        ${CMAKE_CURRENT_SOURCE_DIR}/../lua/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include)
     add_dependencies(wxl-lua-tests wxl-lua)
 
     if(MSVC)
@@ -61,6 +64,50 @@ if(TARGET wxl-lua)
     add_test(NAME lua-types
         COMMAND wxl-lua-types --check ${CMAKE_CURRENT_SOURCE_DIR}/../lua/types/wxl.d.lua)
 endif()
+
+# Every public header in one mod, at the strictest warning level with warnings as errors, as
+# C++17 and as C++20: a mod built against the SDK compiles clean. Building it is the check.
+foreach(standard 17 20)
+    add_library(wxl-headers-cxx${standard} MODULE headers.cpp)
+    target_link_libraries(wxl-headers-cxx${standard} PRIVATE wxl::sdk-mod)
+    set_target_properties(wxl-headers-cxx${standard} PROPERTIES
+        CXX_STANDARD ${standard} CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF PREFIX "")
+    if(MSVC)
+        target_compile_options(wxl-headers-cxx${standard} PRIVATE /W4 /WX /permissive-)
+    else()
+        target_compile_options(wxl-headers-cxx${standard} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+endforeach()
+
+# The guide's example, built as a mod is, with warnings as errors, then loaded through the mod
+# host and driven with the fake services. WXL_MOD_ARCH makes wxl_add_mod declare the library
+# target of this tree's architecture.
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(WXL_MOD_ARCH win-x64)
+else()
+    set(WXL_MOD_ARCH win-x86)
+endif()
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../examples/scout ${CMAKE_CURRENT_BINARY_DIR}/scout)
+if(MSVC)
+    target_compile_options(scout PRIVATE /WX)
+else()
+    target_compile_options(scout PRIVATE -Werror)
+endif()
+
+add_executable(wxl-scout-tests scout_tests.cpp)
+target_link_libraries(wxl-scout-tests PRIVATE wxl::host)
+target_include_directories(wxl-scout-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_dependencies(wxl-scout-tests scout)
+if(MSVC)
+    target_compile_options(wxl-scout-tests PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(wxl-scout-tests PRIVATE -Wall -Wextra)
+endif()
+
+add_test(NAME examples
+    COMMAND wxl-scout-tests $<TARGET_FILE:scout>
+            ${CMAKE_CURRENT_SOURCE_DIR}/../examples/scout/mod.json
+            ${CMAKE_CURRENT_BINARY_DIR}/scout-scratch)
 
 # The documents against the example they quote. A tutorial whose snippets have drifted still
 # builds and still reads well; only this says it is wrong.
