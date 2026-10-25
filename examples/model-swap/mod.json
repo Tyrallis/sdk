@@ -1,0 +1,15 @@
+{
+  "$schema": "../../schema/mod.json",
+  "id": "wxl.model-swap",
+  "name": "Model Swap",
+  "version": "1.0.0",
+  "abi": "0.1.16",
+  "description": "Logs every model the client loads and draws every murloc as a gnoll, through the engine's model cache.",
+  "binaries": {
+    "win-x64": "bin/x64/model-swap.dll",
+    "win-x86": "bin/x86/model-swap.dll"
+  },
+  "requires": [
+    { "service": "wxl.point", "version": 1 }
+  ]
+}

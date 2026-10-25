@@ -1204,6 +1204,78 @@
 ---arrives as its number.
 ---@alias wxl.XpSource "kill"|"other"
 
+---A wxl_loot_kind value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.LootKind "corpse"|"pickpocket"|"fishing"|"disenchant"|"skinning"|"prospecting"|"milling"
+
+---A wxl_loot_slot_type value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.LootSlotType "take"|"roll"|"master"|"locked"|"owner"
+
+---A wxl_roll_type value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.RollType "pass"|"need"|"greed"|"disenchant"
+
+---A wxl_loot_method value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.LootMethod "free_for_all"|"round_robin"|"master"|"group"|"need_before_greed"
+
+---A wxl_group_left_reason value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.GroupLeftReason "removed"|"disbanded"
+
+---A wxl_trade_status value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.TradeStatus "busy"|"proposed"|"initiated"|"cancelled"|"accepted"|"already_trading"|"not_found"|"state_changed"|"complete"|"unaccepted"|"too_far"|"wrong_faction"|"failed"|"closed"|"ignored"|"stunned"|"target_stunned"|"dead"|"target_dead"|"logging_out"|"target_logging_out"|"restricted"|"wrong_realm"|"not_on_taplist"
+
+---A wxl_window_kind value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.WindowKind "gossip"|"merchant"|"trainer"|"bank"|"auction"|"mail"|"taxi"|"trade"|"quest"|"guild_bank"|"stable"|"petition"|"tabard"
+
+---A wxl_texture_encoding value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.TextureEncoding "jpeg"|"palette"|"dxt"|"raw"
+
+---A wxl_shader_stage value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.ShaderStage "vertex"|"hull"|"domain"|"geometry"|"pixel"|"compute"
+
+---A wxl_power_type value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.PowerType "mana"|"rage"|"focus"|"energy"|"happiness"|"runes"|"runic_power"
+
+---A wxl_reaction value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.Reaction "hated"|"hostile"|"unfriendly"|"neutral"|"friendly"|"honored"|"revered"|"exalted"
+
+---A wxl_creature_type value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.CreatureType "none"|"beast"|"dragonkin"|"demon"|"elemental"|"giant"|"undead"|"humanoid"|"critter"|"mechanical"|"not_specified"|"totem"|"non_combat_pet"|"gas_cloud"
+
+---A wxl_classification value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.Classification "normal"|"elite"|"rareelite"|"worldboss"|"rare"
+
+---A wxl_stand_state value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.StandState "standing"|"sitting"|"sitting_chair"|"sleeping"|"sitting_low_chair"|"sitting_medium_chair"|"sitting_high_chair"|"dead"|"kneeling"|"submerged"
+
+---A wxl_move_type value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.MoveType "walk"|"run"|"run_back"|"swim"|"swim_back"|"flight"|"flight_back"|"turn_rate"|"pitch_rate"
+
+---A wxl_inventory_slot value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.InventorySlot "head"|"neck"|"shoulder"|"shirt"|"chest"|"waist"|"legs"|"feet"|"wrist"|"hands"|"finger1"|"finger2"|"trinket1"|"trinket2"|"back"|"main_hand"|"off_hand"|"ranged"|"tabard"|"bag1"|"bag2"|"bag3"|"bag4"
+
+---A wxl_item_quality value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.ItemQuality "poor"|"common"|"uncommon"|"rare"|"epic"|"legendary"|"artifact"|"heirloom"
+
+---A wxl_appearance_change value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.AppearanceChange "worn"|"removed"|"freed"
+
 -- The script families. A function defined on one of these tables as On<Event> is
 -- subscribed when the entry file has run and called with the event's parameters;
 -- on an event that can be answered its return values are taken, as Override
@@ -1230,6 +1302,7 @@ WorldScript = {}
 ---@field OnUiRenderEnd fun(self: RenderScript, index: integer, delta: number)
 ---@field OnSwapchainLost fun(self: RenderScript, width: integer, height: integer)
 ---@field OnSwapchainRestored fun(self: RenderScript, width: integer, height: integer)
+---@field OnModelBatchDrawn fun(self: RenderScript, model: lightuserdata|nil, root_model: lightuserdata|nil, primitive_type: integer, base_vertex: integer, min_index: integer, vertex_count: integer, start_index: integer, primitive_count: integer, blend_mode: integer, viewport_x: integer, viewport_y: integer, viewport_width: integer, viewport_height: integer, viewport_min_z: number, viewport_max_z: number)
 RenderScript = {}
 
 ---@class ObjectScript
@@ -1256,6 +1329,11 @@ RenderScript = {}
 ---@field OnSpellCooldownChanged fun(self: ObjectScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, spell_id: integer, change: wxl.CooldownChange|integer, delay: integer)
 ---@field OnSpellCastCancel fun(self: ObjectScript, caster: wxl.Object|nil, caster_guid: wxl.Guid, spell_id: integer, cast_count: integer, reason: integer, notify_server: boolean)
 ---@field OnObjectFieldChanged fun(self: ObjectScript, object: wxl.Object|nil, type: wxl.ObjectType|integer, field: integer, count: integer, old_value: wxl.FieldValue, new_value: wxl.FieldValue)
+---@field OnUnitAuraApplied fun(self: ObjectScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, slot: integer, spell_id: integer, caster: wxl.Object|nil, caster_guid: wxl.Guid, stacks: integer, previous_stacks: integer, level: integer, flags: integer, harmful: boolean, duration: integer, remaining: integer)
+---@field OnUnitAuraRemoved fun(self: ObjectScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, slot: integer, spell_id: integer, caster: wxl.Object|nil, caster_guid: wxl.Guid, stacks: integer, previous_stacks: integer, level: integer, flags: integer, harmful: boolean, duration: integer, remaining: integer)
+---@field OnUnitAuraRefreshed fun(self: ObjectScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, slot: integer, spell_id: integer, caster: wxl.Object|nil, caster_guid: wxl.Guid, stacks: integer, previous_stacks: integer, level: integer, flags: integer, harmful: boolean, duration: integer, remaining: integer)
+---@field OnUnitMountChanged fun(self: ObjectScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, previous_display_id: integer, display_id: integer)
+---@field OnAppearanceChanged fun(self: ObjectScript, change: wxl.AppearanceChange|integer, wearer: lightuserdata|nil, model: lightuserdata|nil, race_id: integer, sex_id: integer, item_slot: integer, display_id: integer, npc: boolean)
 ObjectScript = {}
 
 ---@class AssetScript
@@ -1268,6 +1346,15 @@ ObjectScript = {}
 ---@field OnClientDbLoaded fun(self: AssetScript, name: string, records: lightuserdata|nil, record_count: integer, record_size: integer)
 ---@field OnArchiveMounted fun(self: AssetScript, path: string, priority: integer, hash_entries: integer, block_entries: integer, bytes: integer)
 ---@field OnArchiveUnmounted fun(self: AssetScript, path: string, priority: integer, hash_entries: integer, block_entries: integer, bytes: integer)
+---@field OnTerrainTileLoad fun(self: AssetScript, path: string, tile_x: integer, tile_y: integer, data: wxl.Bytes)
+---@field OnMapObjectGroupLoad fun(self: AssetScript, path: string, group: integer, data: wxl.Bytes)
+---@field OnSkinProfileLoad fun(self: AssetScript, model: string, data: wxl.Bytes)
+---@field OnTextureDecode fun(self: AssetScript, path: string, width: integer, height: integer, encoding: wxl.TextureEncoding|integer, alpha_bits: integer, alpha_kind: integer, mip_levels: integer)
+---@field OnShaderLoad fun(self: AssetScript, stage: wxl.ShaderStage|integer, path: string, name: string, permutations: integer)
+---@field OnSoundFileLoad fun(self: AssetScript, path: string, streaming: boolean, priority: integer)
+---@field OnModelParsed fun(self: AssetScript, path: string, file: lightuserdata|nil, header: lightuserdata|nil, size: integer)
+---@field OnSkinProfileParsed fun(self: AssetScript, path: string, file: lightuserdata|nil, header: lightuserdata|nil, skin: lightuserdata|nil)
+---@field OnModelSequenceLoad fun(self: AssetScript, path: string, file: lightuserdata|nil, sequence_index: integer, data: wxl.Bytes)
 AssetScript = {}
 
 ---@class NetScript
@@ -1299,6 +1386,11 @@ CombatScript = {}
 ---@field OnPlayerLevelUp fun(self: PlayerScript, level: integer, health: integer, mana: integer, rage: integer, focus: integer, energy: integer, happiness: integer, runes: integer, runic_power: integer, strength: integer, agility: integer, stamina: integer, intellect: integer, spirit: integer)
 ---@field OnPlayerXpGain fun(self: PlayerScript, source: wxl.Object|nil, source_guid: wxl.Guid, amount: integer, kind: wxl.XpSource|integer, bonus: integer, group_multiplier: number, refer_a_friend: boolean)
 ---@field OnPlayerMoneyChanged fun(self: PlayerScript, player: wxl.Object|nil, previous: integer, current: integer)
+---@field OnPlayerDied fun(self: PlayerScript, unit: wxl.Object|nil)
+---@field OnPlayerReleased fun(self: PlayerScript, unit: wxl.Object|nil)
+---@field OnPlayerResurrected fun(self: PlayerScript, unit: wxl.Object|nil)
+---@field OnReputationChanged fun(self: PlayerScript, faction_id: integer, previous: integer, current: integer, bonus: number)
+---@field OnAchievementEarned fun(self: PlayerScript, player: wxl.Object|nil, player_guid: wxl.Guid, achievement_id: integer, date: integer, silent: boolean)
 PlayerScript = {}
 
 ---@class GlueScript
@@ -1317,7 +1409,64 @@ GlueScript = {}
 ---@field OnChatAddonMessage fun(self: ChatScript, type: integer, sender: wxl.Object|nil, sender_guid: wxl.Guid, sender_name: string, prefix: string, text: string, channel: string, gm: boolean)
 ChatScript = {}
 
----@alias wxl.Family "WorldScript"|"RenderScript"|"ObjectScript"|"AssetScript"|"NetScript"|"LuaScript"|"CombatScript"|"PlayerScript"|"GlueScript"|"ChatScript"
+---@class LootScript
+---@field OnLootOpened fun(self: LootScript, source: wxl.Object|nil, source_guid: wxl.Guid, kind: wxl.LootKind|integer, money: integer, count: integer)
+---@field OnLootSlot fun(self: LootScript, index: integer, slot: integer, item_id: integer, quantity: integer, display_id: integer, random_suffix: integer, random_property_id: integer, slot_type: wxl.LootSlotType|integer)
+---@field OnLootSlotCleared fun(self: LootScript, index: integer, slot: integer, item_id: integer, quantity: integer, display_id: integer, random_suffix: integer, random_property_id: integer, slot_type: wxl.LootSlotType|integer)
+---@field OnLootClosed fun(self: LootScript, source: wxl.Object|nil, source_guid: wxl.Guid, kind: wxl.LootKind|integer, money: integer, count: integer)
+---@field OnLootMoney fun(self: LootScript, amount: integer, alone: boolean)
+---@field OnLootRollStart fun(self: LootScript, source_guid: wxl.Guid, slot: integer, item_id: integer, random_suffix: integer, random_property_id: integer, quantity: integer, duration: integer, vote_mask: integer, roll_id: integer)
+---@field OnLootRoll fun(self: LootScript, source_guid: wxl.Guid, slot: integer, item_id: integer, random_suffix: integer, random_property_id: integer, player_guid: wxl.Guid, roll: integer, roll_type: wxl.RollType|integer, auto_pass: boolean)
+---@field OnLootRollWon fun(self: LootScript, source_guid: wxl.Guid, slot: integer, item_id: integer, random_suffix: integer, random_property_id: integer, player_guid: wxl.Guid, roll: integer, roll_type: wxl.RollType|integer, auto_pass: boolean)
+---@field OnLootAllPassed fun(self: LootScript, source_guid: wxl.Guid, slot: integer, item_id: integer, random_suffix: integer, random_property_id: integer, player_guid: wxl.Guid, roll: integer, roll_type: wxl.RollType|integer, auto_pass: boolean)
+LootScript = {}
+
+---@class ItemScript
+---@field OnItemPushed fun(self: ItemScript, player_guid: wxl.Guid, bag: integer, slot: integer, item_id: integer, suffix_factor: integer, random_property_id: integer, count: integer, total: integer, received: boolean, created: boolean, announced: boolean)
+---@field OnInventorySlotChanged fun(self: ItemScript, container: wxl.Object|nil, container_guid: wxl.Guid, slot: integer, previous_guid: wxl.Guid, item: wxl.Object|nil, item_guid: wxl.Guid)
+---@field OnItemDurabilityChanged fun(self: ItemScript, item: wxl.Object|nil, item_guid: wxl.Guid, previous: integer, current: integer, maximum: integer)
+---@field OnItemStackChanged fun(self: ItemScript, item: wxl.Object|nil, item_guid: wxl.Guid, previous: integer, current: integer)
+---@field OnInventoryError fun(self: ItemScript, result: integer, item_guid: wxl.Guid, other_guid: wxl.Guid, required_level: integer)
+ItemScript = {}
+
+---@class QuestScript
+---@field OnQuestAccepted fun(self: QuestScript, quest_id: integer, log_slot: integer)
+---@field OnQuestRemoved fun(self: QuestScript, quest_id: integer, log_slot: integer)
+---@field OnQuestObjectiveChanged fun(self: QuestScript, quest_id: integer, log_slot: integer, objective: integer, previous: integer, current: integer)
+---@field OnQuestCompleted fun(self: QuestScript, quest_id: integer, log_slot: integer)
+---@field OnQuestFailed fun(self: QuestScript, quest_id: integer, log_slot: integer)
+---@field OnQuestTurnedIn fun(self: QuestScript, quest_id: integer, xp: integer, money: integer, honor: integer, talents: integer, arena_points: integer)
+---@field OnQuestGiverGreeting fun(self: QuestScript, giver: wxl.Object|nil, giver_guid: wxl.Guid, quest_id: integer, title: string, text: string, count: integer, shared_by: wxl.Guid)
+---@field OnQuestGiverDetail fun(self: QuestScript, giver: wxl.Object|nil, giver_guid: wxl.Guid, quest_id: integer, title: string, text: string, count: integer, shared_by: wxl.Guid)
+---@field OnQuestGiverProgress fun(self: QuestScript, giver: wxl.Object|nil, giver_guid: wxl.Guid, quest_id: integer, title: string, text: string, count: integer, shared_by: wxl.Guid)
+---@field OnQuestGiverReward fun(self: QuestScript, giver: wxl.Object|nil, giver_guid: wxl.Guid, quest_id: integer, title: string, text: string, count: integer, shared_by: wxl.Guid)
+QuestScript = {}
+
+---@class GroupScript
+---@field OnGroupInvite fun(self: GroupScript, inviter: string, can_accept: boolean, accept: boolean|nil, decline: boolean|nil): boolean|nil, boolean|nil answers through accept, then decline
+---@field OnGroupUpdated fun(self: GroupScript, group_guid: wxl.Guid, raid: boolean, battleground: boolean, count: integer, subgroup: integer, leader_guid: wxl.Guid, loot_method: wxl.LootMethod|integer, looter_guid: wxl.Guid, loot_threshold: integer, dungeon_difficulty: integer, raid_difficulty: integer)
+---@field OnGroupMember fun(self: GroupScript, index: integer, count: integer, member: wxl.Object|nil, member_guid: wxl.Guid, name: string, online: boolean, subgroup: integer, flags: integer, roles: integer)
+---@field OnGroupLeft fun(self: GroupScript, reason: wxl.GroupLeftReason|integer)
+---@field OnGroupLootMethodChanged fun(self: GroupScript, loot_method: wxl.LootMethod|integer, looter_guid: wxl.Guid, loot_threshold: integer)
+---@field OnReadyCheck fun(self: GroupScript, initiator: wxl.Object|nil, initiator_guid: wxl.Guid, duration: integer)
+---@field OnReadyCheckResponse fun(self: GroupScript, member: wxl.Object|nil, member_guid: wxl.Guid, ready: boolean)
+---@field OnReadyCheckFinished fun(self: GroupScript, initiator_guid: wxl.Guid)
+GroupScript = {}
+
+---@class SocialScript
+---@field OnDuelRequested fun(self: SocialScript, challenger: wxl.Object|nil, challenger_guid: wxl.Guid, arbiter_guid: wxl.Guid, accept: boolean|nil, decline: boolean|nil): boolean|nil, boolean|nil answers through accept, then decline
+---@field OnDuelCountdown fun(self: SocialScript, duration: integer)
+---@field OnDuelWon fun(self: SocialScript, winner: string, loser: string, fled: boolean)
+---@field OnDuelFinished fun(self: SocialScript, completed: boolean)
+---@field OnTradeStatus fun(self: SocialScript, status: wxl.TradeStatus|integer, partner_guid: wxl.Guid)
+---@field OnEmote fun(self: SocialScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, emote_id: integer)
+---@field OnTextEmote fun(self: SocialScript, sender: wxl.Object|nil, sender_guid: wxl.Guid, text_emote: integer, emote_number: integer, target_name: string)
+---@field OnResurrectRequest fun(self: SocialScript, offerer: wxl.Object|nil, offerer_guid: wxl.Guid, name: string, sickness: boolean, accept: boolean|nil, decline: boolean|nil): boolean|nil, boolean|nil answers through accept, then decline
+---@field OnWindowOpened fun(self: SocialScript, kind: wxl.WindowKind|integer, npc: wxl.Object|nil, npc_guid: wxl.Guid)
+---@field OnWindowClosed fun(self: SocialScript, kind: wxl.WindowKind|integer, npc: wxl.Object|nil, npc_guid: wxl.Guid)
+SocialScript = {}
+
+---@alias wxl.Family "WorldScript"|"RenderScript"|"ObjectScript"|"AssetScript"|"NetScript"|"LuaScript"|"CombatScript"|"PlayerScript"|"GlueScript"|"ChatScript"|"LootScript"|"ItemScript"|"QuestScript"|"GroupScript"|"SocialScript"
 
 ---Calls `handler` with the event's parameters whenever it is raised. Returns the
 ---handler's id.
@@ -1399,6 +1548,68 @@ ChatScript = {}
 ---@overload fun(family: "AssetScript", method: "OnArchiveMounted", handler: fun(path: string, priority: integer, hash_entries: integer, block_entries: integer, bytes: integer)): integer
 ---@overload fun(family: "AssetScript", method: "OnArchiveUnmounted", handler: fun(path: string, priority: integer, hash_entries: integer, block_entries: integer, bytes: integer)): integer
 ---@overload fun(family: "WorldScript", method: "OnMemoryPressure", handler: fun(largest_free: integer, free: integer, committed: integer, threshold: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnUnitAuraApplied", handler: fun(unit: wxl.Object|nil, unit_guid: wxl.Guid, slot: integer, spell_id: integer, caster: wxl.Object|nil, caster_guid: wxl.Guid, stacks: integer, previous_stacks: integer, level: integer, flags: integer, harmful: boolean, duration: integer, remaining: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnUnitAuraRemoved", handler: fun(unit: wxl.Object|nil, unit_guid: wxl.Guid, slot: integer, spell_id: integer, caster: wxl.Object|nil, caster_guid: wxl.Guid, stacks: integer, previous_stacks: integer, level: integer, flags: integer, harmful: boolean, duration: integer, remaining: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnUnitAuraRefreshed", handler: fun(unit: wxl.Object|nil, unit_guid: wxl.Guid, slot: integer, spell_id: integer, caster: wxl.Object|nil, caster_guid: wxl.Guid, stacks: integer, previous_stacks: integer, level: integer, flags: integer, harmful: boolean, duration: integer, remaining: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnUnitMountChanged", handler: fun(unit: wxl.Object|nil, unit_guid: wxl.Guid, previous_display_id: integer, display_id: integer)): integer
+---@overload fun(family: "LootScript", method: "OnLootOpened", handler: fun(source: wxl.Object|nil, source_guid: wxl.Guid, kind: wxl.LootKind|integer, money: integer, count: integer)): integer
+---@overload fun(family: "LootScript", method: "OnLootSlot", handler: fun(index: integer, slot: integer, item_id: integer, quantity: integer, display_id: integer, random_suffix: integer, random_property_id: integer, slot_type: wxl.LootSlotType|integer)): integer
+---@overload fun(family: "LootScript", method: "OnLootSlotCleared", handler: fun(index: integer, slot: integer, item_id: integer, quantity: integer, display_id: integer, random_suffix: integer, random_property_id: integer, slot_type: wxl.LootSlotType|integer)): integer
+---@overload fun(family: "LootScript", method: "OnLootClosed", handler: fun(source: wxl.Object|nil, source_guid: wxl.Guid, kind: wxl.LootKind|integer, money: integer, count: integer)): integer
+---@overload fun(family: "LootScript", method: "OnLootMoney", handler: fun(amount: integer, alone: boolean)): integer
+---@overload fun(family: "LootScript", method: "OnLootRollStart", handler: fun(source_guid: wxl.Guid, slot: integer, item_id: integer, random_suffix: integer, random_property_id: integer, quantity: integer, duration: integer, vote_mask: integer, roll_id: integer)): integer
+---@overload fun(family: "LootScript", method: "OnLootRoll", handler: fun(source_guid: wxl.Guid, slot: integer, item_id: integer, random_suffix: integer, random_property_id: integer, player_guid: wxl.Guid, roll: integer, roll_type: wxl.RollType|integer, auto_pass: boolean)): integer
+---@overload fun(family: "LootScript", method: "OnLootRollWon", handler: fun(source_guid: wxl.Guid, slot: integer, item_id: integer, random_suffix: integer, random_property_id: integer, player_guid: wxl.Guid, roll: integer, roll_type: wxl.RollType|integer, auto_pass: boolean)): integer
+---@overload fun(family: "LootScript", method: "OnLootAllPassed", handler: fun(source_guid: wxl.Guid, slot: integer, item_id: integer, random_suffix: integer, random_property_id: integer, player_guid: wxl.Guid, roll: integer, roll_type: wxl.RollType|integer, auto_pass: boolean)): integer
+---@overload fun(family: "ItemScript", method: "OnItemPushed", handler: fun(player_guid: wxl.Guid, bag: integer, slot: integer, item_id: integer, suffix_factor: integer, random_property_id: integer, count: integer, total: integer, received: boolean, created: boolean, announced: boolean)): integer
+---@overload fun(family: "ItemScript", method: "OnInventorySlotChanged", handler: fun(container: wxl.Object|nil, container_guid: wxl.Guid, slot: integer, previous_guid: wxl.Guid, item: wxl.Object|nil, item_guid: wxl.Guid)): integer
+---@overload fun(family: "ItemScript", method: "OnItemDurabilityChanged", handler: fun(item: wxl.Object|nil, item_guid: wxl.Guid, previous: integer, current: integer, maximum: integer)): integer
+---@overload fun(family: "ItemScript", method: "OnItemStackChanged", handler: fun(item: wxl.Object|nil, item_guid: wxl.Guid, previous: integer, current: integer)): integer
+---@overload fun(family: "ItemScript", method: "OnInventoryError", handler: fun(result: integer, item_guid: wxl.Guid, other_guid: wxl.Guid, required_level: integer)): integer
+---@overload fun(family: "QuestScript", method: "OnQuestAccepted", handler: fun(quest_id: integer, log_slot: integer)): integer
+---@overload fun(family: "QuestScript", method: "OnQuestRemoved", handler: fun(quest_id: integer, log_slot: integer)): integer
+---@overload fun(family: "QuestScript", method: "OnQuestObjectiveChanged", handler: fun(quest_id: integer, log_slot: integer, objective: integer, previous: integer, current: integer)): integer
+---@overload fun(family: "QuestScript", method: "OnQuestCompleted", handler: fun(quest_id: integer, log_slot: integer)): integer
+---@overload fun(family: "QuestScript", method: "OnQuestFailed", handler: fun(quest_id: integer, log_slot: integer)): integer
+---@overload fun(family: "QuestScript", method: "OnQuestTurnedIn", handler: fun(quest_id: integer, xp: integer, money: integer, honor: integer, talents: integer, arena_points: integer)): integer
+---@overload fun(family: "QuestScript", method: "OnQuestGiverGreeting", handler: fun(giver: wxl.Object|nil, giver_guid: wxl.Guid, quest_id: integer, title: string, text: string, count: integer, shared_by: wxl.Guid)): integer
+---@overload fun(family: "QuestScript", method: "OnQuestGiverDetail", handler: fun(giver: wxl.Object|nil, giver_guid: wxl.Guid, quest_id: integer, title: string, text: string, count: integer, shared_by: wxl.Guid)): integer
+---@overload fun(family: "QuestScript", method: "OnQuestGiverProgress", handler: fun(giver: wxl.Object|nil, giver_guid: wxl.Guid, quest_id: integer, title: string, text: string, count: integer, shared_by: wxl.Guid)): integer
+---@overload fun(family: "QuestScript", method: "OnQuestGiverReward", handler: fun(giver: wxl.Object|nil, giver_guid: wxl.Guid, quest_id: integer, title: string, text: string, count: integer, shared_by: wxl.Guid)): integer
+---@overload fun(family: "GroupScript", method: "OnGroupInvite", handler: fun(inviter: string, can_accept: boolean, accept: boolean|nil, decline: boolean|nil)): integer
+---@overload fun(family: "GroupScript", method: "OnGroupUpdated", handler: fun(group_guid: wxl.Guid, raid: boolean, battleground: boolean, count: integer, subgroup: integer, leader_guid: wxl.Guid, loot_method: wxl.LootMethod|integer, looter_guid: wxl.Guid, loot_threshold: integer, dungeon_difficulty: integer, raid_difficulty: integer)): integer
+---@overload fun(family: "GroupScript", method: "OnGroupMember", handler: fun(index: integer, count: integer, member: wxl.Object|nil, member_guid: wxl.Guid, name: string, online: boolean, subgroup: integer, flags: integer, roles: integer)): integer
+---@overload fun(family: "GroupScript", method: "OnGroupLeft", handler: fun(reason: wxl.GroupLeftReason|integer)): integer
+---@overload fun(family: "GroupScript", method: "OnGroupLootMethodChanged", handler: fun(loot_method: wxl.LootMethod|integer, looter_guid: wxl.Guid, loot_threshold: integer)): integer
+---@overload fun(family: "GroupScript", method: "OnReadyCheck", handler: fun(initiator: wxl.Object|nil, initiator_guid: wxl.Guid, duration: integer)): integer
+---@overload fun(family: "GroupScript", method: "OnReadyCheckResponse", handler: fun(member: wxl.Object|nil, member_guid: wxl.Guid, ready: boolean)): integer
+---@overload fun(family: "GroupScript", method: "OnReadyCheckFinished", handler: fun(initiator_guid: wxl.Guid)): integer
+---@overload fun(family: "SocialScript", method: "OnDuelRequested", handler: fun(challenger: wxl.Object|nil, challenger_guid: wxl.Guid, arbiter_guid: wxl.Guid, accept: boolean|nil, decline: boolean|nil)): integer
+---@overload fun(family: "SocialScript", method: "OnDuelCountdown", handler: fun(duration: integer)): integer
+---@overload fun(family: "SocialScript", method: "OnDuelWon", handler: fun(winner: string, loser: string, fled: boolean)): integer
+---@overload fun(family: "SocialScript", method: "OnDuelFinished", handler: fun(completed: boolean)): integer
+---@overload fun(family: "SocialScript", method: "OnTradeStatus", handler: fun(status: wxl.TradeStatus|integer, partner_guid: wxl.Guid)): integer
+---@overload fun(family: "SocialScript", method: "OnEmote", handler: fun(unit: wxl.Object|nil, unit_guid: wxl.Guid, emote_id: integer)): integer
+---@overload fun(family: "SocialScript", method: "OnTextEmote", handler: fun(sender: wxl.Object|nil, sender_guid: wxl.Guid, text_emote: integer, emote_number: integer, target_name: string)): integer
+---@overload fun(family: "SocialScript", method: "OnResurrectRequest", handler: fun(offerer: wxl.Object|nil, offerer_guid: wxl.Guid, name: string, sickness: boolean, accept: boolean|nil, decline: boolean|nil)): integer
+---@overload fun(family: "SocialScript", method: "OnWindowOpened", handler: fun(kind: wxl.WindowKind|integer, npc: wxl.Object|nil, npc_guid: wxl.Guid)): integer
+---@overload fun(family: "SocialScript", method: "OnWindowClosed", handler: fun(kind: wxl.WindowKind|integer, npc: wxl.Object|nil, npc_guid: wxl.Guid)): integer
+---@overload fun(family: "PlayerScript", method: "OnPlayerDied", handler: fun(unit: wxl.Object|nil)): integer
+---@overload fun(family: "PlayerScript", method: "OnPlayerReleased", handler: fun(unit: wxl.Object|nil)): integer
+---@overload fun(family: "PlayerScript", method: "OnPlayerResurrected", handler: fun(unit: wxl.Object|nil)): integer
+---@overload fun(family: "PlayerScript", method: "OnReputationChanged", handler: fun(faction_id: integer, previous: integer, current: integer, bonus: number)): integer
+---@overload fun(family: "PlayerScript", method: "OnAchievementEarned", handler: fun(player: wxl.Object|nil, player_guid: wxl.Guid, achievement_id: integer, date: integer, silent: boolean)): integer
+---@overload fun(family: "AssetScript", method: "OnTerrainTileLoad", handler: fun(path: string, tile_x: integer, tile_y: integer, data: wxl.Bytes)): integer
+---@overload fun(family: "AssetScript", method: "OnMapObjectGroupLoad", handler: fun(path: string, group: integer, data: wxl.Bytes)): integer
+---@overload fun(family: "AssetScript", method: "OnSkinProfileLoad", handler: fun(model: string, data: wxl.Bytes)): integer
+---@overload fun(family: "AssetScript", method: "OnTextureDecode", handler: fun(path: string, width: integer, height: integer, encoding: wxl.TextureEncoding|integer, alpha_bits: integer, alpha_kind: integer, mip_levels: integer)): integer
+---@overload fun(family: "AssetScript", method: "OnShaderLoad", handler: fun(stage: wxl.ShaderStage|integer, path: string, name: string, permutations: integer)): integer
+---@overload fun(family: "AssetScript", method: "OnSoundFileLoad", handler: fun(path: string, streaming: boolean, priority: integer)): integer
+---@overload fun(family: "AssetScript", method: "OnModelParsed", handler: fun(path: string, file: lightuserdata|nil, header: lightuserdata|nil, size: integer)): integer
+---@overload fun(family: "AssetScript", method: "OnSkinProfileParsed", handler: fun(path: string, file: lightuserdata|nil, header: lightuserdata|nil, skin: lightuserdata|nil)): integer
+---@overload fun(family: "AssetScript", method: "OnModelSequenceLoad", handler: fun(path: string, file: lightuserdata|nil, sequence_index: integer, data: wxl.Bytes)): integer
+---@overload fun(family: "ObjectScript", method: "OnAppearanceChanged", handler: fun(change: wxl.AppearanceChange|integer, wearer: lightuserdata|nil, model: lightuserdata|nil, race_id: integer, sex_id: integer, item_slot: integer, display_id: integer, npc: boolean)): integer
+---@overload fun(family: "RenderScript", method: "OnModelBatchDrawn", handler: fun(model: lightuserdata|nil, root_model: lightuserdata|nil, primitive_type: integer, base_vertex: integer, min_index: integer, vertex_count: integer, start_index: integer, primitive_count: integer, blend_mode: integer, viewport_x: integer, viewport_y: integer, viewport_width: integer, viewport_height: integer, viewport_min_z: number, viewport_max_z: number)): integer
 ---@param family wxl.Family
 ---@param method string
 ---@param handler function
@@ -1416,6 +1627,9 @@ function Observe(family, method, handler) end
 ---@overload fun(family: "ObjectScript", method: "OnSpellCastRequest", handler: fun(caster: wxl.Object|nil, spell_id: integer, item: wxl.Object|nil, target_guid: wxl.Guid, confirmed: boolean, refused: boolean|nil): boolean|nil): integer
 ---@overload fun(family: "ObjectScript", method: "OnItemUseRequest", handler: fun(item: wxl.Object|nil, item_guid: wxl.Guid, target_guid: wxl.Guid, confirmed: boolean, refused: boolean|nil): boolean|nil): integer
 ---@overload fun(family: "ChatScript", method: "OnChatSend", handler: fun(text: string, type: string, language: string, target: string, prefix: string, addon: boolean, suppressed: boolean|nil): boolean|nil): integer
+---@overload fun(family: "GroupScript", method: "OnGroupInvite", handler: fun(inviter: string, can_accept: boolean, accept: boolean|nil, decline: boolean|nil): boolean|nil, boolean|nil): integer
+---@overload fun(family: "SocialScript", method: "OnDuelRequested", handler: fun(challenger: wxl.Object|nil, challenger_guid: wxl.Guid, arbiter_guid: wxl.Guid, accept: boolean|nil, decline: boolean|nil): boolean|nil, boolean|nil): integer
+---@overload fun(family: "SocialScript", method: "OnResurrectRequest", handler: fun(offerer: wxl.Object|nil, offerer_guid: wxl.Guid, name: string, sickness: boolean, accept: boolean|nil, decline: boolean|nil): boolean|nil, boolean|nil): integer
 ---@param family wxl.Family
 ---@param method string
 ---@param handler function
@@ -1502,217 +1716,723 @@ function Object:Fields(name) end
 ---@return boolean|nil written, string|nil reason
 function Object:SetField(name, value, element) end
 
+---Where it stands in the world, in yards; an item has no place.
 ---For any object (position).
 ---@return wxl.Vec3|nil value, string|nil reason
 function Object:Position() end
 
+---The way it faces, in radians.
 ---For any object (facing).
 ---@return number|nil value, string|nil reason
 function Object:Facing() end
 
+---The server's template id: a creature, item or game-object entry; 0 for a player.
 ---For any object (entry).
 ---@return integer|nil value, string|nil reason
 function Object:Entry() end
 
+---Its size, 1 being the model's own.
 ---For any object (scale).
 ---@return number|nil value, string|nil reason
 function Object:Scale() end
 
+---Its health; 0 or less is a dead unit, as the client reads it.
 ---For Unit, Player (unit_health).
 ---@return integer|nil value, string|nil reason
 function Object:Health() end
 
+---Its maximum health.
 ---For Unit, Player (unit_max_health).
 ---@return integer|nil value, string|nil reason
 function Object:MaxHealth() end
 
----For Unit, Player; GameObject (unit_level, gameobject_level).
+---Its level.
+---For Unit, Player; GameObject; Item, Container (unit_level, gameobject_level, item_level).
 ---@return integer|nil value, string|nil reason
 function Object:Level() end
 
+---Its power of a type (0 mana, 1 rage, 2 focus, 3 energy, 4 happiness, 5 runes, 6 runic power).
 ---For Unit, Player (unit_power).
 ---@param index integer
 ---@return integer|nil value, string|nil reason
 function Object:Power(index) end
 
+---Its maximum power of a type.
 ---For Unit, Player (unit_max_power).
 ---@param index integer
 ---@return integer|nil value, string|nil reason
 function Object:MaxPower(index) end
 
+---The type of power it runs on, as PowerValue takes it.
 ---For Unit, Player (unit_power_type).
 ---@return integer|nil value, string|nil reason
 function Object:PowerType() end
 
+---Its race, as ChrRaces.dbc numbers it.
 ---For Unit, Player (unit_race).
 ---@return integer|nil value, string|nil reason
 function Object:Race() end
 
----For Unit, Player (unit_class).
+---Its class, as ChrClasses.dbc numbers it.
+---For Unit, Player; Item, Container (unit_class, item_class).
 ---@return integer|nil value, string|nil reason
 function Object:Class() end
 
+---0 male, 1 female, 2 none.
 ---For Unit, Player (unit_sex).
 ---@return integer|nil value, string|nil reason
 function Object:Sex() end
 
+---The model it shows now, a CreatureDisplayInfo.dbc id.
 ---For Unit, Player; GameObject; Corpse (unit_display_id, gameobject_display_id, corpse_display_id).
 ---@return integer|nil value, string|nil reason
 function Object:DisplayId() end
 
+---The model it shows when nothing changes its shape.
 ---For Unit, Player (unit_native_display_id).
 ---@return integer|nil value, string|nil reason
 function Object:NativeDisplayId() end
 
+---The model of its mount; 0 while not mounted.
 ---For Unit, Player (unit_mount_display_id).
 ---@return integer|nil value, string|nil reason
 function Object:MountDisplayId() end
 
+---Its FactionTemplate.dbc id.
 ---For Unit, Player (unit_faction_template).
 ---@return integer|nil value, string|nil reason
 function Object:FactionTemplate() end
 
+---UNIT_FIELD_FLAGS as the server sends it.
 ---For Unit, Player; Item, Container; GameObject; Corpse (unit_flags, item_flags, gameobject_flags, corpse_flags).
 ---@return integer|nil value, string|nil reason
 function Object:Flags() end
 
+---UNIT_FIELD_FLAGS_2 as the server sends it.
 ---For Unit, Player (unit_flags2).
 ---@return integer|nil value, string|nil reason
 function Object:Flags2() end
 
+---UNIT_DYNAMIC_FLAGS as the server sends it to this client.
 ---For Unit, Player; GameObject; Corpse (unit_dynamic_flags, gameobject_dynamic_flags, corpse_dynamic_flags).
 ---@return integer|nil value, string|nil reason
 function Object:DynamicFlags() end
 
+---What it offers to talk about: vendor, trainer, quest giver, ... as UNIT_NPC_FLAGS.
 ---For Unit, Player (unit_npc_flags).
 ---@return integer|nil value, string|nil reason
 function Object:NpcFlags() end
 
+---The radius of its body, in yards.
 ---For Unit, Player (unit_bounding_radius).
 ---@return number|nil value, string|nil reason
 function Object:BoundingRadius() end
 
+---How far it reaches in melee, in yards.
 ---For Unit, Player (unit_combat_reach).
 ---@return number|nil value, string|nil reason
 function Object:CombatReach() end
 
+---The unit it charms, or 0.
 ---For Unit, Player (unit_charm).
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:Charm() end
 
+---The unit it summoned, its pet among them, or 0.
 ---For Unit, Player (unit_summon).
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:Summon() end
 
+---Who charms it, or 0.
 ---For Unit, Player (unit_charmed_by).
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:CharmedBy() end
 
+---Who summoned it: a pet's owner, or 0.
 ---For Unit, Player (unit_summoned_by).
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:SummonedBy() end
 
+---Who created it: a totem's shaman, or 0.
 ---For Unit, Player; GameObject (unit_created_by, gameobject_created_by).
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:CreatedBy() end
 
+---PLAYER_FLAGS as the server sends it.
 ---For Player (player_flags).
 ---@return integer|nil value, string|nil reason
 function Object:PlayerFlags() end
 
+---Its guild's id; 0 while unguilded.
 ---For Player (player_guild_id).
 ---@return integer|nil value, string|nil reason
 function Object:GuildId() end
 
+---Its rank in the guild, 0 for the guild master.
 ---For Player (player_guild_rank).
 ---@return integer|nil value, string|nil reason
 function Object:GuildRank() end
 
+---The title it shows, a CharTitles.dbc bit index; 0 for none.
 ---For Player (player_chosen_title).
 ---@return integer|nil value, string|nil reason
 function Object:ChosenTitle() end
 
+---The item id an equipment slot shows (0 head .. 18 tabard); 0 when the slot is empty.
 ---For Player (player_visible_item).
 ---@param index integer
 ---@return integer|nil value, string|nil reason
 function Object:VisibleItem(index) end
 
+---The player who owns it.
 ---For Item, Container; Corpse (item_owner, corpse_owner).
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:Owner() end
 
+---The bag holding it, or 0 in the backpack or when equipped.
 ---For Item, Container (item_contained_in).
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:ContainedIn() end
 
+---Who crafted it, or 0.
 ---For Item, Container (item_creator).
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:Creator() end
 
+---How many the stack holds.
 ---For Item, Container (item_stack_count).
 ---@return integer|nil value, string|nil reason
 function Object:StackCount() end
 
+---Seconds left before it expires; 0 when it does not.
 ---For Item, Container (item_duration).
 ---@return integer|nil value, string|nil reason
 function Object:Duration() end
 
+---Its durability now.
 ---For Item, Container (item_durability).
 ---@return integer|nil value, string|nil reason
 function Object:Durability() end
 
+---Its durability when repaired; 0 for an item that does not wear.
 ---For Item, Container (item_max_durability).
 ---@return integer|nil value, string|nil reason
 function Object:MaxDurability() end
 
+---How many slots the bag has.
 ---For Container (container_num_slots).
 ---@return integer|nil value, string|nil reason
 function Object:NumSlots() end
 
+---The item in a slot, as a guid; 0 for an empty one, invalid past NumSlots.
 ---For Container (container_slot).
 ---@param index integer
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:Slot(index) end
 
+---Its FactionTemplate.dbc id.
 ---For GameObject (gameobject_faction).
 ---@return integer|nil value, string|nil reason
 function Object:Faction() end
 
+---0 active, 1 ready, 2 destroyed.
 ---For GameObject (gameobject_state).
 ---@return integer|nil value, string|nil reason
 function Object:State() end
 
+---The game-object type, in the server's numbering (door 0, button 1, chest 3, ...).
 ---For GameObject (gameobject_type).
 ---@return integer|nil value, string|nil reason
 function Object:GameObjectType() end
 
+---The art kit it shows.
 ---For GameObject (gameobject_art_kit).
 ---@return integer|nil value, string|nil reason
 function Object:ArtKit() end
 
+---The unit that cast it.
 ---For DynamicObject (dynamic_caster).
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:Caster() end
 
+---The spell it is the area of.
 ---For DynamicObject (dynamic_spell_id).
 ---@return integer|nil value, string|nil reason
 function Object:SpellId() end
 
+---Its radius, in yards.
 ---For DynamicObject (dynamic_radius).
 ---@return number|nil value, string|nil reason
 function Object:Radius() end
 
+---The client time it was cast at, in milliseconds.
 ---For DynamicObject (dynamic_cast_time).
 ---@return integer|nil value, string|nil reason
 function Object:CastTime() end
 
+---The party the owner was in when they died, or 0.
 ---For Corpse (corpse_party).
----@return string|nil value, string|nil reason
+---@return wxl.Guid|nil value, string|nil reason
 function Object:Party() end
 
+---The owner's guild id.
 ---For Corpse (corpse_guild).
 ---@return integer|nil value, string|nil reason
 function Object:Guild() end
+
+---Whether it is the unit the client controls.
+---For any object (is_active_player).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsActivePlayer() end
+
+---Yards from it to another object, centre to centre; invalid when either has no place in the world.
+---For any object (distance).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param other wxl.Object
+---@return number|nil value, string|nil reason
+function Object:Distance(other) end
+
+---Yards from it to a point; invalid for an object with no place in the world.
+---For any object (distance_to).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param point wxl.Vec3
+---@return number|nil value, string|nil reason
+function Object:DistanceTo(point) end
+
+---What it targets, as a guid, whether that is in view or not; 0 for nothing.
+---For Unit, Player (unit_target_guid).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return wxl.Guid|nil value, string|nil reason
+function Object:TargetGuid() end
+
+---How it stands towards the active player, by the client's own reckoning: the colour of its name.
+---For Unit, Player (unit_reaction).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return wxl.Reaction|nil value, string|nil reason
+function Object:Reaction() end
+
+---How it stands towards another unit, by the client's own reckoning.
+---For Unit, Player (unit_reaction_to).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param other wxl.Object
+---@return wxl.Reaction|nil value, string|nil reason
+function Object:ReactionTo(other) end
+
+---Whether it is dead: no health left, or marked dead by the server.
+---For Unit, Player (unit_is_dead).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsDead() end
+
+---Whether it is in combat, as the client's UnitAffectingCombat reads it.
+---For Unit, Player (unit_in_combat).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:InCombat() end
+
+---Whether it is flagged for player-versus-player combat.
+---For Unit, Player (unit_is_pvp).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsPvp() end
+
+---Whether someone has tapped it: its kill and loot are theirs.
+---For Unit, Player (unit_is_tapped).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsTapped() end
+
+---Whether the active player, or their group, has tapped it.
+---For Unit, Player (unit_is_tapped_by_player).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsTappedByPlayer() end
+
+---Whether it has loot for the active player.
+---For Unit, Player (unit_is_lootable).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsLootable() end
+
+---Whether its corpse can be skinned.
+---For Unit, Player (unit_is_skinnable).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsSkinnable() end
+
+---How it stands: standing, sitting, sleeping, kneeling, ...
+---For Unit, Player (unit_stand_state).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return wxl.StandState|nil value, string|nil reason
+function Object:StandState() end
+
+---Whether it sits, on the ground or in a chair.
+---For Unit, Player (unit_is_sitting).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsSitting() end
+
+---Whether it is stealthed, as the client's IsStealthed reads it.
+---For Unit, Player (unit_is_stealthed).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsStealthed() end
+
+---Whether it rides a mount, as the client's IsMounted reads it.
+---For Unit, Player (unit_is_mounted).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsMounted() end
+
+---The spell it casts now; 0 for none.
+---For Unit, Player (unit_casting_spell_id).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:CastingSpellId() end
+
+---When the cast began, in milliseconds on the client's clock (the client's GetTime() * 1000).
+---For Unit, Player (unit_cast_start).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:CastStart() end
+
+---When the cast ends, on the same clock.
+---For Unit, Player (unit_cast_end).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:CastEnd() end
+
+---Whether it is casting, its cast not yet over, as the client's UnitCastingInfo reads it.
+---For Unit, Player (unit_is_casting).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsCasting() end
+
+---The spell it channels now; 0 for none.
+---For Unit, Player (unit_channel_spell_id).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:ChannelSpellId() end
+
+---When the channel began, on the client's clock.
+---For Unit, Player (unit_channel_start).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:ChannelStart() end
+
+---When the channel ends, on the client's clock.
+---For Unit, Player (unit_channel_end).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:ChannelEnd() end
+
+---Whether it is channeling, its channel not yet over.
+---For Unit, Player (unit_is_channeling).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsChanneling() end
+
+---How many auras the client holds on it, buffs and debuffs alike.
+---For Unit, Player (unit_aura_count).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:AuraCount() end
+
+---The aura in a slot, 0 to AuraCount - 1: its spell, caster, stacks, duration, expiration and flags.
+---For Unit, Player (unit_aura).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param index integer
+---@return wxl.Aura|nil value, string|nil reason
+function Object:Aura(index) end
+
+---Whether an aura of a spell is on it.
+---For Unit, Player (unit_has_aura).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param index integer
+---@return boolean|nil value, string|nil reason
+function Object:HasAura(index) end
+
+---What kind of creature it is, as the client works it out: beast, humanoid, undead, ...
+---For Unit, Player (unit_creature_type).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return wxl.CreatureType|nil value, string|nil reason
+function Object:CreatureType() end
+
+---Its beast family, a CreatureFamily.dbc id; 0 for none.
+---For Unit, Player (unit_creature_family).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:CreatureFamily() end
+
+---Its rank: normal, elite, rare, rare elite, world boss.
+---For Unit, Player (unit_classification).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return wxl.Classification|nil value, string|nil reason
+function Object:Classification() end
+
+---Whether it knows a spell: the active player's spell book or its pet's; false for any other unit.
+---For Unit, Player (unit_knows_spell).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param index integer
+---@return boolean|nil value, string|nil reason
+function Object:KnowsSpell(index) end
+
+---The flags of its movement: forward 0x1, backward 0x2, ..., falling 0x1000, flying 0x2000000.
+---For Unit, Player (unit_movement_flags).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:MovementFlags() end
+
+---One of its speeds, in yards a second: walk, run, swim, flight, ...; the turn and pitch rates in radians a second.
+---For Unit, Player (unit_speed).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param which wxl.MoveType|integer
+---@return number|nil value, string|nil reason
+function Object:Speed(which) end
+
+---Whether it swims, as the client's IsSwimming reads it.
+---For Unit, Player (unit_is_swimming).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsSwimming() end
+
+---Whether it flies, as the client's IsFlying reads it.
+---For Unit, Player (unit_is_flying).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsFlying() end
+
+---Whether it is falling, as the client's IsFalling reads it.
+---For Unit, Player (unit_is_falling).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsFalling() end
+
+---Whether it is a ghost, released from its corpse.
+---For Player (player_is_ghost).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsGhost() end
+
+---Whether it is away from the keyboard.
+---For Player (player_is_afk).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsAfk() end
+
+---Whether it asked not to be disturbed.
+---For Player (player_is_dnd).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsDnd() end
+
+---Whether it rests in an inn or a city, gaining rested experience.
+---For Player (player_is_resting).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return boolean|nil value, string|nil reason
+function Object:IsResting() end
+
+---Its money, in copper.
+---For the active player (player_money).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:Money() end
+
+---Its experience in this level.
+---For the active player (player_xp).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:Xp() end
+
+---The experience this level takes.
+---For the active player (player_next_level_xp).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:NextLevelXp() end
+
+---Its rested experience: kills give twice as much until it is spent.
+---For the active player (player_rested_xp).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:RestedXp() end
+
+---Its honor points.
+---For the active player (player_honor_points).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:HonorPoints() end
+
+---Its arena points.
+---For the active player (player_arena_points).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:ArenaPoints() end
+
+---The item in an equipment slot, or the bag in a bag slot (19 to 22); none for an empty slot.
+---For the active player (player_inventory_item).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param which wxl.InventorySlot|integer
+---@return wxl.Object|nil value, string|nil reason
+function Object:InventoryItem(which) end
+
+---The item in a slot of the backpack, 0 to 15; none for an empty slot.
+---For the active player (player_backpack_item).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param index integer
+---@return wxl.Object|nil value, string|nil reason
+function Object:BackpackItem(index) end
+
+---The skill on a line of the skill list, 0 to 127: its id, value and maximum; an id of 0 for an empty line.
+---For the active player (player_skill).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param index integer
+---@return wxl.Skill|nil value, string|nil reason
+function Object:Skill(index) end
+
+---A skill by its SkillLine.dbc id; invalid for a skill the player does not have.
+---For the active player (player_skill_of).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param index integer
+---@return wxl.Skill|nil value, string|nil reason
+function Object:SkillOf(index) end
+
+---How many others are in its party, 0 to 4.
+---For the active player (player_party_size).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:PartySize() end
+
+---The other party member in a party slot, 0 to 3, whether in view or not; 0 for an empty slot.
+---For the active player (player_party_member_guid).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param index integer
+---@return wxl.Guid|nil value, string|nil reason
+function Object:PartyMemberGuid(index) end
+
+---How many are in its raid, itself included; 0 outside a raid.
+---For the active player (player_raid_size).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:RaidSize() end
+
+---The raid member in a raid slot, 0 to 39, whether in view or not; 0 for an empty slot.
+---For the active player (player_raid_member_guid).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param index integer
+---@return wxl.Guid|nil value, string|nil reason
+function Object:RaidMemberGuid(index) end
+
+---The enchantment in a slot, 0 to 11 (0 permanent, 1 temporary, 2 to 4 sockets, ...), a SpellItemEnchantment.dbc id; 0 for none.
+---For Item, Container (item_enchant).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param index integer
+---@return integer|nil value, string|nil reason
+function Object:Enchant(index) end
+
+---Its quality: poor, common, uncommon, rare, epic, legendary, artifact, heirloom.
+---For Item, Container (item_quality).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return wxl.ItemQuality|nil value, string|nil reason
+function Object:Quality() end
+
+---The level it takes to use.
+---For Item, Container (item_required_level).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:RequiredLevel() end
+
+---Its subclass within the class: a sword, a cloth robe, ...
+---For Item, Container (item_subclass).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:Subclass() end
+
+---Where it is worn: head 1, neck 2, ...; 0 for an item that is not worn.
+---For Item, Container (item_inventory_type).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:InventoryType() end
+
+---How many a stack of it holds at most.
+---For Item, Container (item_max_stack).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:MaxStack() end
+
+---What a vendor pays for one, in copper.
+---For Item, Container (item_sell_price).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@return integer|nil value, string|nil reason
+function Object:SellPrice() end
+
+---The item in a slot of the bag; none for an empty one, invalid past NumSlots.
+---For Container (container_slot_item).
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@param index integer
+---@return wxl.Object|nil value, string|nil reason
+function Object:SlotItem(index) end
+
+---Every aura on a unit, in slot order, as Aura(slot) answers each. Came with abi 0.1.18.
+---@return wxl.Aura[]|nil auras, string|nil reason
+function Object:Auras() end
+
+---The lines of the active player's skill list that hold a skill. Came with abi 0.1.18.
+---@return wxl.Skill[]|nil skills, string|nil reason
+function Object:Skills() end
+
+---The guids of the active player's other party members. Came with abi 0.1.18.
+---@return wxl.Guid[]|nil members, string|nil reason
+function Object:PartyMembers() end
+
+---The guids of the active player's raid, itself included. Came with abi 0.1.18.
+---@return wxl.Guid[]|nil members, string|nil reason
+function Object:RaidMembers() end
+
+---Targets the object, as a left click on it does (wxl.action). Came with abi 0.1.18.
+---@return boolean|nil done, string|nil reason
+function Object:Select() end
+
+---Right-clicks the object: talks, loots, opens, uses (wxl.action). Came with abi 0.1.18.
+---@return boolean|nil done, string|nil reason
+function Object:Interact() end
+
+---Casts a spell the player knows at this unit (wxl.action). Came with abi 0.1.18.
+---@param spell_id integer
+---@return boolean|nil done, string|nil reason
+function Object:CastAt(spell_id) end
+
+---Follows this unit, as /follow does (wxl.action). Came with abi 0.1.18.
+---@return boolean|nil done, string|nil reason
+function Object:Follow() end
+
+---Targets what this unit targets, as /assist does (wxl.action). Came with abi 0.1.18.
+---@return boolean|nil done, string|nil reason
+function Object:Assist() end
+
+---Uses this item, on a unit, or on what it picks itself (wxl.action). Came with abi 0.1.18.
+---@param target? wxl.Object
+---@return boolean|nil done, string|nil reason
+function Object:Use(target) end
+
+---An aura on a unit, as Aura(slot) answers it.
+---@class wxl.Aura
+---@field spell_id integer
+---@field caster wxl.Guid
+---@field stacks integer
+---@field level integer
+---@field flags integer 0x10 helpful, 0x20 with a duration, 0x80 harmful
+---@field duration integer milliseconds
+---@field expiration integer when it ends, on the client's clock in milliseconds; 0 for never
+
+---A line of the skill list, as Skill(line) answers it.
+---@class wxl.Skill
+---@field id integer
+---@field value integer
+---@field max integer
+---@field step integer
+---@field temporary_bonus integer
+---@field permanent_bonus integer
 
 -- The service modules. Each function answers its value, or nil and the reason: "unsupported"
 -- for a runtime without the service or the member, otherwise the result's name ("invalid",
@@ -1756,6 +2476,16 @@ function Object:Guild() end
 ---@field regions integer
 ---@field largest integer
 
+---@class wxl.PointInfo
+---@field point integer
+---@field name string
+---@field signature string
+---@field thread integer
+---@field flags integer
+---@field layout_hash integer
+---@field arg_count integer
+---@field absent string
+
 ---A File of wxl.storage.
 ---@class wxl.File
 local File = {}
@@ -1778,6 +2508,51 @@ local Patch = {}
 ---@return true|nil ok
 ---@return string|nil reason
 function Patch:Restore() end
+
+---A Model of wxl.m2.
+---@class wxl.Model
+local Model = {}
+
+---Takes the model off what it hangs on and gives it back; the mod's models go when it unloads too.
+function Model:Release() end
+
+---Hangs the model on a model at an attachment point; flags 1 attaches to the root where the point is missing, 2 makes it follow the parent's bones.
+---@param parent lightuserdata|wxl.Model an address an event or a call handed you
+---@param attachment integer
+---@param flags integer
+---@return true|nil ok
+---@return string|nil reason
+function Model:Attach(parent, attachment, flags) end
+
+---Takes the model off what it hangs on.
+function Model:Detach() end
+
+---What the model hangs on; nil, "not_found" for nothing, which is how a mod tells its model was let go.
+---@return lightuserdata|nil address
+---@return string|nil reason
+function Model:Parent() end
+
+---Shows or hides every geoset of the model whose id is in [first, last].
+---@param first integer
+---@param last integer
+---@param visible boolean
+function Model:SetGeosets(first, last, visible) end
+
+---Replaces the texture the model takes for a texture type (2 an item's skin, 11-13 a creature's) with a file.
+---@param type integer
+---@param path string
+---@return true|nil ok
+---@return string|nil reason
+function Model:ReplaceTexture(type, path) end
+
+---Hangs the model on one key bone of a model, moved by an offset: an attachment point the parent's file does not have.
+---@param parent lightuserdata|wxl.Model an address an event or a call handed you
+---@param attachment integer
+---@param key_bone integer
+---@param offset wxl.Vec3
+---@return true|nil ok
+---@return string|nil reason
+function Model:AttachToBone(parent, attachment, key_bone, offset) end
 
 ---wxl.script. The client's own script: functions and events added to it, text run in it.
 ---@class wxl.script
@@ -1902,6 +2677,26 @@ function storage.Redirect(from, to) end
 ---@return string|nil reason
 function storage.Unredirect(from) end
 
+---Came with abi 0.1.19: a mod whose mod.json asks for an older abi cannot use it.
+---Serves `data` under a name, for this mod, on every thread: the client opens and reads it as
+---one of its own files, and so do wxl.storage's Read and Open. The bytes are copied. Above 0,
+---the name wins over the client's archives; 0 or below, it only fills a name they lack. Serving
+---a name again replaces this mod's bytes. It stays until Unserve, or until the mod is disabled,
+---reloads or unloads; when two mods serve one name, the higher priority wins, then the later.
+---@param path string
+---@param data string
+---@param priority integer
+---@return true|nil ok
+---@return string|nil reason
+function storage.Serve(path, data, priority) end
+
+---Came with abi 0.1.19: a mod whose mod.json asks for an older abi cannot use it.
+---Takes back what this mod serves under a name; nil, "not_found" for one it does not serve.
+---@param path string
+---@return true|nil ok
+---@return string|nil reason
+function storage.Unserve(path) end
+
 ---wxl.data. The client's databases, served from a mod's own files before the client reads them.
 ---@class wxl.data
 local data = {}
@@ -1947,7 +2742,7 @@ function hook.Points() end
 function hook.HasPoint(name) end
 
 ---wxl.patch. Bytes written into the client's image over the bytes expected there, journaled.
----Unsafe: present only when the mod's mod.json declares it, in "requires" or "optional".
+---Raw: present only when the mod's mod.json declares it, in "requires" or "optional".
 ---@class wxl.patch
 local patch = {}
 
@@ -2076,6 +2871,113 @@ function profile.Message(text) end
 ---@param name string
 function profile.FrameMark(name) end
 
+---wxl.action. What the player can do, through the client's own functions: target, interact, cast, use, follow, move. Main thread only.
+---Came with abi 0.1.18: a mod whose mod.json asks for an older abi cannot use it.
+---@class wxl.action
+local action = {}
+
+---Targets an object, as a left click on it does.
+---@param target wxl.Object
+---@return true|nil ok
+---@return string|nil reason
+function action.Target(target) end
+
+---Clears the target, as Escape does.
+---@return true|nil ok
+---@return string|nil reason
+function action.ClearTarget() end
+
+---Right-clicks an object: talks to an NPC, loots a corpse, opens a chest, uses a game object; it becomes the target.
+---@param target wxl.Object
+---@return true|nil ok
+---@return string|nil reason
+function action.Interact(target) end
+
+---Casts a spell the player knows at a unit, or at the current target when target is left out, as CastSpellByID does.
+---@param spell_id integer
+---@param target? wxl.Object none when left out
+---@return true|nil ok
+---@return string|nil reason
+function action.CastSpell(spell_id, target) end
+
+---Stops the cast, the channel or the repeating spell in progress, as SpellStopCasting does.
+---@return true|nil ok
+---@return string|nil reason
+function action.StopCasting() end
+
+---Uses an item the player holds, on a unit, or on what the item picks itself when target is left out.
+---@param item wxl.Object
+---@param target? wxl.Object none when left out
+---@return true|nil ok
+---@return string|nil reason
+function action.UseItem(item, target) end
+
+---Follows a unit, as /follow does.
+---@param unit wxl.Object
+---@return true|nil ok
+---@return string|nil reason
+function action.Follow(unit) end
+
+---Targets what a unit targets, as /assist does.
+---@param unit wxl.Object
+---@return true|nil ok
+---@return string|nil reason
+function action.Assist(unit) end
+
+---Walks the player to a point, as a click-to-move click on the ground does.
+---@param point wxl.Vec3
+---@return true|nil ok
+---@return string|nil reason
+function action.MoveTo(point) end
+
+---wxl.point. Functions of the engine a mod runs code before, instead of or after.
+---Came with abi 0.1.16: a mod whose mod.json asks for an older abi cannot use it.
+---@class wxl.point
+local point = {}
+
+---Every point of the table, with its signature, thread, flags and, when this runtime does not have it, why.
+---@return wxl.PointInfo[]|nil
+---@return string|nil reason
+function point.Points() end
+
+---The id of a point this runtime has, by name.
+---@param name string
+---@return integer|nil
+---@return string|nil reason
+function point.Find(name) end
+
+---wxl.m2. The models objects draw with, what a character wears, and models a mod makes and hangs on them. Main thread only.
+---Came with abi 0.1.20: a mod whose mod.json asks for an older abi cannot use it.
+---Raw: present only when the mod's mod.json declares it, in "requires" or "optional".
+---@class wxl.m2
+local m2 = {}
+
+---The model an object draws with, followed up what it hangs on (a mounted player answers its mount); nil, "not_found" for none.
+---@param object wxl.Object
+---@return lightuserdata|nil address
+---@return string|nil reason
+function m2.ObjectModel(object) end
+
+---A race's prefix in model file names ("Hu", "Or", "Sc"), from ChrRaces.dbc.
+---@param race_id integer
+---@return string|nil
+---@return string|nil reason
+function m2.RacePrefix(race_id) end
+
+---Makes a model of a file in the scene of the model given, for this mod: hang it on something with Attach.
+---@param scene_model lightuserdata|wxl.Model an address an event or a call handed you
+---@param path string
+---@return wxl.Model|nil
+---@return string|nil reason
+function m2.CreateModel(scene_model, path) end
+
+---Where an attachment point of a loaded model sits in its bind pose, as {x, y, z}.
+---@param model lightuserdata|wxl.Model an address an event or a call handed you
+---@param attachment integer
+---@return wxl.Vec3|nil
+---@return string|nil reason
+function m2.AttachmentPoint(model, attachment) end
+
 ---@class wxl.ModInfo
 ---@field id string
 ---@field name string
@@ -2145,6 +3047,9 @@ function object.Unwatch(type, name) end
 ---@field patch wxl.patch
 ---@field footprint wxl.footprint
 ---@field profile wxl.profile
+---@field action wxl.action
+---@field point wxl.point
+---@field m2 wxl.m2
 ---@field events table<wxl.Family, string[]> every family's events, as On<Event>
 wxl = {}
 

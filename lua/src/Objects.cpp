@@ -8,12 +8,15 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "wxl/events.h"
 #include "wxl/objects/fields.hpp"
 #include "wxl/sdk.hpp"
+#include "wxl/services/action.h"
 #include "wxl/services/object.h"
 
 namespace wxl::lua
@@ -53,7 +56,6 @@ namespace wxl::lua
         void PushValue(lua_State* L, uint32_t value) { lua_pushnumber(L, value); }
         void PushValue(lua_State* L, int32_t value) { lua_pushnumber(L, value); }
         void PushValue(lua_State* L, float value) { lua_pushnumber(L, value); }
-        void PushValue(lua_State* L, wxl_guid value) { PushGuid(L, value); }
         void PushValue(lua_State* L, wxl_vec3 value)
         {
             lua_createtable(L, 0, 3);
@@ -64,6 +66,50 @@ namespace wxl::lua
             lua_pushnumber(L, value.z);
             lua_setfield(L, -2, "z");
         }
+        void PushValue(lua_State* L, const wxl_aura& aura)
+        {
+            lua_createtable(L, 0, 7);
+            lua_pushnumber(L, aura.spell_id);
+            lua_setfield(L, -2, "spell_id");
+            PushGuid(L, aura.caster);
+            lua_setfield(L, -2, "caster");
+            lua_pushnumber(L, aura.stacks);
+            lua_setfield(L, -2, "stacks");
+            lua_pushnumber(L, aura.level);
+            lua_setfield(L, -2, "level");
+            lua_pushnumber(L, aura.flags);
+            lua_setfield(L, -2, "flags");
+            lua_pushnumber(L, aura.duration);
+            lua_setfield(L, -2, "duration");
+            lua_pushnumber(L, aura.expiration);
+            lua_setfield(L, -2, "expiration");
+        }
+        void PushValue(lua_State* L, const wxl_skill& skill)
+        {
+            lua_createtable(L, 0, 6);
+            lua_pushnumber(L, skill.id);
+            lua_setfield(L, -2, "id");
+            lua_pushnumber(L, skill.value);
+            lua_setfield(L, -2, "value");
+            lua_pushnumber(L, skill.max);
+            lua_setfield(L, -2, "max");
+            lua_pushnumber(L, skill.step);
+            lua_setfield(L, -2, "step");
+            lua_pushnumber(L, skill.temporary_bonus);
+            lua_setfield(L, -2, "temporary_bonus");
+            lua_pushnumber(L, skill.permanent_bonus);
+            lua_setfield(L, -2, "permanent_bonus");
+        }
+
+        /// What a row answers in Lua, by its C type and what the facade makes of it.
+        enum class Shape : uint8_t
+        {
+            plain,   ///< a number, a guid's string, a table
+            boolean, ///< a wxl_bool
+            object,  ///< a wxl_handle: the object, nil for none
+            guid,    ///< a wxl_guid (a uint64_t, as a wxl_handle is: told apart by the row)
+            named,   ///< a number of an enumeration of enums.def: its name
+        };
 
         /// nil and the reason a read gave nothing: what a Lua caller gets instead of a value.
         int PushFailure(lua_State* L, wxl_result result)
@@ -74,63 +120,160 @@ namespace wxl::lua
             case WXL_E_NOT_FOUND: lua_pushliteral(L, "gone"); break;
             case WXL_E_INVALID: lua_pushliteral(L, "invalid"); break;
             case WXL_E_UNSUPPORTED: lua_pushliteral(L, "unsupported"); break;
+            case WXL_E_PENDING: lua_pushliteral(L, "pending"); break;
             default: lua_pushliteral(L, "failed"); break;
             }
             return 2;
         }
 
-        /// One getter of the table, called from Lua: the handle, and for an indexed getter the
-        /// index at argument 2.
-        using Call = int (*)(lua_State* L, const wxl_object_api* api, wxl_handle handle);
-
-        template <class V, wxl_result(WXL_CALL* wxl_object_api::*Getter)(wxl_handle, V*)>
-        int Read(lua_State* L, const wxl_object_api* api, wxl_handle handle)
-        {
-            if (!wxl::detail::Carries(api, Getter)) return PushFailure(L, WXL_E_UNSUPPORTED);
-            V                value{};
-            const wxl_result result = (api->*Getter)(handle, &value);
-            if (result != WXL_OK) return PushFailure(L, result);
-            PushValue(L, value);
-            return 1;
-        }
-
-        template <class V, wxl_result(WXL_CALL* wxl_object_api::*Getter)(wxl_handle, uint32_t, V*)>
-        int ReadAt(lua_State* L, const wxl_object_api* api, wxl_handle handle)
-        {
-            if (!wxl::detail::Carries(api, Getter)) return PushFailure(L, WXL_E_UNSUPPORTED);
-            const uint32_t   index = static_cast<uint32_t>(luaL_checkinteger(L, 2));
-            V                value{};
-            const wxl_result result = (api->*Getter)(handle, index, &value);
-            if (result != WXL_OK) return PushFailure(L, result);
-            PushValue(L, value);
-            return 1;
-        }
-
-        /// One row of object_reads.def.
+        /// One row, as the methods need it.
         struct Row
         {
-            const char* member;
-            uint32_t    kinds;
-            Call        call;
+            const names::RowInfo* info;
+            uint32_t              kinds;
+            Shape                 shape;
+            const reflect::Enum*  answer;   ///< the enumeration a named answer holds
+            const reflect::Enum*  argument; ///< the enumeration an argument may be named by
+            int (*call)(lua_State* L, const Row& row, const wxl_object_api* api, wxl_handle handle);
             std::string name; ///< the Lua method
         };
+
+        template <class V>
+        int PushAnswer(lua_State* L, const Row& row, const V& value)
+        {
+            if constexpr (std::is_integral_v<V> && !std::is_same_v<V, uint64_t>)
+            {
+                if (row.shape == Shape::boolean)
+                {
+                    lua_pushboolean(L, value != 0);
+                    return 1;
+                }
+            }
+            if constexpr (std::is_same_v<V, uint64_t>)
+            {
+                if (row.shape == Shape::object) PushObject(L, value);
+                else PushGuid(L, value);
+            }
+            else if constexpr (std::is_same_v<V, uint32_t>)
+            {
+                const char* name = row.shape == Shape::named && row.answer ? reflect::NameOf(*row.answer, value) : nullptr;
+                if (name) lua_pushstring(L, name);
+                else lua_pushnumber(L, value);
+            }
+            else
+            {
+                PushValue(L, value);
+            }
+            return 1;
+        }
+
+        /// A struct out starts with the size the caller knows.
+        template <class V>
+        V Fresh()
+        {
+            V value{};
+            if constexpr (std::is_class_v<V> && !std::is_same_v<V, wxl_vec3>) value.struct_size = sizeof(V);
+            return value;
+        }
+
+        // --- the arguments of a READ_AT row ---------------------------------------------------
+
+        uint32_t CheckWhole(lua_State* L, int at, const Row& row)
+        {
+            if (row.argument && lua_type(L, at) == LUA_TSTRING)
+            {
+                const char* name = lua_tostring(L, at);
+                for (uint32_t i = 0; i < row.argument->count; ++i)
+                    if (std::strcmp(row.argument->values[i].name, name) == 0) return row.argument->values[i].value;
+                std::string names;
+                for (uint32_t i = 0; i < row.argument->count; ++i)
+                    names += std::string(i ? ", " : "") + row.argument->values[i].name;
+                luaL_error(L, "%s: '%s' is not one of %s", row.name.c_str(), name, names.c_str());
+            }
+            const lua_Number value = luaL_checknumber(L, at);
+            if (value < 0 || value > 4294967295.0 || value != static_cast<lua_Number>(static_cast<uint32_t>(value)))
+                luaL_error(L, "%s takes a whole number from 0%s", row.name.c_str(), row.argument ? ", or a name" : "");
+            return static_cast<uint32_t>(value);
+        }
+
+        template <class A>
+        A CheckArg(lua_State* L, int at, const Row& row)
+        {
+            if constexpr (std::is_same_v<A, uint32_t>)
+            {
+                return CheckWhole(L, at, row);
+            }
+            else if constexpr (std::is_same_v<A, wxl_handle>)
+            {
+                return CheckObject(L, at);
+            }
+            else
+            {
+                wxl_vec3 point{};
+                if (lua_type(L, at) != LUA_TTABLE)
+                    luaL_error(L, "%s takes a point: a table with x, y and z", row.name.c_str());
+                lua_getfield(L, at, "x");
+                lua_getfield(L, at, "y");
+                lua_getfield(L, at, "z");
+                if (!lua_isnumber(L, -3) || !lua_isnumber(L, -2) || !lua_isnumber(L, -1))
+                    luaL_error(L, "%s takes a point: a table with x, y and z", row.name.c_str());
+                point = wxl_vec3{static_cast<float>(lua_tonumber(L, -3)), static_cast<float>(lua_tonumber(L, -2)),
+                                 static_cast<float>(lua_tonumber(L, -1))};
+                lua_pop(L, 3);
+                return point;
+            }
+        }
+
+        template <class V, wxl_result(WXL_CALL* wxl_object_api::*Getter)(wxl_handle, V*)>
+        int Read(lua_State* L, const Row& row, const wxl_object_api* api, wxl_handle handle)
+        {
+            if (!wxl::detail::Carries(api, Getter)) return PushFailure(L, WXL_E_UNSUPPORTED);
+            V                value  = Fresh<V>();
+            const wxl_result result = (api->*Getter)(handle, &value);
+            if (result != WXL_OK) return PushFailure(L, result);
+            return PushAnswer(L, row, value);
+        }
+
+        template <class V, class A, wxl_result(WXL_CALL* wxl_object_api::*Getter)(wxl_handle, A, V*)>
+        int ReadAt(lua_State* L, const Row& row, const wxl_object_api* api, wxl_handle handle)
+        {
+            if (!wxl::detail::Carries(api, Getter)) return PushFailure(L, WXL_E_UNSUPPORTED);
+            const A          arg    = CheckArg<A>(L, 2, row);
+            V                value  = Fresh<V>();
+            const wxl_result result = (api->*Getter)(handle, arg, &value);
+            if (result != WXL_OK) return PushFailure(L, result);
+            return PushAnswer(L, row, value);
+        }
+
+        Shape ShapeOf(const names::RowInfo& row)
+        {
+            if (std::strcmp(row.type, "wxl_bool") == 0) return Shape::boolean;
+            if (std::strcmp(row.type, "wxl_handle") == 0) return Shape::object;
+            if (std::strcmp(row.type, "wxl_guid") == 0) return Shape::guid;
+            if (reflect::FindEnum(row.cxx)) return Shape::named;
+            return Shape::plain;
+        }
 
         const std::vector<Row>& Rows()
         {
             static const std::vector<Row> rows = [] {
-                std::vector<Row> table = {
-#define WXL_OBJECT_READ(kinds, member, Method, type) \
-    Row{#member, k##kinds, &Read<type, &wxl_object_api::member>, std::string()},
-#define WXL_OBJECT_READ_AT(kinds, member, Method, type) \
-    Row{#member, k##kinds, &ReadAt<type, &wxl_object_api::member>, std::string()},
+                using Call = int (*)(lua_State*, const Row&, const wxl_object_api*, wxl_handle);
+                const Call calls[] = {
+#define WXL_OBJECT_READ(kinds, member, Method, type, source, Cxx, cxx, doc) \
+    &Read<type, &wxl_object_api::member>,
+#define WXL_OBJECT_READ_AT(kinds, member, Method, type, source, Cxx, cxx, Arg, arg, doc) \
+    &ReadAt<type, Arg, &wxl_object_api::member>,
 #include "wxl/runtime/object_reads.def"
 #undef WXL_OBJECT_READ_AT
 #undef WXL_OBJECT_READ
                 };
-                std::vector<names::Member> members;
-                for (const Row& row : table) members.push_back(names::Member{row.member, row.kinds});
-                const std::vector<std::string> luaNames = names::LuaNames(members);
-                for (size_t i = 0; i < table.size(); ++i) table[i].name = luaNames[i];
+                const std::vector<names::RowInfo>& infos = names::Rows();
+                const std::vector<std::string>&    named = names::RowNames();
+                std::vector<Row>                   table;
+                for (size_t i = 0; i < infos.size(); ++i)
+                    table.push_back(Row{&infos[i], infos[i].kinds, ShapeOf(infos[i]), reflect::FindEnum(infos[i].cxx),
+                                        *infos[i].arg_c ? reflect::FindEnum(infos[i].arg) : nullptr, calls[i],
+                                        named[i]});
                 return table;
             }();
             return rows;
@@ -203,7 +346,7 @@ namespace wxl::lua
             const wxl_object_api* api    = Live(L, box, pushed);
             if (!api) return pushed;
             const Row& row = Rows()[static_cast<size_t>(lua_tointeger(L, lua_upvalueindex(1)))];
-            return row.call(L, api, box->handle);
+            return row.call(L, row, api, box->handle);
         }
 
         /// A generated method on a kind without it: upvalue 1 is its name.
@@ -531,6 +674,167 @@ namespace wxl::lua
             return 1;
         }
 
+        // --- lists and actions, by hand ----------------------------------------------------
+
+        const wxl_action_api* ActionApi()
+        {
+            static wxl::Service<wxl_action_api> service(WXL_ACTION_SERVICE, WXL_ACTION_SERVICE_VERSION);
+            return service.Get();
+        }
+
+        /// The handle of the live object at argument 1, or 0 with the failure pushed.
+        wxl_handle LiveHandle(lua_State* L, int& pushed)
+        {
+            const ObjectBox* box = CheckBox(L, 1);
+            return Live(L, box, pushed) ? box->handle : WXL_HANDLE_NONE;
+        }
+
+        /// unit:Auras(): every aura in slot order, as Aura(slot) answers each.
+        int Auras(lua_State* L)
+        {
+            int                   pushed = 0;
+            const wxl_handle      handle = LiveHandle(L, pushed);
+            const wxl_object_api* api    = Api();
+            if (!handle) return pushed;
+            if (!wxl::detail::Carries(api, &wxl_object_api::unit_aura)) return PushFailure(L, WXL_E_UNSUPPORTED);
+            uint32_t         count  = 0;
+            const wxl_result result = api->unit_aura_count(handle, &count);
+            if (result != WXL_OK) return PushFailure(L, result);
+            lua_createtable(L, static_cast<int>(count), 0);
+            int n = 0;
+            for (uint32_t slot = 0; slot < count; ++slot)
+            {
+                wxl_aura aura    = Fresh<wxl_aura>();
+                if (api->unit_aura(handle, slot, &aura) != WXL_OK) continue;
+                PushValue(L, aura);
+                lua_rawseti(L, -2, ++n);
+            }
+            return 1;
+        }
+
+        /// player:Skills(): the lines that hold a skill, as Skill(line) answers each.
+        int Skills(lua_State* L)
+        {
+            int                   pushed = 0;
+            const wxl_handle      handle = LiveHandle(L, pushed);
+            const wxl_object_api* api    = Api();
+            if (!handle) return pushed;
+            if (!wxl::detail::Carries(api, &wxl_object_api::player_skill)) return PushFailure(L, WXL_E_UNSUPPORTED);
+            lua_newtable(L);
+            int n = 0;
+            for (uint32_t line = 0; line < 128; ++line)
+            {
+                wxl_skill        skill  = Fresh<wxl_skill>();
+                const wxl_result result = api->player_skill(handle, line, &skill);
+                if (result != WXL_OK) return PushFailure(L, result);
+                if (!skill.id) continue;
+                PushValue(L, skill);
+                lua_rawseti(L, -2, ++n);
+            }
+            return 1;
+        }
+
+        /// The guids of a group's slots, skipping the empty ones.
+        int Members(lua_State* L, wxl_result(WXL_CALL* wxl_object_api::*getter)(wxl_handle, uint32_t, wxl_guid*),
+                    uint32_t slots)
+        {
+            int                   pushed = 0;
+            const wxl_handle      handle = LiveHandle(L, pushed);
+            const wxl_object_api* api    = Api();
+            if (!handle) return pushed;
+            if (!wxl::detail::Carries(api, getter)) return PushFailure(L, WXL_E_UNSUPPORTED);
+            lua_newtable(L);
+            int n = 0;
+            for (uint32_t slot = 0; slot < slots; ++slot)
+            {
+                wxl_guid         guid   = WXL_GUID_NONE;
+                const wxl_result result = (api->*getter)(handle, slot, &guid);
+                if (result != WXL_OK) return PushFailure(L, result);
+                if (!guid) continue;
+                PushGuid(L, guid);
+                lua_rawseti(L, -2, ++n);
+            }
+            return 1;
+        }
+
+        int PartyMembers(lua_State* L) { return Members(L, &wxl_object_api::player_party_member_guid, 4); }
+        int RaidMembers(lua_State* L) { return Members(L, &wxl_object_api::player_raid_member_guid, 40); }
+
+        /// true, or nil and why: what an action answers.
+        int PushActed(lua_State* L, wxl_result result)
+        {
+            if (result != WXL_OK) return PushFailure(L, result);
+            lua_pushboolean(L, 1);
+            return 1;
+        }
+
+        /// An action on the object at argument 1 alone.
+        int Act(lua_State* L, wxl_result(WXL_CALL* wxl_action_api::*action)(wxl_handle))
+        {
+            int              pushed = 0;
+            const wxl_handle handle = LiveHandle(L, pushed);
+            if (!handle) return pushed;
+            const wxl_action_api* api = ActionApi();
+            if (!wxl::detail::Carries(api, action)) return PushFailure(L, WXL_E_UNSUPPORTED);
+            return PushActed(L, (api->*action)(handle));
+        }
+
+        int Select(lua_State* L) { return Act(L, &wxl_action_api::target); }
+        int Interact(lua_State* L) { return Act(L, &wxl_action_api::interact); }
+        int Follow(lua_State* L) { return Act(L, &wxl_action_api::follow); }
+        int Assist(lua_State* L) { return Act(L, &wxl_action_api::assist); }
+
+        /// unit:CastAt(spell_id): casts a spell the player knows at this unit.
+        int CastAt(lua_State* L)
+        {
+            int              pushed = 0;
+            const wxl_handle handle = LiveHandle(L, pushed);
+            if (!handle) return pushed;
+            const lua_Number spell = luaL_checknumber(L, 2);
+            if (spell < 1 || spell > 4294967295.0 || spell != static_cast<lua_Number>(static_cast<uint32_t>(spell)))
+                return luaL_error(L, "CastAt takes a spell id, a whole number from 1");
+            const wxl_action_api* api = ActionApi();
+            if (!wxl::detail::Carries(api, &wxl_action_api::cast_spell)) return PushFailure(L, WXL_E_UNSUPPORTED);
+            return PushActed(L, api->cast_spell(static_cast<uint32_t>(spell), handle));
+        }
+
+        /// item:Use([target]): uses the item, on a unit or on what it picks itself.
+        int Use(lua_State* L)
+        {
+            int              pushed = 0;
+            const wxl_handle handle = LiveHandle(L, pushed);
+            if (!handle) return pushed;
+            const wxl_handle      target = lua_isnoneornil(L, 2) ? WXL_HANDLE_NONE : CheckObject(L, 2);
+            const wxl_action_api* api    = ActionApi();
+            if (!wxl::detail::Carries(api, &wxl_action_api::use_item)) return PushFailure(L, WXL_E_UNSUPPORTED);
+            return PushActed(L, api->use_item(handle, target));
+        }
+
+        /// A hand-written method of some kinds, and the abi it came with.
+        struct Typed
+        {
+            const char*   name;
+            lua_CFunction func;
+            uint32_t      kinds;
+            uint32_t      since[3];
+        };
+
+        const Typed kTyped[] = {
+            {"Auras", &Auras, kUnits, {0, 1, 18}},
+            {"Skills", &Skills, kPlayers, {0, 1, 18}},
+            {"PartyMembers", &PartyMembers, kPlayers, {0, 1, 18}},
+            {"RaidMembers", &RaidMembers, kPlayers, {0, 1, 18}},
+            {"Select", &Select, kAny, {0, 1, 18}},
+            {"Interact", &Interact, kAny, {0, 1, 18}},
+            {"CastAt", &CastAt, kUnits, {0, 1, 18}},
+            {"Follow", &Follow, kUnits, {0, 1, 18}},
+            {"Assist", &Assist, kUnits, {0, 1, 18}},
+            {"Use", &Use, kItems, {0, 1, 18}},
+        };
+
+        /// A method the mod's abi does not reach: upvalue 1 says why.
+        int TooNewMethod(lua_State* L) { return luaL_error(L, "%s", lua_tostring(L, lua_upvalueindex(1))); }
+
         // --- indexing -----------------------------------------------------------------------
 
         /// obj.key: the method of the object's kind (upvalue 1: one methods table per kind), or
@@ -774,7 +1078,7 @@ namespace wxl::lua
         }
     } // namespace
 
-    void OpenObjects(lua_State* L)
+    void OpenObjects(lua_State* L, const std::function<std::string(const uint32_t* since)>& tooNew)
     {
         const luaL_Reg own[] = {
             {"Valid", &Valid},       {"Guid", &Guid},         {"Type", &Type},
@@ -791,11 +1095,31 @@ namespace wxl::lua
             lua_pushboolean(L, 1);
             lua_setfield(L, reserved, method->name);
         }
+        for (const Typed& method : kTyped)
+        {
+            lua_pushboolean(L, 1);
+            lua_setfield(L, reserved, method.name);
+        }
         for (const Row& row : Rows())
         {
             lua_pushboolean(L, 1);
             lua_setfield(L, reserved, row.name.c_str());
         }
+
+        // Pushes the method a kind gets for a name the mod's abi may not reach: the method, or
+        // a function that raises why.
+        const auto push = [&](const char* name, const uint32_t* since, lua_CFunction func, int upvalue) {
+            const std::string why = tooNew ? tooNew(since) : std::string();
+            if (!why.empty())
+            {
+                if (upvalue) lua_pop(L, 1);
+                const std::string text = std::string(name) + " " + why;
+                lua_pushlstring(L, text.data(), text.size());
+                lua_pushcclosure(L, &TooNewMethod, 1);
+                return;
+            }
+            lua_pushcclosure(L, func, upvalue);
+        };
 
         // One methods table per kind, built once: a call looks its method up and runs it, with
         // no walk of the rows. A generated name the kind lacks answers why.
@@ -804,18 +1128,17 @@ namespace wxl::lua
         const std::vector<Row>& rows = Rows();
         for (uint32_t kind = WXL_OBJECT_UNKNOWN; kind <= WXL_OBJECT_CORPSE; ++kind)
         {
+            const uint32_t bit = kind == WXL_OBJECT_UNKNOWN ? 0u : KindBit(static_cast<wxl_object_type>(kind));
             lua_newtable(L);
             for (size_t i = 0; i < rows.size(); ++i)
             {
                 lua_getfield(L, -1, rows[i].name.c_str());
                 const bool named = !lua_isnil(L, -1);
                 lua_pop(L, 1);
-                const bool accepts = kind != WXL_OBJECT_UNKNOWN &&
-                                     (rows[i].kinds & KindBit(static_cast<wxl_object_type>(kind))) != 0;
-                if (accepts)
+                if ((rows[i].kinds & bit) != 0)
                 {
                     lua_pushinteger(L, static_cast<lua_Integer>(i));
-                    lua_pushcclosure(L, &Generated, 1);
+                    push(rows[i].name.c_str(), rows[i].info->since, &Generated, 1);
                 }
                 else if (!named)
                 {
@@ -827,6 +1150,19 @@ namespace wxl::lua
                     continue; // another row of the name already answers for this kind
                 }
                 lua_setfield(L, -2, rows[i].name.c_str());
+            }
+            for (const Typed& method : kTyped)
+            {
+                if ((method.kinds & bit) != 0)
+                {
+                    push(method.name, method.since, method.func, 0);
+                }
+                else
+                {
+                    lua_pushstring(L, method.name);
+                    lua_pushcclosure(L, &Absent, 1);
+                }
+                lua_setfield(L, -2, method.name);
             }
             for (const luaL_Reg* method = own; method->name; ++method)
             {

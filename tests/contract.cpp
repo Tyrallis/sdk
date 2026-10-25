@@ -240,6 +240,95 @@ namespace
         }
     };
 
+    /// The model events of three families: the loader's stages, an appearance, a drawn batch.
+    struct ModelStages final : wxl::AssetScript
+    {
+        std::string parsed, skinned, sequenced;
+        void*       file = nullptr;
+        uint32_t    index = 0, bytes = 0;
+        void OnModelParsed(std::string_view path, void* f, void* header, uint32_t size) override
+        {
+            parsed = std::string(path), file = f, bytes = header ? size : 0;
+        }
+        void OnSkinProfileParsed(std::string_view path, void*, void*, void* skin) override
+        {
+            if (skin) skinned = std::string(path);
+        }
+        void OnModelSequenceLoad(std::string_view path, void*, uint32_t sequence, wxl::Bytes data) override
+        {
+            sequenced = std::string(path) + ":" + std::string(data.View());
+            index     = sequence;
+        }
+    };
+
+    struct Wardrobe final : wxl::ObjectScript
+    {
+        wxl_appearance_change change = WXL_APPEARANCE_FREED;
+        void*                 model  = nullptr;
+        uint32_t              slot = 0, display = 0;
+        bool                  npc = true;
+        void OnAppearanceChanged(wxl_appearance_change c, void*, void* m, uint32_t, uint32_t, uint32_t s, uint32_t d,
+                                 bool n) override
+        {
+            change = c, model = m, slot = s, display = d, npc = n;
+        }
+    };
+
+    struct Outline final : wxl::RenderScript
+    {
+        uint32_t primitives = 0;
+        int32_t  base       = 0;
+        float    depth      = 0.0f;
+        void OnModelBatchDrawn(void*, void*, uint32_t, int32_t base_vertex, uint32_t, uint32_t, uint32_t, uint32_t count,
+                               uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, float, float max_z) override
+        {
+            primitives = count, base = base_vertex, depth = max_z;
+        }
+    };
+
+    /// The gameplay families: direct parameters, enums as their C types, answers through wxl::Answer.
+    struct GameplayLoot final : wxl::LootScript
+    {
+        wxl_loot_kind kind   = WXL_LOOT_CORPSE;
+        uint32_t      money  = 0;
+        int32_t       suffix = 0;
+        void OnLootOpened(wxl::Object, wxl_guid, wxl_loot_kind k, uint32_t m, uint32_t) override { kind = k, money = m; }
+        void OnLootSlot(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, int32_t property,
+                        wxl_loot_slot_type) override
+        {
+            suffix = property;
+        }
+    };
+
+    struct GameplayGroup final : wxl::GroupScript
+    {
+        std::string inviter;
+        void OnGroupInvite(std::string_view who, bool canAccept, wxl::Answer accept, wxl::Answer) override
+        {
+            inviter = std::string(who);
+            if (canAccept) accept.Set();
+        }
+    };
+
+    struct GameplaySocial final : wxl::SocialScript
+    {
+        wxl_window_kind window = WXL_WINDOW_GOSSIP;
+        void OnWindowOpened(wxl_window_kind kind, wxl::Object, wxl_guid) override { window = kind; }
+        void OnResurrectRequest(wxl::Object, wxl_guid, std::string_view, bool, wxl::Answer, wxl::Answer decline) override
+        {
+            decline.Set();
+        }
+    };
+
+    struct GameplayQuest final : wxl::QuestScript
+    {
+        uint32_t objective = 0, current = 0;
+        void OnQuestObjectiveChanged(uint32_t, uint32_t, uint32_t which, uint32_t, uint32_t now) override
+        {
+            objective = which, current = now;
+        }
+    };
+
     /// Sees what an earlier handler answered.
     struct LateNetScript final : wxl::NetScript
     {
@@ -356,6 +445,77 @@ namespace
 
 // The entry points the WXL_MOD macro writes, exercised in-process.
 WXL_MOD(LifecycleMod, "wxl.contract", "Contract")
+
+
+// --- A point service that records what is attached, for the typed facade -----------------------
+namespace fakepoint
+{
+    struct Attached
+    {
+        uint32_t     point, side;
+        wxl_point_fn fn;
+        void*        user;
+        uint32_t     hash;
+        bool         live;
+    };
+    std::vector<Attached> g_attached;
+    int                   g_originals = 0;
+
+    uint32_t WXL_CALL List(wxl_point_info*, uint32_t) { return 0; }
+    wxl_result WXL_CALL Find(const char* name, uint32_t* out)
+    {
+        uint32_t id = 0;
+#define WXL_POINT(Ident, n, ret, params, lowered, hash, policy, thread, stability, runtimes) \
+        ++id;                                                                              \
+        if (std::strcmp(n, name) == 0) { *out = id; return WXL_OK; }
+#include "wxl/points.def"
+#undef WXL_POINT
+        return WXL_E_NOT_FOUND;
+    }
+    uint32_t WXL_CALL Attach(uint32_t point, uint32_t side, wxl_point_fn fn, void* user, int32_t, uint32_t hash)
+    {
+        g_attached.push_back(Attached{point, side, fn, user, hash, true});
+        return static_cast<uint32_t>(g_attached.size());
+    }
+    wxl_result WXL_CALL Detach(uint32_t id)
+    {
+        if (id == 0 || id > g_attached.size() || !g_attached[id - 1].live) return WXL_E_NOT_FOUND;
+        g_attached[id - 1].live = false;
+        return WXL_OK;
+    }
+    /// The original of the camera's point: answers data + param, as addresses.
+    void WXL_CALL CallOriginal(wxl_point_call* call)
+    {
+        ++g_originals;
+        const uintptr_t data  = reinterpret_cast<uintptr_t>(*static_cast<void**>(call->args[0]));
+        const uintptr_t param = reinterpret_cast<uintptr_t>(*static_cast<void**>(call->args[1]));
+        *static_cast<int32_t*>(call->result) = static_cast<int32_t>(data + param);
+    }
+    const wxl_point_api g_api = {sizeof(wxl_point_api), &List, &Find, &Attach, &Detach, &CallOriginal};
+
+    /// Runs the live handlers of the camera point on a call, side by side, as a runtime would.
+    int32_t Run(uintptr_t data, uintptr_t param)
+    {
+        void*          a = reinterpret_cast<void*>(data);
+        void*          b = reinterpret_cast<void*>(param);
+        void* const    args[] = {&a, &b};
+        int32_t        result = 0;
+        wxl_point_call call{sizeof(wxl_point_call), 1, 0, 1, 0, 2, args, &result, {0, 0, 0}};
+        for (uint32_t side : {WXL_POINT_BEFORE, WXL_POINT_REPLACE, WXL_POINT_AFTER})
+        {
+            call.side  = side;
+            bool ran   = false;
+            for (const Attached& one : g_attached)
+                if (one.live && one.side == side)
+                {
+                    one.fn(&call, one.user);
+                    ran = true;
+                }
+            if (side == WXL_POINT_REPLACE && !ran) CallOriginal(&call);
+        }
+        return result;
+    }
+}
 
 int main()
 {
@@ -597,6 +757,83 @@ int main()
         wxl::ScriptMgr::Clear();
     }
 
+    Section("the gameplay families");
+    {
+        GameplayLoot   loot;
+        GameplayGroup  group;
+        GameplaySocial social;
+        GameplayQuest  quest;
+        wxl::ScriptMgr::Add(&loot);
+        wxl::ScriptMgr::Add(&group);
+        wxl::ScriptMgr::Add(&social);
+        wxl::ScriptMgr::Add(&quest);
+
+        wxl_loot_args opened{};
+        opened.kind = WXL_LOOT_SKINNING, opened.money = 7;
+        host.Raise(WXL_EV_LootOpened, &opened);
+        wxl_loot_slot_args slot{};
+        slot.random_property_id = -40;
+        host.Raise(WXL_EV_LootSlot, &slot);
+        Check(loot.kind == WXL_LOOT_SKINNING && loot.money == 7 && loot.suffix == -40,
+              "LootScript: the kind as wxl_loot_kind, a signed property as int32_t");
+
+        wxl_bool              accept = WXL_FALSE, decline = WXL_FALSE;
+        wxl_group_invite_args invite{wxl::Str("Jaina"), WXL_TRUE, &accept, &decline};
+        host.Raise(WXL_EV_GroupInvite, &invite);
+        Check(group.inviter == "Jaina" && accept == WXL_TRUE && decline == WXL_FALSE,
+              "GroupScript: OnGroupInvite answers through its accept");
+
+        wxl_window_args window{};
+        window.kind = WXL_WINDOW_TRAINER;
+        host.Raise(WXL_EV_WindowOpened, &window);
+        accept = decline = WXL_FALSE;
+        wxl_resurrect_request_args offer{};
+        offer.accept = &accept, offer.decline = &decline;
+        host.Raise(WXL_EV_ResurrectRequest, &offer);
+        Check(social.window == WXL_WINDOW_TRAINER && decline == WXL_TRUE && accept == WXL_FALSE,
+              "SocialScript: a window by kind, a resurrection declined");
+
+        const wxl_quest_objective_args moved{783, 0, 2, 4, 5};
+        host.Raise(WXL_EV_QuestObjectiveChanged, &moved);
+        Check(quest.objective == 2 && quest.current == 5, "QuestScript: the objective and its count");
+        wxl::ScriptMgr::Clear();
+    }
+
+    Section("the model events: the loader's stages, appearances, drawn batches");
+    {
+        ModelStages stages;
+        Wardrobe    wardrobe;
+        Outline     outline;
+        wxl::ScriptMgr::Add(&stages);
+        wxl::ScriptMgr::Add(&wardrobe);
+        wxl::ScriptMgr::Add(&outline);
+
+        int                         shared = 0, header = 0, skin = 0;
+        const wxl_model_parsed_args parsed{wxl::Str("Creature\\Boar\\Boar.m2"), &shared, &header, 4096};
+        host.Raise(WXL_EV_ModelParsed, &parsed);
+        const wxl_skin_profile_parsed_args skinned{wxl::Str("Creature\\Boar\\Boar.m2"), &shared, &header, &skin};
+        host.Raise(WXL_EV_SkinProfileParsed, &skinned);
+        const wxl_model_sequence_args sequence{wxl::Str("Boar.m2"), &shared, 7, "anim", 4};
+        host.Raise(WXL_EV_ModelSequenceLoad, &sequence);
+        Check(stages.parsed == "Creature\\Boar\\Boar.m2" && stages.file == &shared && stages.bytes == 4096 &&
+                  stages.skinned == stages.parsed && stages.sequenced == "Boar.m2:anim" && stages.index == 7,
+              "AssetScript: the model's file and header as addresses, a sequence's bytes as wxl::Bytes");
+
+        int                       wearer = 0, body = 0;
+        const wxl_appearance_args worn{WXL_APPEARANCE_WORN, &wearer, &body, 1, 1, 4, 416036, WXL_FALSE};
+        host.Raise(WXL_EV_AppearanceChanged, &worn);
+        Check(wardrobe.change == WXL_APPEARANCE_WORN && wardrobe.model == &body && wardrobe.slot == 4 &&
+                  wardrobe.display == 416036 && !wardrobe.npc,
+              "ObjectScript: the change as wxl_appearance_change, the npc flag as bool");
+
+        wxl_model_batch_args batch{};
+        batch.base_vertex = -12, batch.primitive_count = 40, batch.viewport_max_z = 1.0f;
+        host.Raise(WXL_EV_ModelBatchDrawn, &batch);
+        Check(outline.primitives == 40 && outline.base == -12 && outline.depth == 1.0f,
+              "RenderScript: a drawn batch with the numbers of its draw");
+        wxl::ScriptMgr::Clear();
+    }
+
     Section("what a script handles");
     {
         wxl::ScriptMgr::Clear();
@@ -798,6 +1035,10 @@ int main()
         host.Table()->publish_service(WXL_HOOK_RAW_SERVICE, WXL_HOOK_RAW_SERVICE_VERSION, wxltest::FakeHooks::RawTable());
         host.Table()->publish_service(WXL_PATCH_SERVICE, WXL_PATCH_SERVICE_VERSION, wxltest::FakePatch::Table());
         host.Table()->publish_service(WXL_DATA_SERVICE, WXL_DATA_SERVICE_VERSION, wxltest::FakeData::Table());
+        host.Table()->publish_service(WXL_ACTION_SERVICE, WXL_ACTION_SERVICE_VERSION, wxltest::FakeActions::Table());
+        host.Table()->publish_service(WXL_M2_SERVICE, WXL_M2_SERVICE_VERSION, wxltest::FakeModels::Table());
+        host.Table()->publish_service(WXL_M2FILE_SERVICE, WXL_M2FILE_SERVICE_VERSION, wxltest::FakeModels::FileTable());
+        host.Table()->publish_service(WXL_GX_SERVICE, WXL_GX_SERVICE_VERSION, wxltest::FakeModels::GxTable());
     }
 
     Section("reads that can fail");
@@ -992,6 +1233,167 @@ int main()
                              void(wxl::Object, wxl_object_type, uint32_t, uint32_t, wxl::FieldValue, wxl::FieldValue)>,
               "its handler takes the object, its type, the field, its size and the two values");
         wxl::ScriptMgr::Remove(&changes);
+    }
+
+    Section("every object member: object_reads.def through the facades");
+    {
+        // Each row from 0.1.18 on is a method of its class, which reaches its member and answers
+        // the fake's seed for the row as the type the row says: a number, a bool, an
+        // enumeration, a facade class, a struct.
+        using namespace wxl;
+        using wxltest::FakeObjects;
+        uint32_t since = 0;
+#define WXL_OBJECT_SINCE(major, minor, feature) since = since ? since : __LINE__;
+#define WXL_OBJECT_READ(kinds, member, Method, type, source, Cxx, cxx, doc)
+#define WXL_OBJECT_READ_AT(kinds, member, Method, type, source, Cxx, cxx, Arg, arg, doc)
+#include "wxl/runtime/object_reads.def"
+#undef WXL_OBJECT_READ_AT
+#undef WXL_OBJECT_READ
+#undef WXL_OBJECT_SINCE
+
+        std::string wrong;
+        int         checked = 0;
+        const auto  row     = [&](const char* member, const char* kinds, uint32_t line, auto got, auto expected) {
+            ++checked;
+            const bool held = std::strcmp(kinds, "Containers") != 0 && std::strcmp(kinds, "Dynamics") != 0 &&
+                              std::strcmp(kinds, "Corpses") != 0;
+            if (!held)
+            {
+                if (got || got.Error() != WXL_E_INVALID) wrong += std::string(member) + " (no such object here); ";
+                return;
+            }
+            if (!got || !wxltest::SameSeed(*got, expected)) wrong += std::string(member) + "; ";
+            (void)line;
+        };
+#define WXL_CONTRACT_OF_Any         Object(FakeObjects::kBoar)
+#define WXL_CONTRACT_OF_Units       Unit(FakeObjects::kBoar)
+#define WXL_CONTRACT_OF_Players     Player(FakeObjects::kPlayer)
+#define WXL_CONTRACT_OF_Active      Player(FakeObjects::kPlayer)
+#define WXL_CONTRACT_OF_Items       Item(FakeObjects::kItem)
+#define WXL_CONTRACT_OF_Containers  Container(FakeObjects::kItem)
+#define WXL_CONTRACT_OF_GameObjects GameObject(FakeObjects::kChest)
+#define WXL_CONTRACT_OF_Dynamics    DynamicObject(FakeObjects::kChest)
+#define WXL_CONTRACT_OF_Corpses     Corpse(FakeObjects::kChest)
+#define WXL_CONTRACT_EXPECTED(type, cxx) wxltest::SeedAs<type, cxx>(__LINE__)
+#define WXL_OBJECT_READ(kinds, member, Method, type, source, Cxx, cxx, doc)                          \
+    if (__LINE__ > since)                                                                             \
+        row(#member, #kinds, __LINE__, WXL_CONTRACT_OF_##kinds.Cxx(), WXL_CONTRACT_EXPECTED(type, cxx));
+#define WXL_OBJECT_READ_AT(kinds, member, Method, type, source, Cxx, cxx, Arg, arg, doc)              \
+    if (__LINE__ > since)                                                                             \
+        row(#member, #kinds, __LINE__, WXL_CONTRACT_OF_##kinds.Cxx(std::decay_t<arg>{}),               \
+            WXL_CONTRACT_EXPECTED(type, cxx));
+#include "wxl/runtime/object_reads.def"
+#undef WXL_OBJECT_READ_AT
+#undef WXL_OBJECT_READ
+        Check(checked > 60 && wrong.empty(), "every 0.1.18 row answers its seed through its class's method");
+        if (!wrong.empty()) std::printf("        %s\n", wrong.c_str());
+
+        const Player me = Player::Local();
+        const Unit   boar(FakeObjects::kBoar);
+        Check(me.InventoryItem(WXL_INVENTORY_MAIN_HAND) && me.InventoryItem(WXL_INVENTORY_MAIN_HAND)->Handle() == FakeObjects::kBoar,
+              "a handle answer is the facade class over the object");
+        Check(boar.Reaction() && *boar.Reaction() == WXL_REACTION_HOSTILE, "an enumeration answer is the C enum");
+        Check(boar.IsDead() && *boar.IsDead() == true, "a wxl_bool answer is a bool");
+        Check(Player(FakeObjects::kBoar).Xp().Error() == WXL_E_INVALID,
+              "a unit viewed as a player, unchecked, answers no player read");
+        Check(Unit(FakeObjects::kItem).Health().Error() == WXL_E_INVALID, "an item viewed as a unit no unit read");
+        const auto auras = boar.Auras();
+        Check(auras && !auras->empty() && (*auras)[0].stacks == 3, "Auras reads AuraCount slots");
+        const auto skills = me.Skills();
+        Check(skills && skills->size() == 128, "Skills keeps the lines that hold a skill");
+        const auto party = me.PartyMembers();
+        Check(party && party->size() == 4, "PartyMembers keeps the slots that hold someone");
+        Check(!Unit(FakeObjects::kStale).IsDead() && Unit(FakeObjects::kStale).IsDead().Error() == WXL_E_NOT_FOUND,
+              "a stale object is gone");
+    }
+
+    Section("wxl.m2, wxl.m2file and wxl.gx: methods generated from their tables");
+    {
+        using wxltest::FakeModels;
+        using wxltest::FakeObjects;
+        void* const body = wxl::M2Service::ObjectModel(wxl::Unit(FakeObjects::kBoar));
+        Check(body == FakeModels::UnitModel() && !wxl::M2Service::ObjectModel(wxl::Object(FakeObjects::kItem)),
+              "ObjectModel: a unit's model, none for an item");
+        const auto row = wxl::M2Service::ItemDisplay(416036);
+        Check(row && std::strcmp(row->model[0], "Buckle.mdx") == 0 && row->struct_size == sizeof(wxl_m2_item_display) &&
+                  wxl::M2Service::ItemDisplay(1).Error() == WXL_E_NOT_FOUND,
+              "ItemDisplay: a row, its struct_size set by the facade; not found for none");
+        Check(wxl::M2Service::RacePrefix(1).ValueOr("") == "Hu" && !wxl::M2Service::RacePrefix(9),
+              "RacePrefix answers a string");
+
+        const int released = FakeModels::Released();
+        {
+            wxl::M2Model buckle(body, "Item\\Buckle.m2");
+            Check(static_cast<bool>(buckle) && buckle.Attach(body, 99) == WXL_E_NOT_FOUND &&
+                      buckle.Attach(body, 99, WXL_M2_ATTACH_ROOT | WXL_M2_ATTACH_FOLLOW_BONES) == WXL_OK &&
+                      buckle.Parent() == body,
+                  "M2Model: made, hung on the root where the point is missing");
+            buckle.SetGeosets(1, 3, false);
+            const auto* made = FakeModels::Known(buckle.Get());
+            Check(made && made->first == 1 && made->last == 3 && !made->visible &&
+                      buckle.ReplaceTexture(2, "missing.blp") == WXL_E_NOT_FOUND,
+                  "geosets and textures reach the model");
+            Check(buckle.AttachToBone(body, 53, 5, wxl_vec3{0.2f, 0.0f, 1.1f}) == WXL_OK && made->key_bone == 5 &&
+                      made->offset.x == 0.2f,
+                  "AttachToBone takes the offset by value");
+            buckle.Detach();
+            Check(!buckle.Parent(), "Detach takes it off");
+            wxl::M2Model moved = std::move(buckle);
+            Check(!buckle && static_cast<bool>(moved), "moving one leaves the other empty");
+        }
+        Check(FakeModels::Released() == released + 1, "and the one left gives the model back when it goes");
+        const auto point = wxl::M2Service::AttachmentPoint(body, 32);
+        Check(point && point->z == 1.5f && wxl::M2Service::AttachmentPoint(body, 1).Error() == WXL_E_NOT_FOUND,
+              "AttachmentPoint answers a point");
+
+        uint32_t array[2]  = {0, 0};
+        void*    elements  = wxl::M2FileService::AllocNear(array, 3 * sizeof(uint32_t));
+        auto*    values    = static_cast<uint32_t*>(elements);
+        values[0] = 10, values[1] = 20, values[2] = 30;
+        Check(elements && wxl::M2FileService::SetArray(array, elements, 3) == WXL_OK &&
+                  wxl::M2FileService::ArrayData(array) == elements,
+              "SetArray and ArrayData agree, the runtime's way");
+        uint32_t sum = 0;
+        for (uint32_t value : wxl::M2FileService::Elements<uint32_t>(array)) sum += value;
+        Check(sum == 60, "Elements walks a parsed array");
+        const int animated = FakeModels::Animated();
+        wxl::M2FileService::AnimateBones(array);
+        Check(FakeModels::Animated() == animated + 1, "AnimateBones reaches the file");
+
+        const int invalidated = FakeModels::Invalidated();
+        Check(wxl::GxService::D3d9Device() == FakeModels::Device(), "D3d9Device answers the device");
+        wxl::GxService::InvalidateState();
+        Check(FakeModels::Invalidated() == invalidated + 1, "InvalidateState reaches the runtime");
+    }
+
+    Section("wxl.action, and the objects' own actions");
+    {
+        using wxltest::FakeActions;
+        using wxltest::FakeObjects;
+        FakeActions::Calls().clear();
+        const wxl::Unit boar(FakeObjects::kBoar);
+        const wxl::Item stone(FakeObjects::kItem);
+        Check(wxl::ActionService::Target(boar) == WXL_OK && wxl::ActionService::ClearTarget() == WXL_OK &&
+                  wxl::ActionService::Interact(wxl::Object(FakeObjects::kChest)) == WXL_OK &&
+                  wxl::ActionService::CastSpell(133) == WXL_OK && wxl::ActionService::CastSpell(133, boar) == WXL_OK &&
+                  wxl::ActionService::StopCasting() == WXL_OK && wxl::ActionService::UseItem(stone) == WXL_OK &&
+                  wxl::ActionService::Follow(boar) == WXL_OK && wxl::ActionService::Assist(boar) == WXL_OK &&
+                  wxl::ActionService::MoveTo(wxl_vec3{1.0f, 2.0f, 3.0f}) == WXL_OK,
+              "every action of the facade reaches its member");
+        const auto& calls = FakeActions::Calls();
+        Check(calls.size() == 10 && calls[0].name == "target" && calls[0].object == FakeObjects::kBoar &&
+                  calls[3].spell == 133 && calls[3].target == WXL_HANDLE_NONE && calls[4].target == FakeObjects::kBoar &&
+                  calls[6].object == FakeObjects::kItem && calls[9].point.z == 3.0f,
+              "with its arguments: no target for a cast at the current one");
+        Check(wxl::ActionService::CastSpell(0) == WXL_E_FAILED, "what the client refuses answers failed");
+        FakeActions::Calls().clear();
+        Check(boar.Select() == WXL_OK && boar.Interact() == WXL_OK && boar.CastAt(116) == WXL_OK &&
+                  boar.Follow() == WXL_OK && boar.Assist() == WXL_OK && stone.Use(boar) == WXL_OK,
+              "the objects' own actions are the same calls");
+        Check(calls.size() == 6 && calls[2].spell == 116 && calls[2].target == FakeObjects::kBoar &&
+                  calls[5].target == FakeObjects::kBoar,
+              "on the object they are called on");
+        Check(wxl::Unit(FakeObjects::kStale).Select() == WXL_E_NOT_FOUND, "a stale object's action is gone");
     }
 
     Section("objects in handlers, and data kept per object");
@@ -1500,6 +1902,39 @@ int main()
               "on a runtime without disable, the mod says so and stops itself");
         host.WithDisable();
         LifecycleMod::throwIn.clear();
+    }
+
+    Section("typed points");
+    {
+        host.Table()->publish_service(WXL_POINT_SERVICE, WXL_POINT_SERVICE_VERSION, &fakepoint::g_api);
+        using Camera = wxl::points::CGCamera_UpdateCallback;
+        Check(std::is_same_v<Camera::Signature, int32_t(void*, void*)> && Camera::kReplaceable && Camera::kStable &&
+                  Camera::kThread == WXL_POINT_THREAD_MAIN && std::strcmp(Camera::kName, "CGCamera::UpdateCallback") == 0,
+              "a point's class carries its row: signature, policy, stability, thread, name");
+        Check(Camera::Id() == 1, "its id is found by name");
+
+        int  seen  = 0;
+        auto first = Camera::Before([&seen](void*& data, void*&) { seen = static_cast<int>(reinterpret_cast<uintptr_t>(data)); data = reinterpret_cast<void*>(uintptr_t{10}); });
+        wxl::PointAttachment replace = Camera::Replace([](auto original, void* data, void* param) {
+            return original(data, reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(param) + 1)) * 2;
+        });
+        wxl::PointAttachment after = Camera::After([](int32_t& result, void*, void*) { result += 3; });
+        Check(first && replace && after && fakepoint::g_attached.size() == 3, "Before, Replace and After attach");
+        Check(fakepoint::g_attached[1].hash == Camera::kLayoutHash, "and pass the point's layout hash");
+        const int32_t answer = fakepoint::Run(1, 2);
+        Check(seen == 1 && answer == (10 + 3) * 2 + 3 && fakepoint::g_originals == 1,
+              "Before rewrote an argument, Replace called the original with its own and doubled it, After added to it");
+
+        wxl::PointAttachment throws = Camera::Replace([](auto, void*, void*) -> int32_t { throw std::runtime_error("no"); });
+        replace.Reset();
+        fakepoint::g_originals = 0;
+        Check(fakepoint::Run(1, 2) == 10 + 2 + 3 && fakepoint::g_originals == 1,
+              "a Replace that throws before calling the original: the facade calls it, the call goes on");
+        first.Reset();
+        after.Reset();
+        throws.Reset();
+        Check(fakepoint::Run(1, 2) == 3, "Reset detaches each");
+        Check(!fakepoint::g_attached[0].live && !fakepoint::g_attached[3].live, "and a reset handle detaches nothing twice");
     }
 
     if (g_failures == 0)

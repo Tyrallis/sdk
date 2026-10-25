@@ -8,14 +8,25 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <unordered_map>
 #include <utility>
+
+#include <ankerl/unordered_dense.h>
+
+#include "wxl/hash.hpp"
 
 #include "wxl/objects/object.hpp"
 #include "wxl/sdk.hpp"
 
 namespace wxl
 {
+    /// The hash ObjectMap keys by: its handle's (wxl/hash.hpp).
+    struct ObjectHash
+    {
+        using is_avalanching = void;
+
+        uint64_t operator()(const Object& object) const noexcept { return Hash64()(object.Handle()); }
+    };
+
     /**
      * @brief Data a mod keeps per object, erased when the object leaves view.
      *
@@ -33,13 +44,17 @@ namespace wxl
      * runtime that does not raise it), nothing is erased by itself; Prune() drops what no longer
      * resolves.
      *
+     * The entries sit side by side in one array (ankerl::unordered_dense), which makes a lookup
+     * one probe and a walk a straight read; the price is that a pointer or reference to an entry
+     * holds until the next insertion or erasure, which may move it. Keep the Object, not the T&.
+     *
      * Main thread only, like the objects themselves.
      */
     template <class T>
     class ObjectMap
     {
     public:
-        using map_type       = std::unordered_map<Object, T>;
+        using map_type       = ankerl::unordered_dense::map<Object, T, ObjectHash>;
         using iterator       = typename map_type::iterator;
         using const_iterator = typename map_type::const_iterator;
 

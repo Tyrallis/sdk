@@ -13,6 +13,10 @@ add_library(wxl::sdk ALIAS wxl-sdk)
 target_include_directories(wxl-sdk INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
+# ankerl::unordered_dense (MIT, deps/unordered_dense, its own license file): the hash tables the
+# runtimes and wxl::ObjectMap look objects up in. One header, reached as <ankerl/unordered_dense.h>.
+target_include_directories(wxl-sdk SYSTEM INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/unordered_dense/include>)
 
 target_compile_features(wxl-sdk INTERFACE cxx_std_17)
 
@@ -53,6 +57,8 @@ endif()
 
 install(TARGETS wxl-sdk wxl-sdk-mod EXPORT wxl-sdk-targets)
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY deps/unordered_dense/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(FILES deps/unordered_dense/LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/wxl-sdk RENAME LICENSE-unordered_dense)
 install(EXPORT wxl-sdk-targets
     FILE wxl-sdk-targets.cmake
     NAMESPACE wxl::

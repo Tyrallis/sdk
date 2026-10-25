@@ -2,7 +2,7 @@
 # place of fake_host.hpp.
 add_executable(wxl-contract contract.cpp)
 target_link_libraries(wxl-contract PRIVATE wxl::sdk)
-target_include_directories(wxl-contract PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(wxl-contract PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include)
 # C++20, as wxl_add_mod builds a mod: wxl::Log's formatting is std::format.
 set_target_properties(wxl-contract PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
 
@@ -94,9 +94,33 @@ else()
     target_compile_options(scout PRIVATE -Werror)
 endif()
 
+# The in-game test suite, assembled as a Mods folder for a client (ingame/README.md).
+add_subdirectory(ingame)
+
+# The points example: built, warnings as errors, so the typed point facade compiles as a mod sees it.
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../examples/model-swap ${CMAKE_CURRENT_BINARY_DIR}/model-swap)
+if(MSVC)
+    target_compile_options(model-swap PRIVATE /WX)
+else()
+    target_compile_options(model-swap PRIVATE -Werror)
+endif()
+# The models example, the same way: the wxl.m2 facade and the model events as a mod sees them.
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../examples/murloc-hat ${CMAKE_CURRENT_BINARY_DIR}/murloc-hat)
+if(MSVC)
+    target_compile_options(murloc-hat PRIVATE /WX)
+else()
+    target_compile_options(murloc-hat PRIVATE -Werror)
+endif()
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../examples/asset-provider ${CMAKE_CURRENT_BINARY_DIR}/asset-provider)
+if(MSVC)
+    target_compile_options(asset-provider PRIVATE /WX)
+else()
+    target_compile_options(asset-provider PRIVATE -Werror)
+endif()
+
 add_executable(wxl-scout-tests scout_tests.cpp)
 target_link_libraries(wxl-scout-tests PRIVATE wxl::host)
-target_include_directories(wxl-scout-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(wxl-scout-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include)
 add_dependencies(wxl-scout-tests scout)
 if(MSVC)
     target_compile_options(wxl-scout-tests PRIVATE /W4 /permissive-)
@@ -119,3 +143,18 @@ else()
     message(WARNING "Python 3 was not found, so the documentation check will not run. "
         "Run sdk/examples/check_docs.py by hand.")
 endif()
+
+# The object facades' members and the guides' tables of them, against object_reads.def: what
+# wxl-object-members writes (sdk/tools/objects) must be what is committed.
+add_executable(wxl-object-members ${CMAKE_CURRENT_SOURCE_DIR}/../tools/objects/gen_members.cpp)
+target_link_libraries(wxl-object-members PRIVATE wxl::sdk)
+target_include_directories(wxl-object-members PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lua/src)
+if(MSVC)
+    target_compile_options(wxl-object-members PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(wxl-object-members PRIVATE -Wall -Wextra)
+endif()
+add_test(NAME object-members
+    COMMAND wxl-object-members --check ${CMAKE_CURRENT_SOURCE_DIR}/..)

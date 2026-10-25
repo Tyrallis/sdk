@@ -93,6 +93,9 @@ typedef struct wxl_host
      * @brief Writes one line to the runtime's log.
      *
      * No varargs: formatting is the caller's, so nothing with a variable signature crosses.
+     * @p tag and @p message are UTF-8 text: a byte that is not part of a well-formed sequence, and
+     * a control character other than a tab or a line break, is written as `\xNN`, so the log
+     * stays a text file whatever a mod hands over.
      * @param tag  identifies the caller, since one log serves every mod.
      */
     void(WXL_CALL* log)(wxl_log_level level, const char* tag, wxl_str message);

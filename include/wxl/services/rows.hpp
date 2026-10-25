@@ -13,8 +13,8 @@
 //
 //   WXL_API_SERVICE(svc, name, version, since, access, doc)
 //       opens the table of wxl_<svc>_api: the macros of its name and version, the version of
-//       the contract it came with as `(major, minor, feature)`, and `safe` or `unsafe`. A script
-//       mod whose mod.json asks for an older abi cannot use it; an unsafe service reaches a
+//       the contract it came with as `(major, minor, feature)`, and `open` or `raw`. A script
+//       mod whose mod.json asks for an older abi cannot use it; a raw service reaches a
 //       script mod only when its mod.json declares it. The services there before the contract
 //       dated what it brought say (0, 1, 5), the oldest abi a mod can ask for.
 //   WXL_API_SINCE(svc, member, (major, minor, feature))
@@ -47,9 +47,16 @@
 //
 // Parameters, and the C parameters each one is:
 //   str wxl_str  cstr const char*  i32  u32  u64  uptr uintptr_t  f64 double  boolean wxl_bool
-//   ptr void*  ptr_out void**  call wxl_script_call*  script_fn wxl_script_fn
+//   ptr void*  cptr const void*: an address of the client's (a model); a script passes what an
+//       event or a call handed it, or one of its own resources
+//   ptr_out void**  call wxl_script_call*  script_fn wxl_script_fn
+//   point_fn wxl_point_fn  point_call wxl_point_call*
 //   values (const wxl_value*, uint32_t count)  bytes const void*
 //   bytes_size uint32_t: the length of the bytes before it, which must all be as long
+//   object wxl_handle: a world object; a script passes the object, C++ a wxl::Object
+//   vec3 wxl_vec3: a point; a script passes a table with x, y and z
+//   provider const wxl_asset_provider*  transform const wxl_asset_transform*: what a native
+//       mod hands wxl.storage; no script reaches a row taking one
 //   a resource: its ctype
 //   opt<K> the C parameters of K, a parameter a script may leave out: it is then K's zero (0
 //       for a number), which the row's doc says. Every other parameter a script must give, and
@@ -58,8 +65,11 @@
 // Answers: the C return, and the C parameters the answer appends after the row's own:
 //   none void  result wxl_result  boolean wxl_bool  u32  uptr  str wxl_str
 //   address uintptr_t, 0 meaning none
+//   ptr void*, null meaning none: an address of the client's, which a script holds as it is
 //   enumeration<E> uint32_t holding a value of E, an enumeration of enums.def
-//   out<K> wxl_result, K*            found<K> wxl_bool, K*
+//   out<K> wxl_result, K*            found<K> wxl_bool, K*: K a value kind (u64 u32 i32 f64 str
+//       boolean vec3) or a struct kind (m2_item_display: wxl_m2_item_display, written no longer
+//       than its struct_size)
 //   whole_bytes wxl_result, (void* buffer, uint64_t capacity, uint64_t* out_read): a buffer
 //       too small is WXL_E_INVALID with out_read set to what it needs
 //   read_bytes wxl_result, (void* buffer, uint64_t size, uint64_t* out_read): the caller says
@@ -82,8 +92,14 @@
 #include "wxl/services/data.h"
 #include "wxl/services/hook.h"
 #include "wxl/services/patch.h"
+#include "wxl/services/point.h"
 #include "wxl/services/footprint.h"
 #include "wxl/services/profile.h"
+#include "wxl/services/action.h"
+#include "wxl/services/gx.h"
+#include "wxl/services/m2.h"
+#include "wxl/services/m2file.h"
+#include "wxl/objects/object.hpp"
 #include "wxl/services/script.h"
 #include "wxl/services/storage.h"
 
@@ -107,12 +123,20 @@ namespace wxl::api
         struct f64 {};
         struct boolean {};
         struct ptr {};
+        struct cptr {};
         struct ptr_out {};
         struct call {};
         struct script_fn {};
+        struct point_fn {};
+        struct point_call {};
         struct values {};
         struct bytes {};
         struct bytes_size {};
+        struct object {};
+        struct vec3 {};
+        struct provider {};
+        struct transform {};
+        struct m2_item_display {};
         template <class K>
         struct opt {};
 
@@ -145,14 +169,7 @@ namespace wxl::api
         static constexpr const char* kName   = #Name;               \
         static constexpr const char* kService = #svc;               \
     };
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
+#include "wxl/services/tables.inc"
 #undef WXL_API_RESOURCE
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
@@ -183,6 +200,8 @@ namespace wxl::api
     template <> struct Value<kind::f64> { using type = double; };
     template <> struct Value<kind::str> { using type = wxl_str; };
     template <> struct Value<kind::boolean> { using type = wxl_bool; };
+    template <> struct Value<kind::vec3> { using type = wxl_vec3; };
+    template <> struct Value<kind::m2_item_display> { using type = wxl_m2_item_display; };
 
     /// The C parameters a parameter kind stands for.
     template <class K, class = void>
@@ -196,12 +215,19 @@ namespace wxl::api
     template <> struct Param<kind::f64> { using C = List<double>; };
     template <> struct Param<kind::boolean> { using C = List<wxl_bool>; };
     template <> struct Param<kind::ptr> { using C = List<void*>; };
+    template <> struct Param<kind::cptr> { using C = List<const void*>; };
     template <> struct Param<kind::ptr_out> { using C = List<void**>; };
     template <> struct Param<kind::call> { using C = List<wxl_script_call*>; };
     template <> struct Param<kind::script_fn> { using C = List<wxl_script_fn>; };
+    template <> struct Param<kind::point_fn> { using C = List<wxl_point_fn>; };
+    template <> struct Param<kind::point_call> { using C = List<wxl_point_call*>; };
     template <> struct Param<kind::values> { using C = List<const wxl_value*, uint32_t>; };
     template <> struct Param<kind::bytes> { using C = List<const void*>; };
     template <> struct Param<kind::bytes_size> { using C = List<uint32_t>; };
+    template <> struct Param<kind::object> { using C = List<wxl_handle>; };
+    template <> struct Param<kind::vec3> { using C = List<wxl_vec3>; };
+    template <> struct Param<kind::provider> { using C = List<const wxl_asset_provider*>; };
+    template <> struct Param<kind::transform> { using C = List<const wxl_asset_transform*>; };
     template <class R>
     struct Param<R, std::enable_if_t<IsResource<R>::value>>
     {
@@ -223,6 +249,7 @@ namespace wxl::api
     template <> struct Answer<kind::uptr> { using Return = uintptr_t; using Tail = List<>; };
     template <> struct Answer<kind::str> { using Return = wxl_str; using Tail = List<>; };
     template <> struct Answer<kind::address> { using Return = uintptr_t; using Tail = List<>; };
+    template <> struct Answer<kind::ptr> { using Return = void*; using Tail = List<>; };
     template <class E>
     struct Answer<kind::enumeration<E>>
     {
@@ -308,8 +335,8 @@ namespace wxl::api
     template <class Api>
     struct ServiceOf;
 
-#define WXL_API_UNSAFE_safe   false
-#define WXL_API_UNSAFE_unsafe true
+#define WXL_API_RAW_open false
+#define WXL_API_RAW_raw  true
 #define WXL_API_SERVICE(svc, name, version, since, access, doc)                     \
     template <>                                                         \
     struct ServiceOf<wxl_##svc##_api>                                   \
@@ -317,21 +344,14 @@ namespace wxl::api
         static constexpr const char* kId      = #svc;                   \
         static constexpr const char* kName    = name;                   \
         static constexpr uint32_t    kVersion = version;                \
-        static constexpr bool        kUnsafe  = WXL_API_UNSAFE_##access; \
+        static constexpr bool        kRaw     = WXL_API_RAW_##access;    \
     };
 #define WXL_API(svc, member, Name, answer, params, lua, cxx, doc)
 #define WXL_API_RESOURCE(svc, Name, ctype, none_value)
 #define WXL_API_CLOSE(svc, member, Name, answer, Resource, when, doc)
 #define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(type, member, kind)
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
+#include "wxl/services/tables.inc"
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
 #undef WXL_API_CLOSE
@@ -405,7 +425,7 @@ namespace wxl::api
         const char* name;     ///< what the runtime publishes it as, "wxl.storage"
         uint32_t    version;
         Version     since;    ///< the version of the contract the table came with
-        bool        unsafe;   ///< reached by a script mod only when its mod.json declares it
+        bool        raw;      ///< reached by a script mod only when its mod.json declares it
         uint32_t    api_size; ///< sizeof the table's struct
         const char* doc;      ///< what it is, in a line
     };
@@ -461,7 +481,7 @@ namespace wxl::api
     {
 #define WXL_API_VERSION_(major, minor, feature) Version{major, minor, feature}
 #define WXL_API_SERVICE(svc, name, version, since, access, doc)                                 \
-    ServiceRow{#svc, name, version, WXL_API_VERSION_ since, WXL_API_UNSAFE_##access,             \
+    ServiceRow{#svc, name, version, WXL_API_VERSION_ since, WXL_API_RAW_##access,                \
                uint32_t(sizeof(wxl_##svc##_api)), doc},
 #define WXL_API(svc, member, Name, answer, params, lua, cxx, doc)
 #define WXL_API_RESOURCE(svc, Name, ctype, none_value)
@@ -469,14 +489,7 @@ namespace wxl::api
 #define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(type, member, kind)
         inline constexpr ServiceRow kServices[] = {
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
+#include "wxl/services/tables.inc"
         };
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
@@ -496,14 +509,7 @@ namespace wxl::api
 #define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(type, member, kind)
         inline constexpr Row kRows[] = {
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
+#include "wxl/services/tables.inc"
         };
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
@@ -519,14 +525,7 @@ namespace wxl::api
 #define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(type, member, kind)
         inline constexpr ResourceRow kResources[] = {
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
+#include "wxl/services/tables.inc"
         };
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
@@ -543,14 +542,7 @@ namespace wxl::api
 #define WXL_API_FIELD(type, member, kind) \
     FieldRow{&TypeTag<type>, #type, #member, #kind, uint32_t(offsetof(type, member))},
         inline constexpr FieldRow kFields[] = {
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
+#include "wxl/services/tables.inc"
         };
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
@@ -569,14 +561,7 @@ namespace wxl::api
         // Led by a row no table has, so that the array is never empty.
         inline constexpr SinceRow kSinces[] = {
             SinceRow{"", "", 0, Version{0, 0, 0}},
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
+#include "wxl/services/tables.inc"
         };
 #undef WXL_API_SINCE
 #undef WXL_API_FIELD
@@ -659,7 +644,7 @@ namespace wxl::api
     // WXL_E_UNSUPPORTED when it does not.
 
     /// The C++ parameter of a kind, and how it crosses.
-    template <class K>
+    template <class K, class = void>
     struct CxxParam;
     template <>
     struct CxxParam<kind::str>
@@ -703,6 +688,37 @@ namespace wxl::api
         using type = bool;
         static wxl_bool ToC(bool value) { return value ? WXL_TRUE : WXL_FALSE; }
     };
+    template <>
+    struct CxxParam<kind::object>
+    {
+        using type = Object;
+        static wxl_handle ToC(Object value) { return value.Handle(); }
+    };
+    template <>
+    struct CxxParam<kind::vec3>
+    {
+        using type = wxl_vec3;
+        static wxl_vec3 ToC(wxl_vec3 value) { return value; }
+    };
+    template <>
+    struct CxxParam<kind::ptr>
+    {
+        using type = void*;
+        static void* ToC(void* value) { return value; }
+    };
+    template <>
+    struct CxxParam<kind::cptr>
+    {
+        using type = const void*;
+        static const void* ToC(const void* value) { return value; }
+    };
+    /// A resource is its C value in C++: what the row that handed it out answered.
+    template <class R>
+    struct CxxParam<R, std::enable_if_t<IsResource<R>::value>>
+    {
+        using type = typename R::type;
+        static type ToC(type value) { return value; }
+    };
     /// A parameter a script may leave out is an ordinary one in C++.
     template <class K>
     struct CxxParam<kind::opt<K>> : CxxParam<K>
@@ -710,7 +726,7 @@ namespace wxl::api
     };
 
     /// The C++ answer of a kind: what a missing member answers, and what a call does.
-    template <class K>
+    template <class K, class = void>
     struct CxxAnswer;
     template <>
     struct CxxAnswer<kind::none>
@@ -778,6 +794,28 @@ namespace wxl::api
             return f();
         }
     };
+    template <>
+    struct CxxAnswer<kind::ptr>
+    {
+        using type = void*;
+        static void* Missing() { return nullptr; }
+        template <class F>
+        static void* Call(F&& f)
+        {
+            return f();
+        }
+    };
+    template <class R>
+    struct CxxAnswer<R, std::enable_if_t<IsResource<R>::value>>
+    {
+        using type = typename R::type;
+        static type Missing() { return R::kNone; }
+        template <class F>
+        static type Call(F&& f)
+        {
+            return f();
+        }
+    };
     template <class E>
     struct CxxAnswer<kind::enumeration<E>>
     {
@@ -802,6 +840,23 @@ namespace wxl::api
             const wxl_result result = f(&out);
             if (result != WXL_OK) return Unexpected{result};
             return out;
+        }
+    };
+
+    /// A string answered through an out parameter is a view: the runtime's text, which the row
+    /// says how long it lives.
+    template <>
+    struct CxxAnswer<kind::out<kind::str>>
+    {
+        using type = Expected<std::string_view>;
+        static type Missing() { return Unexpected{WXL_E_UNSUPPORTED}; }
+        template <class F>
+        static type Call(F&& f)
+        {
+            wxl_str          out{};
+            const wxl_result result = f(&out);
+            if (result != WXL_OK) return Unexpected{result};
+            return View(out);
         }
     };
 
@@ -840,7 +895,7 @@ namespace wxl::api
     static constexpr ::wxl::api::Method<&wxl_##svc##_api::member, answer params> Name{};
 #define WXL_API_CXX_by_hand(svc, member, Name, answer, params)
 
-#undef WXL_API_UNSAFE_unsafe
-#undef WXL_API_UNSAFE_safe
+#undef WXL_API_RAW_raw
+#undef WXL_API_RAW_open
 
 #endif // WXL_SERVICE_ROWS_HPP

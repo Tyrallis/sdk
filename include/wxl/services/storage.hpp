@@ -6,7 +6,11 @@
 #ifndef WXL_SERVICE_STORAGE_HPP
 #define WXL_SERVICE_STORAGE_HPP
 
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <functional>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -91,6 +95,302 @@ namespace wxl
         wxl_handle             handle_ = WXL_HANDLE_NONE;
     };
 
+    /// A file kind's first four bytes as a transform filters on them: Magic("MD20").
+    constexpr uint32_t Magic(const char (&text)[5])
+    {
+        return static_cast<uint32_t>(static_cast<uint8_t>(text[0])) |
+               static_cast<uint32_t>(static_cast<uint8_t>(text[1])) << 8 |
+               static_cast<uint32_t>(static_cast<uint8_t>(text[2])) << 16 |
+               static_cast<uint32_t>(static_cast<uint8_t>(text[3])) << 24;
+    }
+
+    /**
+     * @brief One file a provider opened, read by the client a piece at a time.
+     *
+     * Calls on one file come one at a time, on whichever thread is reading it; it is destroyed
+     * when the client closes it, or when its provider is taken back.
+     */
+    class AssetFile
+    {
+    public:
+        virtual ~AssetFile() = default;
+
+        /// Its length in bytes, asked once when it is opened.
+        virtual uint64_t Size() const = 0;
+
+        /// Copies up to @p size bytes at @p offset into @p buffer and answers how many: fewer
+        /// only at the end. An unexpected value is a read error the client is told of.
+        virtual Expected<uint32_t> ReadAt(uint64_t offset, void* buffer, uint32_t size) = 0;
+    };
+
+    /// A file held in memory, for a provider that has the bytes at hand.
+    class MemoryAssetFile final : public AssetFile
+    {
+    public:
+        explicit MemoryAssetFile(std::vector<uint8_t> bytes) : bytes_(std::move(bytes)) {}
+
+        uint64_t Size() const override { return bytes_.size(); }
+
+        Expected<uint32_t> ReadAt(uint64_t offset, void* buffer, uint32_t size) override
+        {
+            if (offset >= bytes_.size()) return uint32_t{0};
+            const uint64_t left = bytes_.size() - offset;
+            const uint32_t n    = left < size ? static_cast<uint32_t>(left) : size;
+            std::memcpy(buffer, bytes_.data() + offset, n);
+            return n;
+        }
+
+    private:
+        std::vector<uint8_t> bytes_;
+    };
+
+    /// What a provider says of a name.
+    enum class AssetState
+    {
+        Missing, ///< it has no such file
+        Present, ///< it has it
+        Pending, ///< it will, not yet: looked for further down meanwhile; a mod's read is told so
+    };
+
+    /**
+     * @brief A source of files the client reads as it reads its archives.
+     *
+     * Asked on every thread that opens files, often several at once: every method must be safe
+     * to call concurrently, and quick. Lookup is asked at each open and existence check the
+     * provider may win, so it is a lookup; Open does the work. The object must outlive its
+     * registration. An exception thrown out of a method is caught at the boundary and answers
+     * "no such file" or a failed read.
+     */
+    class AssetProvider
+    {
+    public:
+        virtual ~AssetProvider() = default;
+
+        /// Whether a name is one of the provider's files. @p path has backslashes, any case.
+        virtual AssetState Lookup(std::string_view path) = 0;
+
+        /// Opens one of them; null when it cannot after all.
+        virtual std::unique_ptr<AssetFile> Open(std::string_view path) = 0;
+
+        /// The entries of a folder ("Interface\\AddOns", "" for the top): names alone, with
+        /// whether each is a folder. The default lists nothing.
+        virtual void List(std::string_view folder, const std::function<void(std::string_view name, bool folder)>& entry)
+        {
+            (void)folder;
+            (void)entry;
+        }
+    };
+
+    /// Where a transform writes the bytes it answers with.
+    class AssetOutput
+    {
+    public:
+        explicit AssetOutput(const wxl_asset_output* out) : out_(out) {}
+
+        /// A buffer of @p size bytes that becomes the file once the transform returns true;
+        /// null when that much memory cannot be had.
+        uint8_t* Replace(size_t size) const
+        {
+            if (!out_ || !out_->replace) return nullptr;
+            return static_cast<uint8_t*>(out_->replace(out_->context, size));
+        }
+
+        /// Replaces the file by a copy of @p bytes; false when the memory cannot be had.
+        bool Replace(const void* bytes, size_t size) const
+        {
+            uint8_t* to = Replace(size);
+            if (!to) return false;
+            if (size) std::memcpy(to, bytes, size);
+            return true;
+        }
+
+    private:
+        const wxl_asset_output* out_;
+    };
+
+    /**
+     * @brief A conversion of one kind of file: called with the bytes as read, before the client
+     *        parses them.
+     *
+     * Called on the thread opening the file, possibly several at once: Apply must be safe to
+     * call concurrently. Answer true after writing through @p out to replace the bytes, false
+     * to leave them as they are. The object must outlive its registration.
+     */
+    class AssetTransform
+    {
+    public:
+        virtual ~AssetTransform() = default;
+        virtual bool Apply(std::string_view path, const uint8_t* data, size_t size, const AssetOutput& out) = 0;
+    };
+
+    /// A transform as a function, for AddTransform's short form.
+    using TransformFn = std::function<bool(std::string_view path, const uint8_t* data, size_t size, const AssetOutput& out)>;
+
+    namespace detail
+    {
+        /// The C side of a provider or a transform: the table the runtime calls, over the object.
+        struct AssetBridge
+        {
+            AssetProvider*      provider  = nullptr;
+            AssetTransform*     transform = nullptr;
+            TransformFn         fn;
+            wxl_asset_provider  provider_table{};
+            wxl_asset_transform transform_table{};
+            std::string         extension;
+
+            static wxl_result WXL_CALL Lookup(void* user, wxl_str path)
+            {
+                try
+                {
+                    switch (static_cast<AssetBridge*>(user)->provider->Lookup(View(path)))
+                    {
+                    case AssetState::Present: return WXL_OK;
+                    case AssetState::Pending: return WXL_E_PENDING;
+                    case AssetState::Missing: break;
+                    }
+                    return WXL_E_NOT_FOUND;
+                }
+                catch (...)
+                {
+                    return WXL_E_NOT_FOUND;
+                }
+            }
+
+            static void* WXL_CALL Open(void* user, wxl_str path, uint64_t* out_size)
+            {
+                try
+                {
+                    std::unique_ptr<AssetFile> file = static_cast<AssetBridge*>(user)->provider->Open(View(path));
+                    if (!file) return nullptr;
+                    if (out_size) *out_size = file->Size();
+                    return file.release();
+                }
+                catch (...)
+                {
+                    return nullptr;
+                }
+            }
+
+            static wxl_result WXL_CALL ReadAt(void*, void* file, uint64_t offset, void* buffer, uint32_t size,
+                                              uint32_t* out_read)
+            {
+                try
+                {
+                    const Expected<uint32_t> read = static_cast<AssetFile*>(file)->ReadAt(offset, buffer, size);
+                    if (!read) return read.Error();
+                    if (out_read) *out_read = *read;
+                    return WXL_OK;
+                }
+                catch (...)
+                {
+                    return WXL_E_FAILED;
+                }
+            }
+
+            static void WXL_CALL Close(void*, void* file) { delete static_cast<AssetFile*>(file); }
+
+            struct ListContext
+            {
+                wxl_asset_entry_fn fn;
+                void*              context;
+            };
+
+            static void WXL_CALL List(void* user, wxl_str folder, wxl_asset_entry_fn fn, void* context)
+            {
+                try
+                {
+                    static_cast<AssetBridge*>(user)->provider->List(View(folder), [&](std::string_view name, bool is) {
+                        fn(context, Str(name), is ? WXL_TRUE : WXL_FALSE);
+                    });
+                }
+                catch (...)
+                {
+                }
+            }
+
+            static wxl_result WXL_CALL Apply(void* user, wxl_str path, const void* data, uint64_t size,
+                                             const wxl_asset_output* out)
+            {
+                try
+                {
+                    AssetBridge* bridge = static_cast<AssetBridge*>(user);
+                    const auto*  bytes  = static_cast<const uint8_t*>(data);
+                    const bool   done   = bridge->transform
+                                              ? bridge->transform->Apply(View(path), bytes, static_cast<size_t>(size), AssetOutput(out))
+                                              : bridge->fn(View(path), bytes, static_cast<size_t>(size), AssetOutput(out));
+                    return done ? WXL_OK : WXL_E_NOT_FOUND;
+                }
+                catch (...)
+                {
+                    return WXL_E_FAILED;
+                }
+            }
+        };
+    } // namespace detail
+
+    /**
+     * @brief A provider or a transform registered with wxl.storage, taken back when this goes.
+     *
+     * Move-only. A mod that goes takes its registrations with it anyway; holding one is how a
+     * mod takes one back sooner.
+     */
+    class AssetRegistration
+    {
+    public:
+        AssetRegistration() = default;
+        AssetRegistration(AssetRegistration&& other) noexcept
+            : api_(other.api_), handle_(other.handle_), kind_(other.kind_), bridge_(std::move(other.bridge_))
+        {
+            other.handle_ = 0;
+        }
+        AssetRegistration& operator=(AssetRegistration&& other) noexcept
+        {
+            if (this != &other)
+            {
+                Reset();
+                api_    = other.api_;
+                handle_ = other.handle_;
+                kind_   = other.kind_;
+                bridge_ = std::move(other.bridge_);
+                other.handle_ = 0;
+            }
+            return *this;
+        }
+        AssetRegistration(const AssetRegistration&)            = delete;
+        AssetRegistration& operator=(const AssetRegistration&) = delete;
+        ~AssetRegistration() { Reset(); }
+
+        explicit operator bool() const { return handle_ != 0; }
+        uint64_t Get() const { return handle_; }
+
+        /// Takes the registration back now; safe to call more than once.
+        void Reset()
+        {
+            if (handle_ && api_)
+            {
+                if (kind_ == Kind::Provider && detail::Carries(api_, &wxl_storage_api::remove_provider))
+                    api_->remove_provider(handle_);
+                if (kind_ == Kind::Transform && detail::Carries(api_, &wxl_storage_api::remove_transform))
+                    api_->remove_transform(handle_);
+            }
+            handle_ = 0;
+            bridge_.reset();
+        }
+
+    private:
+        friend class StorageService;
+        enum class Kind
+        {
+            Provider,
+            Transform
+        };
+
+        const wxl_storage_api*               api_    = nullptr;
+        uint64_t                             handle_ = 0;
+        Kind                                 kind_   = Kind::Provider;
+        std::unique_ptr<detail::AssetBridge> bridge_;
+    };
+
     /**
      * @brief The typed facade over wxl.storage.
      *
@@ -171,6 +471,97 @@ namespace wxl
             found.reserve(written < count ? written : count);
             for (uint32_t i = 0; i < written && i < count; ++i) found.emplace_back(View(slices[i]));
             return found;
+        }
+
+        /**
+         * @brief Adds a provider at a priority (above 0: before the client's archives; 0 or
+         *        below: only names the client does not have). Taken back when the registration
+         *        goes, or with the mod.
+         */
+        Expected<AssetRegistration> AddProvider(AssetProvider& provider, int32_t priority) const
+        {
+            const wxl_storage_api* api = Raw();
+            if (!detail::Carries(api, &wxl_storage_api::add_provider)) return Unexpected{WXL_E_UNSUPPORTED};
+            auto bridge      = std::make_unique<detail::AssetBridge>();
+            bridge->provider = &provider;
+            wxl_asset_provider& table = bridge->provider_table;
+            table.struct_size         = sizeof table;
+            table.user                = bridge.get();
+            table.lookup              = &detail::AssetBridge::Lookup;
+            table.open                = &detail::AssetBridge::Open;
+            table.read_at             = &detail::AssetBridge::ReadAt;
+            table.close               = &detail::AssetBridge::Close;
+            table.list                = &detail::AssetBridge::List;
+            uint64_t         handle   = 0;
+            const wxl_result result   = api->add_provider(&table, priority, &handle);
+            if (result != WXL_OK) return Unexpected{result};
+            AssetRegistration registration;
+            registration.api_    = api;
+            registration.handle_ = handle;
+            registration.kind_   = AssetRegistration::Kind::Provider;
+            registration.bridge_ = std::move(bridge);
+            return registration;
+        }
+
+        /**
+         * @brief Adds a transform of the files ending in @p extension ("m2", "blp"...), only
+         *        those starting with @p magic unless it is 0, at a priority (highest runs first).
+         */
+        Expected<AssetRegistration> AddTransform(std::string_view extension, uint32_t magic, int32_t priority,
+                                                 AssetTransform& transform) const
+        {
+            auto bridge       = std::make_unique<detail::AssetBridge>();
+            bridge->transform = &transform;
+            return Transform(extension, magic, priority, std::move(bridge));
+        }
+
+        /// The same with a function: `[](std::string_view path, const uint8_t* data, size_t size,
+        /// const wxl::AssetOutput& out) { ...; return true; }`.
+        Expected<AssetRegistration> AddTransform(std::string_view extension, uint32_t magic, int32_t priority,
+                                                 TransformFn fn) const
+        {
+            if (!fn) return Unexpected{WXL_E_INVALID};
+            auto bridge = std::make_unique<detail::AssetBridge>();
+            bridge->fn  = std::move(fn);
+            return Transform(extension, magic, priority, std::move(bridge));
+        }
+
+        /// Serves @p size bytes under a name, on every thread, until Unserve or the mod goes.
+        wxl_result Serve(std::string_view path, const void* data, uint32_t size, int32_t priority) const
+        {
+            const wxl_storage_api* api = Raw();
+            if (!detail::Carries(api, &wxl_storage_api::serve)) return WXL_E_UNSUPPORTED;
+            return api->serve(Str(path), data, size, priority);
+        }
+
+        /// Serves text under a name.
+        wxl_result Serve(std::string_view path, std::string_view text, int32_t priority) const
+        {
+            return Serve(path, text.data(), static_cast<uint32_t>(text.size()), priority);
+        }
+
+    private:
+        Expected<AssetRegistration> Transform(std::string_view extension, uint32_t magic, int32_t priority,
+                                              std::unique_ptr<detail::AssetBridge> bridge) const
+        {
+            const wxl_storage_api* api = Raw();
+            if (!detail::Carries(api, &wxl_storage_api::add_transform)) return Unexpected{WXL_E_UNSUPPORTED};
+            bridge->extension          = std::string(extension);
+            wxl_asset_transform& table = bridge->transform_table;
+            table.struct_size          = sizeof table;
+            table.user                 = bridge.get();
+            table.extension            = Str(bridge->extension);
+            table.magic                = magic;
+            table.apply                = &detail::AssetBridge::Apply;
+            uint64_t         handle    = 0;
+            const wxl_result result    = api->add_transform(&table, priority, &handle);
+            if (result != WXL_OK) return Unexpected{result};
+            AssetRegistration registration;
+            registration.api_    = api;
+            registration.handle_ = handle;
+            registration.kind_   = AssetRegistration::Kind::Transform;
+            registration.bridge_ = std::move(bridge);
+            return registration;
         }
     };
 } // namespace wxl

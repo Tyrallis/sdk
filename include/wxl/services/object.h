@@ -24,6 +24,41 @@ extern "C" {
 #endif
 
 /**
+ * @brief One aura the client holds on a unit, as unit_aura writes it.
+ *
+ * The caller sets struct_size to the size it knows; the runtime writes no more than that and
+ * sets struct_size to what it wrote.
+ */
+typedef struct wxl_aura
+{
+    uint32_t struct_size;
+    uint32_t spell_id;
+    wxl_guid caster;     ///< who cast it; 0 for an aura with no caster the client knows
+    uint32_t stacks;     ///< how many times it is applied; 0 for one that does not stack
+    uint32_t level;      ///< the caster's level when it was cast
+    uint32_t flags;      ///< as the server sends them: 0x8 cast by the unit itself, 0x10 helpful, 0x20 with a duration, 0x80 harmful
+    int32_t  duration;   ///< its whole duration in milliseconds; 0 or less for none
+    uint32_t expiration; ///< when it ends, in milliseconds on the client's clock; 0 for never
+} wxl_aura;
+
+/**
+ * @brief One line of the active player's skill list, as player_skill writes it.
+ *
+ * The caller sets struct_size to the size it knows; the runtime writes no more than that and
+ * sets struct_size to what it wrote.
+ */
+typedef struct wxl_skill
+{
+    uint32_t struct_size;
+    uint32_t id;              ///< a SkillLine.dbc id; 0 for an empty line
+    uint32_t value;           ///< the skill now, without bonuses
+    uint32_t max;             ///< the most it can reach at this rank
+    uint32_t step;            ///< the rank: apprentice 1, journeyman 2, ...
+    int32_t  temporary_bonus; ///< from what the player wears or drinks
+    int32_t  permanent_bonus; ///< from racials and talents
+} wxl_skill;
+
+/**
  * @brief Reading world objects.
  *
  * A getter writes its out-parameter and returns WXL_OK, or leaves it untouched and returns
@@ -297,6 +332,153 @@ typedef struct wxl_object_api
      * kind's block -- and refused with WXL_E_INVALID when it is wrong.
      */
     wxl_result(WXL_CALL* unwatch_field)(uint32_t type, uint32_t first, uint32_t count);
+
+    // --- appended in 0.1.18: the typed reads ------------------------------------------------
+    //
+    // One getter per thing a mod asks of an object, each described by a row of
+    // object_reads.def, which the facades and wxl.lua are made from. They answer as the getters
+    // above: WXL_OK, WXL_E_NOT_FOUND for a stale handle, WXL_E_INVALID for a handle of another
+    // kind or an argument out of range. Three more answers:
+    //
+    //   - a uint32_t answer described with an enumeration holds a value of it: unit_reaction a
+    //     wxl_reaction, unit_creature_type a wxl_creature_type, ...;
+    //   - a wxl_handle answer is the object in view, or WXL_HANDLE_NONE for nothing there;
+    //   - the item cache's reads (item_quality, item_level, ...) answer WXL_E_FAILED while the
+    //     client has not received the item's record from the server: ask again later.
+    //
+    // The player getters marked as the active player's answer WXL_E_INVALID for any other player:
+    // the client keeps money, experience, inventory and skills for the player it controls only.
+
+    /// Whether it is the unit the client controls.
+    wxl_result(WXL_CALL* is_active_player)(wxl_handle object, wxl_bool* out);
+    /// Yards from it to another object, centre to centre; invalid when either has no place in the world.
+    wxl_result(WXL_CALL* distance)(wxl_handle object, wxl_handle other, float* out);
+    /// Yards from it to a point; invalid for an object with no place in the world.
+    wxl_result(WXL_CALL* distance_to)(wxl_handle object, wxl_vec3 point, float* out);
+    /// What it targets, as a guid, whether that is in view or not; 0 for nothing.
+    wxl_result(WXL_CALL* unit_target_guid)(wxl_handle unit, wxl_guid* out);
+    /// How it stands towards the active player, by the client's own reckoning: the colour of its name.
+    wxl_result(WXL_CALL* unit_reaction)(wxl_handle unit, uint32_t* out);
+    /// How it stands towards another unit, by the client's own reckoning.
+    wxl_result(WXL_CALL* unit_reaction_to)(wxl_handle unit, wxl_handle other, uint32_t* out);
+    /// Whether it is dead: no health left, or marked dead by the server.
+    wxl_result(WXL_CALL* unit_is_dead)(wxl_handle unit, wxl_bool* out);
+    /// Whether it is in combat, as the client's UnitAffectingCombat reads it.
+    wxl_result(WXL_CALL* unit_in_combat)(wxl_handle unit, wxl_bool* out);
+    /// Whether it is flagged for player-versus-player combat.
+    wxl_result(WXL_CALL* unit_is_pvp)(wxl_handle unit, wxl_bool* out);
+    /// Whether someone has tapped it: its kill and loot are theirs.
+    wxl_result(WXL_CALL* unit_is_tapped)(wxl_handle unit, wxl_bool* out);
+    /// Whether the active player, or their group, has tapped it.
+    wxl_result(WXL_CALL* unit_is_tapped_by_player)(wxl_handle unit, wxl_bool* out);
+    /// Whether it has loot for the active player.
+    wxl_result(WXL_CALL* unit_is_lootable)(wxl_handle unit, wxl_bool* out);
+    /// Whether its corpse can be skinned.
+    wxl_result(WXL_CALL* unit_is_skinnable)(wxl_handle unit, wxl_bool* out);
+    /// How it stands: standing, sitting, sleeping, kneeling, ...
+    wxl_result(WXL_CALL* unit_stand_state)(wxl_handle unit, uint32_t* out);
+    /// Whether it sits, on the ground or in a chair.
+    wxl_result(WXL_CALL* unit_is_sitting)(wxl_handle unit, wxl_bool* out);
+    /// Whether it is stealthed, as the client's IsStealthed reads it.
+    wxl_result(WXL_CALL* unit_is_stealthed)(wxl_handle unit, wxl_bool* out);
+    /// Whether it rides a mount, as the client's IsMounted reads it.
+    wxl_result(WXL_CALL* unit_is_mounted)(wxl_handle unit, wxl_bool* out);
+    /// The spell it casts now; 0 for none.
+    wxl_result(WXL_CALL* unit_casting_spell_id)(wxl_handle unit, uint32_t* out);
+    /// When the cast began, in milliseconds on the client's clock (the client's GetTime() * 1000).
+    wxl_result(WXL_CALL* unit_cast_start)(wxl_handle unit, uint32_t* out);
+    /// When the cast ends, on the same clock.
+    wxl_result(WXL_CALL* unit_cast_end)(wxl_handle unit, uint32_t* out);
+    /// Whether it is casting, its cast not yet over, as the client's UnitCastingInfo reads it.
+    wxl_result(WXL_CALL* unit_is_casting)(wxl_handle unit, wxl_bool* out);
+    /// The spell it channels now; 0 for none.
+    wxl_result(WXL_CALL* unit_channel_spell_id)(wxl_handle unit, uint32_t* out);
+    /// When the channel began, on the client's clock.
+    wxl_result(WXL_CALL* unit_channel_start)(wxl_handle unit, uint32_t* out);
+    /// When the channel ends, on the client's clock.
+    wxl_result(WXL_CALL* unit_channel_end)(wxl_handle unit, uint32_t* out);
+    /// Whether it is channeling, its channel not yet over.
+    wxl_result(WXL_CALL* unit_is_channeling)(wxl_handle unit, wxl_bool* out);
+    /// How many auras the client holds on it, buffs and debuffs alike.
+    wxl_result(WXL_CALL* unit_aura_count)(wxl_handle unit, uint32_t* out);
+    /// The aura in a slot, 0 to AuraCount - 1: its spell, caster, stacks, duration, expiration and flags.
+    wxl_result(WXL_CALL* unit_aura)(wxl_handle unit, uint32_t slot, wxl_aura* out);
+    /// Whether an aura of a spell is on it.
+    wxl_result(WXL_CALL* unit_has_aura)(wxl_handle unit, uint32_t spell_id, wxl_bool* out);
+    /// What kind of creature it is, as the client works it out: beast, humanoid, undead, ...
+    wxl_result(WXL_CALL* unit_creature_type)(wxl_handle unit, uint32_t* out);
+    /// Its beast family, a CreatureFamily.dbc id; 0 for none.
+    wxl_result(WXL_CALL* unit_creature_family)(wxl_handle unit, uint32_t* out);
+    /// Its rank: normal, elite, rare, rare elite, world boss.
+    wxl_result(WXL_CALL* unit_classification)(wxl_handle unit, uint32_t* out);
+    /// Whether it knows a spell: the active player's spell book or its pet's; false for any other unit.
+    wxl_result(WXL_CALL* unit_knows_spell)(wxl_handle unit, uint32_t spell_id, wxl_bool* out);
+    /// The flags of its movement: forward 0x1, backward 0x2, ..., falling 0x1000, flying 0x2000000.
+    wxl_result(WXL_CALL* unit_movement_flags)(wxl_handle unit, uint32_t* out);
+    /// One of its speeds, in yards a second: walk, run, swim, flight, ...; the turn and pitch rates in radians a second.
+    wxl_result(WXL_CALL* unit_speed)(wxl_handle unit, uint32_t move_type, float* out);
+    /// Whether it swims, as the client's IsSwimming reads it.
+    wxl_result(WXL_CALL* unit_is_swimming)(wxl_handle unit, wxl_bool* out);
+    /// Whether it flies, as the client's IsFlying reads it.
+    wxl_result(WXL_CALL* unit_is_flying)(wxl_handle unit, wxl_bool* out);
+    /// Whether it is falling, as the client's IsFalling reads it.
+    wxl_result(WXL_CALL* unit_is_falling)(wxl_handle unit, wxl_bool* out);
+    /// Whether it is a ghost, released from its corpse.
+    wxl_result(WXL_CALL* player_is_ghost)(wxl_handle player, wxl_bool* out);
+    /// Whether it is away from the keyboard.
+    wxl_result(WXL_CALL* player_is_afk)(wxl_handle player, wxl_bool* out);
+    /// Whether it asked not to be disturbed.
+    wxl_result(WXL_CALL* player_is_dnd)(wxl_handle player, wxl_bool* out);
+    /// Whether it rests in an inn or a city, gaining rested experience.
+    wxl_result(WXL_CALL* player_is_resting)(wxl_handle player, wxl_bool* out);
+    /// Its money, in copper.
+    wxl_result(WXL_CALL* player_money)(wxl_handle player, uint32_t* out);
+    /// Its experience in this level.
+    wxl_result(WXL_CALL* player_xp)(wxl_handle player, uint32_t* out);
+    /// The experience this level takes.
+    wxl_result(WXL_CALL* player_next_level_xp)(wxl_handle player, uint32_t* out);
+    /// Its rested experience: kills give twice as much until it is spent.
+    wxl_result(WXL_CALL* player_rested_xp)(wxl_handle player, uint32_t* out);
+    /// Its honor points.
+    wxl_result(WXL_CALL* player_honor_points)(wxl_handle player, uint32_t* out);
+    /// Its arena points.
+    wxl_result(WXL_CALL* player_arena_points)(wxl_handle player, uint32_t* out);
+    /// The item in an equipment slot, or the bag in a bag slot (19 to 22); none for an empty slot.
+    wxl_result(WXL_CALL* player_inventory_item)(wxl_handle player, uint32_t slot, wxl_handle* out);
+    /// The item in a slot of the backpack, 0 to 15; none for an empty slot.
+    wxl_result(WXL_CALL* player_backpack_item)(wxl_handle player, uint32_t slot, wxl_handle* out);
+    /// The skill on a line of the skill list, 0 to 127: its id, value and maximum; an id of 0 for an empty line.
+    wxl_result(WXL_CALL* player_skill)(wxl_handle player, uint32_t line, wxl_skill* out);
+    /// A skill by its SkillLine.dbc id; invalid for a skill the player does not have.
+    wxl_result(WXL_CALL* player_skill_of)(wxl_handle player, uint32_t skill_id, wxl_skill* out);
+    /// How many others are in its party, 0 to 4.
+    wxl_result(WXL_CALL* player_party_size)(wxl_handle player, uint32_t* out);
+    /// The other party member in a party slot, 0 to 3, whether in view or not; 0 for an empty slot.
+    wxl_result(WXL_CALL* player_party_member_guid)(wxl_handle player, uint32_t slot, wxl_guid* out);
+    /// How many are in its raid, itself included; 0 outside a raid.
+    wxl_result(WXL_CALL* player_raid_size)(wxl_handle player, uint32_t* out);
+    /// The raid member in a raid slot, 0 to 39, whether in view or not; 0 for an empty slot.
+    wxl_result(WXL_CALL* player_raid_member_guid)(wxl_handle player, uint32_t slot, wxl_guid* out);
+    /// The enchantment in a slot, 0 to 11 (0 permanent, 1 temporary, 2 to 4 sockets, ...), a SpellItemEnchantment.dbc id; 0 for none.
+    wxl_result(WXL_CALL* item_enchant)(wxl_handle item, uint32_t slot, uint32_t* out);
+    /// Its quality: poor, common, uncommon, rare, epic, legendary, artifact, heirloom.
+    wxl_result(WXL_CALL* item_quality)(wxl_handle item, uint32_t* out);
+    /// Its item level.
+    wxl_result(WXL_CALL* item_level)(wxl_handle item, uint32_t* out);
+    /// The level it takes to use.
+    wxl_result(WXL_CALL* item_required_level)(wxl_handle item, uint32_t* out);
+    /// Its class, an ItemClass.dbc id: weapon 2, armor 4, ...
+    wxl_result(WXL_CALL* item_class)(wxl_handle item, uint32_t* out);
+    /// Its subclass within the class: a sword, a cloth robe, ...
+    wxl_result(WXL_CALL* item_subclass)(wxl_handle item, uint32_t* out);
+    /// Where it is worn: head 1, neck 2, ...; 0 for an item that is not worn.
+    wxl_result(WXL_CALL* item_inventory_type)(wxl_handle item, uint32_t* out);
+    /// How many a stack of it holds at most.
+    wxl_result(WXL_CALL* item_max_stack)(wxl_handle item, uint32_t* out);
+    /// What a vendor pays for one, in copper.
+    wxl_result(WXL_CALL* item_sell_price)(wxl_handle item, uint32_t* out);
+    /// The item in a slot of the bag; none for an empty one, invalid past NumSlots.
+    wxl_result(WXL_CALL* container_slot_item)(wxl_handle container, uint32_t slot, wxl_handle* out);
 } wxl_object_api;
 
 #ifdef __cplusplus

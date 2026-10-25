@@ -862,6 +862,496 @@ WXL_ARGS_FIELD(wxl_memory_pressure_args, committed, u64)    ///< what the proces
 WXL_ARGS_FIELD(wxl_memory_pressure_args, threshold, u64)    ///< the threshold it fell under
 WXL_ARGS_END(wxl_memory_pressure_args)
 
+// --- Gameplay: auras, loot, items, quests, groups, the people around (abi 0.1.17) ------------
+
+/**
+ * @brief An aura on a unit, as the client keeps it in one of the unit's aura slots.
+ *
+ * For UnitAuraRemoved the values are the ones the aura had when it left. @ref remaining is
+ * worked out when the event is raised from the end time the client keeps; an aura without a
+ * duration has both at 0. A handle resolves only for an object the client holds; the guids are
+ * what the server sent whether or not it does.
+ */
+WXL_ARGS(wxl_aura_args)
+WXL_ARGS_FIELD(wxl_aura_args, unit, handle)
+WXL_ARGS_FIELD(wxl_aura_args, unit_guid, guid)
+WXL_ARGS_FIELD(wxl_aura_args, slot, u32)            ///< the unit's aura slot, as UnitAura's index counts them from 0
+WXL_ARGS_FIELD(wxl_aura_args, spell_id, u32)
+WXL_ARGS_FIELD(wxl_aura_args, caster, handle)       ///< WXL_HANDLE_NONE when the caster is not in view
+WXL_ARGS_FIELD(wxl_aura_args, caster_guid, guid)    ///< the unit itself for an aura it cast on itself
+WXL_ARGS_FIELD(wxl_aura_args, stacks, u32)          ///< the stack count the server sent: 0 and 1 both mean one
+WXL_ARGS_FIELD(wxl_aura_args, previous_stacks, u32) ///< for UnitAuraRefreshed, the count before; the same as stacks otherwise
+WXL_ARGS_FIELD(wxl_aura_args, level, u32)           ///< the caster's level when it cast the aura
+WXL_ARGS_FIELD(wxl_aura_args, flags, u32)           ///< the aura's flags byte as the server sent it
+WXL_ARGS_FIELD(wxl_aura_args, harmful, bool)        ///< WXL_TRUE for a debuff
+WXL_ARGS_FIELD(wxl_aura_args, duration, u32)        ///< its full length in milliseconds, 0 for none
+WXL_ARGS_FIELD(wxl_aura_args, remaining, u32)       ///< milliseconds left, 0 for none
+WXL_ARGS_END(wxl_aura_args)
+
+/// A unit mounting, dismounting or changing mounts: its mount display id changed.
+WXL_ARGS(wxl_mount_args)
+WXL_ARGS_FIELD(wxl_mount_args, unit, handle)
+WXL_ARGS_FIELD(wxl_mount_args, unit_guid, guid)
+WXL_ARGS_FIELD(wxl_mount_args, previous_display_id, u32) ///< 0 when it was not mounted
+WXL_ARGS_FIELD(wxl_mount_args, display_id, u32)          ///< 0 when it got off
+WXL_ARGS_END(wxl_mount_args)
+
+/// The loot window, opened on something or closed.
+WXL_ARGS(wxl_loot_args)
+WXL_ARGS_FIELD(wxl_loot_args, source, handle)     ///< what is looted: a corpse, a chest, an item, a fishing bobber
+WXL_ARGS_FIELD(wxl_loot_args, source_guid, guid)
+WXL_ARGS_ENUM(wxl_loot_args, kind, wxl_loot_kind)
+WXL_ARGS_FIELD(wxl_loot_args, money, u32)         ///< copper in the window; 0 for LootClosed
+WXL_ARGS_FIELD(wxl_loot_args, count, u32)         ///< items in the window, one LootSlot each; 0 for LootClosed
+WXL_ARGS_END(wxl_loot_args)
+
+/// One item of the loot window.
+WXL_ARGS(wxl_loot_slot_args)
+WXL_ARGS_FIELD(wxl_loot_slot_args, index, u32)              ///< its place among the window's items, from 0
+WXL_ARGS_FIELD(wxl_loot_slot_args, slot, u32)               ///< the server's loot slot, what a loot request names
+WXL_ARGS_FIELD(wxl_loot_slot_args, item_id, u32)
+WXL_ARGS_FIELD(wxl_loot_slot_args, quantity, u32)
+WXL_ARGS_FIELD(wxl_loot_slot_args, display_id, u32)
+WXL_ARGS_FIELD(wxl_loot_slot_args, random_suffix, u32)
+WXL_ARGS_FIELD(wxl_loot_slot_args, random_property_id, i32)
+WXL_ARGS_ENUM(wxl_loot_slot_args, slot_type, wxl_loot_slot_type)
+WXL_ARGS_END(wxl_loot_slot_args)
+
+/// The local player's share of looted money: SMSG_LOOT_MONEY_NOTIFY.
+WXL_ARGS(wxl_loot_money_args)
+WXL_ARGS_FIELD(wxl_loot_money_args, amount, u32) ///< copper
+WXL_ARGS_FIELD(wxl_loot_money_args, alone, bool) ///< WXL_TRUE when it was not split with a group
+WXL_ARGS_END(wxl_loot_money_args)
+
+/// A roll starting on an item of a group's loot: SMSG_LOOT_START_ROLL, on the player's map.
+WXL_ARGS(wxl_loot_roll_start_args)
+WXL_ARGS_FIELD(wxl_loot_roll_start_args, source_guid, guid) ///< the corpse or chest the item is on
+WXL_ARGS_FIELD(wxl_loot_roll_start_args, slot, u32)
+WXL_ARGS_FIELD(wxl_loot_roll_start_args, item_id, u32)
+WXL_ARGS_FIELD(wxl_loot_roll_start_args, random_suffix, u32)
+WXL_ARGS_FIELD(wxl_loot_roll_start_args, random_property_id, i32)
+WXL_ARGS_FIELD(wxl_loot_roll_start_args, quantity, u32)
+WXL_ARGS_FIELD(wxl_loot_roll_start_args, duration, u32)     ///< milliseconds to choose
+WXL_ARGS_FIELD(wxl_loot_roll_start_args, vote_mask, u32)    ///< the choices allowed: 1 pass, 2 need, 4 greed, 8 disenchant
+WXL_ARGS_FIELD(wxl_loot_roll_start_args, roll_id, u32)      ///< the id the interface's RollOnLoot takes for it
+WXL_ARGS_END(wxl_loot_roll_start_args)
+
+/// A roll on an item: someone's choice (LootRoll), the winner (LootRollWon), or nobody (LootAllPassed).
+WXL_ARGS(wxl_loot_roll_args)
+WXL_ARGS_FIELD(wxl_loot_roll_args, source_guid, guid)
+WXL_ARGS_FIELD(wxl_loot_roll_args, slot, u32)
+WXL_ARGS_FIELD(wxl_loot_roll_args, item_id, u32)
+WXL_ARGS_FIELD(wxl_loot_roll_args, random_suffix, u32)
+WXL_ARGS_FIELD(wxl_loot_roll_args, random_property_id, i32)
+WXL_ARGS_FIELD(wxl_loot_roll_args, player_guid, guid)       ///< who rolled or won; 0 for LootAllPassed
+WXL_ARGS_FIELD(wxl_loot_roll_args, roll, u32)               ///< the number rolled, 1 to 100; 0 for a pass and for LootAllPassed
+WXL_ARGS_ENUM(wxl_loot_roll_args, roll_type, wxl_roll_type)
+WXL_ARGS_FIELD(wxl_loot_roll_args, auto_pass, bool)         ///< WXL_TRUE when the server passed for the player
+WXL_ARGS_END(wxl_loot_roll_args)
+
+/// An item the local player (or a member of its group) received: SMSG_ITEM_PUSH_RESULT.
+WXL_ARGS(wxl_item_push_args)
+WXL_ARGS_FIELD(wxl_item_push_args, player_guid, guid)        ///< who got it
+WXL_ARGS_FIELD(wxl_item_push_args, bag, u32)                 ///< the bag it went to: 255 for the backpack and the player's own slots
+WXL_ARGS_FIELD(wxl_item_push_args, slot, u32)                ///< the slot in that bag; 0xFFFFFFFF when it was stacked onto others
+WXL_ARGS_FIELD(wxl_item_push_args, item_id, u32)
+WXL_ARGS_FIELD(wxl_item_push_args, suffix_factor, u32)
+WXL_ARGS_FIELD(wxl_item_push_args, random_property_id, i32)
+WXL_ARGS_FIELD(wxl_item_push_args, count, u32)               ///< how many it got
+WXL_ARGS_FIELD(wxl_item_push_args, total, u32)               ///< how many of the item it now has
+WXL_ARGS_FIELD(wxl_item_push_args, received, bool)           ///< WXL_TRUE when given (a quest, a vendor, a trade), WXL_FALSE when looted
+WXL_ARGS_FIELD(wxl_item_push_args, created, bool)            ///< WXL_TRUE when made: a craft, a conjure
+WXL_ARGS_FIELD(wxl_item_push_args, announced, bool)          ///< WXL_TRUE when the client shows it in the chat
+WXL_ARGS_END(wxl_item_push_args)
+
+/**
+ * @brief One slot of the local player's inventory or of one of its bags changed.
+ *
+ * @ref container is the local player for its own slots, numbered as the client numbers them
+ * (19-22 the equipped bags, 23-38 the backpack, 67-73 the bank's bags, 86 on the keyring and the
+ * currencies), or the bag for a slot of a bag, numbered from 0. The equipped items 0-18 are
+ * EquipmentChanged's. Raised after the server's update is applied: the new item is in place.
+ */
+WXL_ARGS(wxl_inventory_slot_args)
+WXL_ARGS_FIELD(wxl_inventory_slot_args, container, handle)
+WXL_ARGS_FIELD(wxl_inventory_slot_args, container_guid, guid)
+WXL_ARGS_FIELD(wxl_inventory_slot_args, slot, u32)
+WXL_ARGS_FIELD(wxl_inventory_slot_args, previous_guid, guid) ///< the item that was there, 0 for none
+WXL_ARGS_FIELD(wxl_inventory_slot_args, item, handle)        ///< the item there now, WXL_HANDLE_NONE for none
+WXL_ARGS_FIELD(wxl_inventory_slot_args, item_guid, guid)     ///< 0 for none
+WXL_ARGS_END(wxl_inventory_slot_args)
+
+/// An item's durability changed.
+WXL_ARGS(wxl_item_durability_args)
+WXL_ARGS_FIELD(wxl_item_durability_args, item, handle)
+WXL_ARGS_FIELD(wxl_item_durability_args, item_guid, guid)
+WXL_ARGS_FIELD(wxl_item_durability_args, previous, u32)
+WXL_ARGS_FIELD(wxl_item_durability_args, current, u32)       ///< 0: broken
+WXL_ARGS_FIELD(wxl_item_durability_args, maximum, u32)
+WXL_ARGS_END(wxl_item_durability_args)
+
+/// An item's stack count changed.
+WXL_ARGS(wxl_item_stack_args)
+WXL_ARGS_FIELD(wxl_item_stack_args, item, handle)
+WXL_ARGS_FIELD(wxl_item_stack_args, item_guid, guid)
+WXL_ARGS_FIELD(wxl_item_stack_args, previous, u32)
+WXL_ARGS_FIELD(wxl_item_stack_args, current, u32)
+WXL_ARGS_END(wxl_item_stack_args)
+
+/// The server refused an inventory change: SMSG_INVENTORY_CHANGE_FAILURE.
+WXL_ARGS(wxl_inventory_error_args)
+WXL_ARGS_FIELD(wxl_inventory_error_args, result, u32)         ///< the client's inventory result code (InventoryResult: 1 cannot equip at this level, 50 the bag is full, ...)
+WXL_ARGS_FIELD(wxl_inventory_error_args, item_guid, guid)     ///< the item the change was about, 0 when the message names none
+WXL_ARGS_FIELD(wxl_inventory_error_args, other_guid, guid)    ///< the second item of a swap, 0 for none
+WXL_ARGS_FIELD(wxl_inventory_error_args, required_level, u32) ///< for a level refusal, the level needed; 0 otherwise
+WXL_ARGS_END(wxl_inventory_error_args)
+
+/// A quest of the local player's quest log: its slot in the log, from 0.
+WXL_ARGS(wxl_quest_args)
+WXL_ARGS_FIELD(wxl_quest_args, quest_id, u32)
+WXL_ARGS_FIELD(wxl_quest_args, log_slot, u32)
+WXL_ARGS_END(wxl_quest_args)
+
+/// The count of a quest's creature or object objective moved.
+WXL_ARGS(wxl_quest_objective_args)
+WXL_ARGS_FIELD(wxl_quest_objective_args, quest_id, u32)
+WXL_ARGS_FIELD(wxl_quest_objective_args, log_slot, u32)
+WXL_ARGS_FIELD(wxl_quest_objective_args, objective, u32) ///< which of the quest's four objectives, from 0
+WXL_ARGS_FIELD(wxl_quest_objective_args, previous, u32)
+WXL_ARGS_FIELD(wxl_quest_objective_args, current, u32)
+WXL_ARGS_END(wxl_quest_objective_args)
+
+/// A quest turned in, with what it gave: SMSG_QUESTGIVER_QUEST_COMPLETE.
+WXL_ARGS(wxl_quest_reward_args)
+WXL_ARGS_FIELD(wxl_quest_reward_args, quest_id, u32)
+WXL_ARGS_FIELD(wxl_quest_reward_args, xp, u32)
+WXL_ARGS_FIELD(wxl_quest_reward_args, money, i32)       ///< copper; negative when the quest took money
+WXL_ARGS_FIELD(wxl_quest_reward_args, honor, u32)
+WXL_ARGS_FIELD(wxl_quest_reward_args, talents, u32)
+WXL_ARGS_FIELD(wxl_quest_reward_args, arena_points, u32)
+WXL_ARGS_END(wxl_quest_reward_args)
+
+/**
+ * @brief A page a quest giver shows: its greeting with the quests it has, a quest's details, what
+ *        a quest still asks for, or its reward.
+ *
+ * The texts are the server's, before the client substitutes the player's name and class in them.
+ */
+WXL_ARGS(wxl_quest_giver_args)
+WXL_ARGS_FIELD(wxl_quest_giver_args, giver, handle)      ///< WXL_HANDLE_NONE for a quest the client opened itself, or a shared one
+WXL_ARGS_FIELD(wxl_quest_giver_args, giver_guid, guid)
+WXL_ARGS_FIELD(wxl_quest_giver_args, quest_id, u32)      ///< 0 for a greeting
+WXL_ARGS_FIELD(wxl_quest_giver_args, title, str)         ///< empty for a greeting
+WXL_ARGS_FIELD(wxl_quest_giver_args, text, str)          ///< the greeting, the details, the progress text or the reward text
+WXL_ARGS_FIELD(wxl_quest_giver_args, count, u32)         ///< for a greeting, the quests it lists; 0 otherwise
+WXL_ARGS_FIELD(wxl_quest_giver_args, shared_by, guid)    ///< for details, the player who shared the quest; 0 otherwise
+WXL_ARGS_END(wxl_quest_giver_args)
+
+/**
+ * @brief An invitation to a group: SMSG_GROUP_INVITE.
+ *
+ * Writing WXL_TRUE to @ref accept joins the group, to @ref decline turns the invitation down,
+ * the way the dialog's buttons do, and the client does not show the dialog. Leaving both asks
+ * the player, as the client does. Decline wins over accept.
+ */
+WXL_ARGS(wxl_group_invite_args)
+WXL_ARGS_FIELD(wxl_group_invite_args, inviter, str)
+WXL_ARGS_FIELD(wxl_group_invite_args, can_accept, bool) ///< WXL_FALSE when the player is already in a group: the client only tells it
+WXL_ARGS_ANSWER(wxl_group_invite_args, accept)          ///< write WXL_TRUE to join
+WXL_ARGS_ANSWER(wxl_group_invite_args, decline)         ///< write WXL_TRUE to turn it down
+WXL_ARGS_END(wxl_group_invite_args)
+
+/// The local player's group as the server lists it: SMSG_GROUP_LIST. One GroupMember per other member follows.
+WXL_ARGS(wxl_group_args)
+WXL_ARGS_FIELD(wxl_group_args, group_guid, guid)
+WXL_ARGS_FIELD(wxl_group_args, raid, bool)
+WXL_ARGS_FIELD(wxl_group_args, battleground, bool)
+WXL_ARGS_FIELD(wxl_group_args, count, u32)              ///< the other members; 0 when the player is in no group any more
+WXL_ARGS_FIELD(wxl_group_args, subgroup, u32)           ///< the player's own subgroup, from 0
+WXL_ARGS_FIELD(wxl_group_args, leader_guid, guid)
+WXL_ARGS_ENUM(wxl_group_args, loot_method, wxl_loot_method)
+WXL_ARGS_FIELD(wxl_group_args, looter_guid, guid)       ///< the master looter, 0 for none
+WXL_ARGS_FIELD(wxl_group_args, loot_threshold, u32)     ///< the item quality rolls start at: 2 uncommon, 3 rare, ...
+WXL_ARGS_FIELD(wxl_group_args, dungeon_difficulty, u32)
+WXL_ARGS_FIELD(wxl_group_args, raid_difficulty, u32)
+WXL_ARGS_END(wxl_group_args)
+
+/// One other member of the local player's group, in the server's order.
+WXL_ARGS(wxl_group_member_args)
+WXL_ARGS_FIELD(wxl_group_member_args, index, u32)
+WXL_ARGS_FIELD(wxl_group_member_args, count, u32)
+WXL_ARGS_FIELD(wxl_group_member_args, member, handle)   ///< WXL_HANDLE_NONE when the member is not in view
+WXL_ARGS_FIELD(wxl_group_member_args, member_guid, guid)
+WXL_ARGS_FIELD(wxl_group_member_args, name, str)
+WXL_ARGS_FIELD(wxl_group_member_args, online, bool)
+WXL_ARGS_FIELD(wxl_group_member_args, subgroup, u32)
+WXL_ARGS_FIELD(wxl_group_member_args, flags, u32)       ///< assistant 1, main tank 2, main assist 4
+WXL_ARGS_FIELD(wxl_group_member_args, roles, u32)       ///< tank 2, healer 4, damage 8
+WXL_ARGS_END(wxl_group_member_args)
+
+/// The local player is no longer in a group.
+WXL_ARGS(wxl_group_left_args)
+WXL_ARGS_ENUM(wxl_group_left_args, reason, wxl_group_left_reason)
+WXL_ARGS_END(wxl_group_left_args)
+
+/// How the group's loot is shared, after it changed.
+WXL_ARGS(wxl_group_loot_args)
+WXL_ARGS_ENUM(wxl_group_loot_args, loot_method, wxl_loot_method)
+WXL_ARGS_FIELD(wxl_group_loot_args, looter_guid, guid)
+WXL_ARGS_FIELD(wxl_group_loot_args, loot_threshold, u32)
+WXL_ARGS_END(wxl_group_loot_args)
+
+/// A ready check started: MSG_RAID_READY_CHECK.
+WXL_ARGS(wxl_ready_check_args)
+WXL_ARGS_FIELD(wxl_ready_check_args, initiator, handle)
+WXL_ARGS_FIELD(wxl_ready_check_args, initiator_guid, guid)
+WXL_ARGS_FIELD(wxl_ready_check_args, duration, u32)    ///< milliseconds the client waits for the answers
+WXL_ARGS_END(wxl_ready_check_args)
+
+/// A member answered a ready check: MSG_RAID_READY_CHECK_CONFIRM.
+WXL_ARGS(wxl_ready_check_response_args)
+WXL_ARGS_FIELD(wxl_ready_check_response_args, member, handle)
+WXL_ARGS_FIELD(wxl_ready_check_response_args, member_guid, guid)
+WXL_ARGS_FIELD(wxl_ready_check_response_args, ready, bool)
+WXL_ARGS_END(wxl_ready_check_response_args)
+
+/// A ready check is over: MSG_RAID_READY_CHECK_FINISHED.
+WXL_ARGS(wxl_ready_check_end_args)
+WXL_ARGS_FIELD(wxl_ready_check_end_args, initiator_guid, guid) ///< who started it, 0 when the client saw no start
+WXL_ARGS_END(wxl_ready_check_end_args)
+
+/**
+ * @brief A duel challenge for the local player: SMSG_DUEL_REQUESTED.
+ *
+ * Writing WXL_TRUE to @ref accept accepts it, to @ref decline refuses it, as the dialog's buttons
+ * do, and the client does not show the dialog. Leaving both asks the player. A challenge the
+ * player sent itself, or one from an ignored player, the client answers on its own, as always.
+ */
+WXL_ARGS(wxl_duel_request_args)
+WXL_ARGS_FIELD(wxl_duel_request_args, challenger, handle)
+WXL_ARGS_FIELD(wxl_duel_request_args, challenger_guid, guid)
+WXL_ARGS_FIELD(wxl_duel_request_args, arbiter_guid, guid)   ///< the duel's flag
+WXL_ARGS_ANSWER(wxl_duel_request_args, accept)
+WXL_ARGS_ANSWER(wxl_duel_request_args, decline)
+WXL_ARGS_END(wxl_duel_request_args)
+
+/// The duel's countdown started: SMSG_DUEL_COUNTDOWN.
+WXL_ARGS(wxl_duel_countdown_args)
+WXL_ARGS_FIELD(wxl_duel_countdown_args, duration, u32) ///< milliseconds before it starts
+WXL_ARGS_END(wxl_duel_countdown_args)
+
+/// A duel in view ended with a winner: SMSG_DUEL_WINNER.
+WXL_ARGS(wxl_duel_won_args)
+WXL_ARGS_FIELD(wxl_duel_won_args, winner, str)
+WXL_ARGS_FIELD(wxl_duel_won_args, loser, str)
+WXL_ARGS_FIELD(wxl_duel_won_args, fled, bool)  ///< WXL_TRUE when the loser left the area
+WXL_ARGS_END(wxl_duel_won_args)
+
+/// The local player's duel is over: SMSG_DUEL_COMPLETE.
+WXL_ARGS(wxl_duel_finished_args)
+WXL_ARGS_FIELD(wxl_duel_finished_args, completed, bool) ///< WXL_FALSE when it was cancelled before it began
+WXL_ARGS_END(wxl_duel_finished_args)
+
+/// A step of a trade: SMSG_TRADE_STATUS.
+WXL_ARGS(wxl_trade_args)
+WXL_ARGS_ENUM(wxl_trade_args, status, wxl_trade_status)
+WXL_ARGS_FIELD(wxl_trade_args, partner_guid, guid)       ///< for a proposal, who proposes; 0 otherwise
+WXL_ARGS_END(wxl_trade_args)
+
+/// A unit in view played an emote's animation: SMSG_EMOTE.
+WXL_ARGS(wxl_emote_args)
+WXL_ARGS_FIELD(wxl_emote_args, unit, handle)
+WXL_ARGS_FIELD(wxl_emote_args, unit_guid, guid)
+WXL_ARGS_FIELD(wxl_emote_args, emote_id, u32)            ///< a row of Emotes.dbc
+WXL_ARGS_END(wxl_emote_args)
+
+/// A player's text emote, /wave or /dance: SMSG_TEXT_EMOTE.
+WXL_ARGS(wxl_text_emote_args)
+WXL_ARGS_FIELD(wxl_text_emote_args, sender, handle)
+WXL_ARGS_FIELD(wxl_text_emote_args, sender_guid, guid)
+WXL_ARGS_FIELD(wxl_text_emote_args, text_emote, u32)     ///< a row of EmotesText.dbc
+WXL_ARGS_FIELD(wxl_text_emote_args, emote_number, u32)   ///< which of the emote's variants
+WXL_ARGS_FIELD(wxl_text_emote_args, target_name, str)    ///< empty for none
+WXL_ARGS_END(wxl_text_emote_args)
+
+/**
+ * @brief An offer to resurrect the local player: SMSG_RESURRECT_REQUEST.
+ *
+ * Writing WXL_TRUE to @ref accept accepts it, to @ref decline turns it down, as the dialog's
+ * buttons do, and the client does not show the dialog. Leaving both asks the player.
+ */
+WXL_ARGS(wxl_resurrect_request_args)
+WXL_ARGS_FIELD(wxl_resurrect_request_args, offerer, handle)
+WXL_ARGS_FIELD(wxl_resurrect_request_args, offerer_guid, guid)
+WXL_ARGS_FIELD(wxl_resurrect_request_args, name, str)        ///< the offerer's name as the server sent it; empty when the client looks it up
+WXL_ARGS_FIELD(wxl_resurrect_request_args, sickness, bool)   ///< WXL_TRUE when accepting brings resurrection sickness
+WXL_ARGS_ANSWER(wxl_resurrect_request_args, accept)
+WXL_ARGS_ANSWER(wxl_resurrect_request_args, decline)
+WXL_ARGS_END(wxl_resurrect_request_args)
+
+/// A window of the interface opened on someone, or closed.
+WXL_ARGS(wxl_window_args)
+WXL_ARGS_ENUM(wxl_window_args, kind, wxl_window_kind)
+WXL_ARGS_FIELD(wxl_window_args, npc, handle)       ///< whom the player talks to; for a trade, the other player
+WXL_ARGS_FIELD(wxl_window_args, npc_guid, guid)    ///< 0 when the window is on nobody
+WXL_ARGS_END(wxl_window_args)
+
+/// A change of standing with a faction: SMSG_SET_FACTION_STANDING, one per faction it names.
+WXL_ARGS(wxl_reputation_args)
+WXL_ARGS_FIELD(wxl_reputation_args, faction_id, u32)    ///< a row of Faction.dbc
+WXL_ARGS_FIELD(wxl_reputation_args, previous, i32)      ///< the reputation before, as the interface counts it
+WXL_ARGS_FIELD(wxl_reputation_args, current, i32)
+WXL_ARGS_FIELD(wxl_reputation_args, bonus, f32)         ///< the refer-a-friend bonus the server applied
+WXL_ARGS_END(wxl_reputation_args)
+
+/// An achievement earned by a player in view or by the local player: SMSG_ACHIEVEMENT_EARNED.
+WXL_ARGS(wxl_achievement_args)
+WXL_ARGS_FIELD(wxl_achievement_args, player, handle)
+WXL_ARGS_FIELD(wxl_achievement_args, player_guid, guid)
+WXL_ARGS_FIELD(wxl_achievement_args, achievement_id, u32) ///< a row of Achievement.dbc
+WXL_ARGS_FIELD(wxl_achievement_args, date, u32)           ///< when, packed as the client's WowTime: minute 0-5, hour 6-10, weekday 11-13, day 14-19, month 20-23, year from 2000 24-28
+WXL_ARGS_FIELD(wxl_achievement_args, silent, bool)        ///< WXL_TRUE when the client shows nothing for it
+WXL_ARGS_END(wxl_achievement_args)
+
+/**
+ * @brief A terrain tile's file (an .adt), read whole, before the client walks its chunks.
+ *
+ * The bytes are the file's, after any transform; looking is free, changing them is a
+ * transform's job (wxl.storage add_transform).
+ */
+WXL_ARGS(wxl_terrain_tile_args)
+WXL_ARGS_FIELD(wxl_terrain_tile_args, path, str)    ///< the name it was opened by
+WXL_ARGS_FIELD(wxl_terrain_tile_args, tile_x, i32)  ///< its column on the map's 64 x 64 grid
+WXL_ARGS_FIELD(wxl_terrain_tile_args, tile_y, i32)  ///< its row
+WXL_ARGS_BYTES(wxl_terrain_tile_args, data, size)   ///< the file; valid for the call only
+WXL_ARGS_FIELD(wxl_terrain_tile_args, size, u32)
+WXL_ARGS_END(wxl_terrain_tile_args)
+
+/// A map object's group file ("..._000.wmo"), read whole, before its chunks are walked.
+WXL_ARGS(wxl_map_object_group_args)
+WXL_ARGS_FIELD(wxl_map_object_group_args, path, str)   ///< the map object's root file
+WXL_ARGS_FIELD(wxl_map_object_group_args, group, u32)  ///< the group's number, as in its file name
+WXL_ARGS_BYTES(wxl_map_object_group_args, data, size)  ///< the group file; valid for the call only
+WXL_ARGS_FIELD(wxl_map_object_group_args, size, u32)
+WXL_ARGS_END(wxl_map_object_group_args)
+
+/// A model's skin profile, read whole, before it is parsed.
+WXL_ARGS(wxl_skin_profile_args)
+WXL_ARGS_FIELD(wxl_skin_profile_args, model, str)    ///< the model's file; its skins are named after it
+WXL_ARGS_BYTES(wxl_skin_profile_args, data, size)    ///< the .skin file; valid for the call only
+WXL_ARGS_FIELD(wxl_skin_profile_args, size, u32)
+WXL_ARGS_END(wxl_skin_profile_args)
+
+/// A texture file about to be decoded, as its header describes it.
+WXL_ARGS(wxl_texture_decode_args)
+WXL_ARGS_FIELD(wxl_texture_decode_args, path, str)                       ///< the texture's file
+WXL_ARGS_FIELD(wxl_texture_decode_args, width, u32)                      ///< in pixels, at the largest mip level
+WXL_ARGS_FIELD(wxl_texture_decode_args, height, u32)
+WXL_ARGS_ENUM(wxl_texture_decode_args, encoding, wxl_texture_encoding)   ///< how the pixels are stored
+WXL_ARGS_FIELD(wxl_texture_decode_args, alpha_bits, u32)                 ///< 0, 1, 4 or 8
+WXL_ARGS_FIELD(wxl_texture_decode_args, alpha_kind, u32)                 ///< the header's preferred format: for DXT, 0 is DXT1, 1 DXT3, 7 DXT5
+WXL_ARGS_FIELD(wxl_texture_decode_args, mip_levels, u32)                 ///< how many mip levels the file holds
+WXL_ARGS_END(wxl_texture_decode_args)
+
+/// A shader program the graphics device loads by name, from "<path>\\<profile>\\<name>.bls".
+WXL_ARGS(wxl_shader_load_args)
+WXL_ARGS_ENUM(wxl_shader_load_args, stage, wxl_shader_stage)  ///< vertex or pixel, in this client
+WXL_ARGS_FIELD(wxl_shader_load_args, path, str)               ///< the folder: "Shaders\\Vertex", "Shaders\\Pixel"
+WXL_ARGS_FIELD(wxl_shader_load_args, name, str)               ///< the program: "MapObjDiffuse"
+WXL_ARGS_FIELD(wxl_shader_load_args, permutations, u32)       ///< how many variants the file holds
+WXL_ARGS_END(wxl_shader_load_args)
+
+/// A sound file the sound engine opens to play, cached or not.
+WXL_ARGS(wxl_sound_file_args)
+WXL_ARGS_FIELD(wxl_sound_file_args, path, str)        ///< the file: "Sound\\Music\\..."
+WXL_ARGS_FIELD(wxl_sound_file_args, streaming, bool)  ///< read as it plays rather than loaded whole
+WXL_ARGS_FIELD(wxl_sound_file_args, priority, i32)    ///< the engine's priority for the channel
+WXL_ARGS_END(wxl_sound_file_args)
+
+/**
+ * @brief A model file parsed, before the client makes anything from it.
+ *
+ * The header's arrays are resolved: wxl.m2file reads them (ArrayData) and points them at other
+ * memory (SetArray, AllocNear) the way the runtime keeps them. Nothing has chosen a skin profile
+ * or made a texture yet.
+ */
+WXL_ARGS(wxl_model_parsed_args)
+WXL_ARGS_FIELD(wxl_model_parsed_args, path, str)          ///< the path the model was opened by
+WXL_ARGS_PTR(wxl_model_parsed_args, file, void*)          ///< the client's model file (opaque): what wxl.m2file takes
+WXL_ARGS_PTR(wxl_model_parsed_args, header, void*)        ///< the parsed header (M2Data, the file's own layout)
+WXL_ARGS_FIELD(wxl_model_parsed_args, size, u32)          ///< the bytes the header was parsed from
+WXL_ARGS_END(wxl_model_parsed_args)
+
+/**
+ * @brief A model's skin profile parsed, before the client sizes its draw state from it.
+ *
+ * Its batches and submeshes, and the model's lookups, can still be pointed elsewhere.
+ */
+WXL_ARGS(wxl_skin_profile_parsed_args)
+WXL_ARGS_FIELD(wxl_skin_profile_parsed_args, path, str)   ///< the model's path
+WXL_ARGS_PTR(wxl_skin_profile_parsed_args, file, void*)   ///< the client's model file (opaque)
+WXL_ARGS_PTR(wxl_skin_profile_parsed_args, header, void*) ///< the model's parsed header
+WXL_ARGS_PTR(wxl_skin_profile_parsed_args, skin, void*)   ///< the skin profile's parsed header (M2SkinProfile)
+WXL_ARGS_END(wxl_skin_profile_parsed_args)
+
+/**
+ * @brief An external sequence file of a model (.anim) read, before it is parsed against the model.
+ *
+ * The bytes are the client's buffer, as read; a sequence that shares its keys with others hands
+ * the same buffer for each. To change them, an `anim` transform of wxl.storage converts the file
+ * as it is read, to any size.
+ */
+WXL_ARGS(wxl_model_sequence_args)
+WXL_ARGS_FIELD(wxl_model_sequence_args, path, str)            ///< the model's path
+WXL_ARGS_PTR(wxl_model_sequence_args, file, void*)            ///< the client's model file (opaque)
+WXL_ARGS_FIELD(wxl_model_sequence_args, sequence_index, u32)  ///< which of the model's sequences
+WXL_ARGS_BYTES(wxl_model_sequence_args, data, size)           ///< the file's bytes; valid for the call only
+WXL_ARGS_FIELD(wxl_model_sequence_args, size, u32)
+WXL_ARGS_END(wxl_model_sequence_args)
+
+/**
+ * @brief A change to what a character appearance wears.
+ *
+ * An appearance is the client's CCharacterComponent: every player, every humanoid NPC dressed
+ * from CreatureDisplayInfoExtra, and every copy the interface makes of one (character select,
+ * the dressing room, portraits). `wearer` names it, the same until it is freed.
+ */
+WXL_ARGS(wxl_appearance_args)
+WXL_ARGS_ENUM(wxl_appearance_args, change, wxl_appearance_change)
+WXL_ARGS_PTR(wxl_appearance_args, wearer, void*)   ///< the appearance (opaque)
+WXL_ARGS_PTR(wxl_appearance_args, model, void*)    ///< its character model, what items hang on (wxl.m2); may be null
+WXL_ARGS_FIELD(wxl_appearance_args, race_id, u32)  ///< ChrRaces id
+WXL_ARGS_FIELD(wxl_appearance_args, sex_id, u32)   ///< 0 male, 1 female
+WXL_ARGS_FIELD(wxl_appearance_args, item_slot, u32)  ///< 0 head, 1 shoulder, 2 shirt, 3 chest, 4 belt, 5 legs, 6 feet, 7 wrists, 8 hands, 9 tabard, 10 cloak, 11 quiver; 0 when freed
+WXL_ARGS_FIELD(wxl_appearance_args, display_id, u32) ///< the ItemDisplayInfo id put on or taken off; 0 when freed
+WXL_ARGS_FIELD(wxl_appearance_args, npc, bool)       ///< an NPC's appearance: its body is one baked texture, items paint nothing
+WXL_ARGS_END(wxl_appearance_args)
+
+/**
+ * @brief One batch of a model, just drawn by the client's Direct3D 9 device.
+ *
+ * Everything it was drawn with -- vertex declaration, streams, indices, shaders and their
+ * constants, textures, render states -- is still bound: DrawIndexedPrimitive with these numbers
+ * draws the batch again (wxl.gx gives the device).
+ */
+WXL_ARGS(wxl_model_batch_args)
+WXL_ARGS_PTR(wxl_model_batch_args, model, void*)      ///< the model the batch belongs to (opaque)
+WXL_ARGS_PTR(wxl_model_batch_args, root_model, void*) ///< the top of what it hangs on: what wxl.m2's ObjectModel answers
+WXL_ARGS_FIELD(wxl_model_batch_args, primitive_type, u32) ///< a D3DPRIMITIVETYPE
+WXL_ARGS_FIELD(wxl_model_batch_args, base_vertex, i32)
+WXL_ARGS_FIELD(wxl_model_batch_args, min_index, u32)
+WXL_ARGS_FIELD(wxl_model_batch_args, vertex_count, u32)
+WXL_ARGS_FIELD(wxl_model_batch_args, start_index, u32)
+WXL_ARGS_FIELD(wxl_model_batch_args, primitive_count, u32)
+WXL_ARGS_FIELD(wxl_model_batch_args, blend_mode, u32)     ///< the material's blend: 0 opaque, 1 alpha key, 2 and up blended
+WXL_ARGS_FIELD(wxl_model_batch_args, viewport_x, u32)     ///< the viewport of the draw, as D3DVIEWPORT9 holds it: setting a
+WXL_ARGS_FIELD(wxl_model_batch_args, viewport_y, u32)     ///< render target resets it, and a pure device cannot be asked for it
+WXL_ARGS_FIELD(wxl_model_batch_args, viewport_width, u32)
+WXL_ARGS_FIELD(wxl_model_batch_args, viewport_height, u32)
+WXL_ARGS_FIELD(wxl_model_batch_args, viewport_min_z, f32)
+WXL_ARGS_FIELD(wxl_model_batch_args, viewport_max_z, f32)
+WXL_ARGS_END(wxl_model_batch_args)
+
 #ifdef WXL_ARGS_ENUM_DEFAULTED
     #undef WXL_ARGS_ENUM
     #undef WXL_ARGS_ENUM_DEFAULTED

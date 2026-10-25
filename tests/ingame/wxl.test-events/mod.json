@@ -1,0 +1,12 @@
+{
+  "$schema": "../../../schema/mod.json",
+  "id": "wxl.test-events",
+  "name": "Test events",
+  "version": "1.0.0",
+  "abi": "0.1.7",
+  "description": "Logs every event of waves 2 and 3, the exact chat events and the identity of a target.",
+  "lua": "init.lua",
+  "optional": [
+    { "service": "wxl.object", "version": 1 }
+  ]
+}

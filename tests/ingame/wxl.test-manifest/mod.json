@@ -1,0 +1,15 @@
+{
+  "$schema": "../../../schema/mod.json",
+  "id": "wxl.test-manifest",
+  "name": "Test manifest",
+  "version": "1.0.0",
+  "abi": "0.1.8",
+  "description": "Puts back the mod.json wxl.test-reload broke on purpose, which a Lua mod cannot do for itself once it is unloaded; also at load and at shutdown, so the folder is never left broken.",
+  "binaries": {
+    "win-x64": "bin/x64/test-manifest.dll",
+    "win-x86": "bin/x86/test-manifest.dll"
+  },
+  "optional": [
+    { "service": "wxl.script", "version": 1 }
+  ]
+}

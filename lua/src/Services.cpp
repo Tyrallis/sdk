@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "Objects.hpp"
 #include "ScriptMod.hpp"
 #include "Shims.hpp"
 #include "wxl/reflect.hpp"
@@ -27,6 +28,7 @@ namespace wxl::lua
         {
         case WXL_OK: return "ok";
         case WXL_E_UNSUPPORTED: return "unsupported";
+        case WXL_E_PENDING: return "pending";
         case WXL_E_VERSION: return "version";
         case WXL_E_INVALID: return "invalid";
         case WXL_E_NOT_FOUND: return "not_found";
@@ -86,14 +88,7 @@ namespace wxl::lua
         static constexpr When        kWhen   = When::when_kind;                         \
         static constexpr const char* kMethod = #Name;                                   \
     };
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
+#include "wxl/services/tables.inc"
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
@@ -112,20 +107,32 @@ namespace wxl::lua
     struct Closer<kind::Resource> : closers::Resource##Closer          \
     {                                                                  \
     };
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
+#include "wxl/services/tables.inc"
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD
 #undef WXL_API_SINCE
 #undef WXL_API_RESOURCE
 #undef WXL_API
 #undef WXL_API_SERVICE
+
+        /// A resource's C value as the box keeps it, and back: a number, or an address.
+        template <class T>
+        uint64_t Widen(T value)
+        {
+            if constexpr (std::is_pointer_v<T>)
+                return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(value));
+            else
+                return static_cast<uint64_t>(value);
+        }
+
+        template <class T>
+        T Narrow(uint64_t value)
+        {
+            if constexpr (std::is_pointer_v<T>)
+                return reinterpret_cast<T>(static_cast<uintptr_t>(value));
+            else
+                return static_cast<T>(value);
+        }
 
         /// Calls a resource's close row; its answer, WXL_OK for a row that answers nothing.
         template <class R>
@@ -134,7 +141,7 @@ namespace wxl::lua
             using C          = Closer<R>;
             const auto* api  = wxl::api::Table<typename C::Api>();
             if (!wxl::detail::Carries(api, C::kMember)) return WXL_E_UNSUPPORTED;
-            const auto handle = static_cast<typename R::type>(value);
+            const auto handle = Narrow<typename R::type>(value);
             if constexpr (std::is_same_v<typename C::answer, kind::none>)
             {
                 (api->*C::kMember)(handle);
@@ -167,7 +174,7 @@ namespace wxl::lua
         void PushResource(lua_State* L, typename R::type value)
         {
             ResourceBox* box = static_cast<ResourceBox*>(lua_newuserdata(L, sizeof(ResourceBox)));
-            box->value       = static_cast<uint64_t>(value);
+            box->value       = Widen(value);
             box->give_back   = &GiveBackSilently<R>;
             box->open        = true;
             luaL_getmetatable(L, MetaName(R::kName).c_str());
@@ -397,9 +404,84 @@ namespace wxl::lua
                     const std::string why = std::string("the ") + R::kName + " was given back already";
                     luaL_argerror(r.L, index, why.c_str());
                 }
-                return static_cast<Held>(box->value);
+                return Narrow<Held>(box->value);
             }
             static std::tuple<Held> C(Held held) { return {held}; }
+        };
+
+        /// A world object: the mod's object, as a wxl.object method hands it.
+        template <>
+        struct Arg<kind::object>
+        {
+            using Held = wxl_handle;
+            static Held Read(Reader& r)
+            {
+                Require(r, "an object");
+                return CheckObject(r.L, r.next++);
+            }
+            static std::tuple<wxl_handle> C(Held held) { return {held}; }
+        };
+
+        /// A point: a table with x, y and z, as Position() answers one.
+        template <>
+        struct Arg<kind::vec3>
+        {
+            using Held = wxl_vec3;
+            static Held Read(Reader& r)
+            {
+                Require(r, "a point");
+                const int at = r.next++;
+                luaL_checktype(r.L, at, LUA_TTABLE);
+                lua_getfield(r.L, at, "x");
+                lua_getfield(r.L, at, "y");
+                lua_getfield(r.L, at, "z");
+                if (!lua_isnumber(r.L, -3) || !lua_isnumber(r.L, -2) || !lua_isnumber(r.L, -1))
+                    luaL_argerror(r.L, at, "a point: a table with numbers x, y and z");
+                const wxl_vec3 point{static_cast<float>(lua_tonumber(r.L, -3)), static_cast<float>(lua_tonumber(r.L, -2)),
+                                     static_cast<float>(lua_tonumber(r.L, -1))};
+                lua_pop(r.L, 3);
+                return point;
+            }
+            static std::tuple<wxl_vec3> C(Held held) { return {held}; }
+        };
+
+        /// An address of the client's: what an event or a call handed the script (a light
+        /// userdata), or a resource of the script's own that is one, still open (a wxl.Model).
+        void* CheckAddress(Reader& r, const char* what)
+        {
+            Require(r, what);
+            const int index = r.next++;
+            if (lua_type(r.L, index) == LUA_TLIGHTUSERDATA) return lua_touserdata(r.L, index);
+            if (lua_type(r.L, index) == LUA_TUSERDATA && lua_getmetatable(r.L, index))
+            {
+                lua_getfield(r.L, -1, "__wxl_address");
+                const bool resource = lua_toboolean(r.L, -1) != 0;
+                lua_pop(r.L, 2);
+                if (resource)
+                {
+                    const ResourceBox* box = static_cast<const ResourceBox*>(lua_touserdata(r.L, index));
+                    if (!box->open) luaL_argerror(r.L, index, "it was given back already");
+                    return reinterpret_cast<void*>(static_cast<uintptr_t>(box->value));
+                }
+            }
+            luaL_argerror(r.L, index, what);
+            return nullptr;
+        }
+
+        template <>
+        struct Arg<kind::ptr>
+        {
+            using Held = void*;
+            static Held Read(Reader& r) { return CheckAddress(r, "an address an event or a call handed you"); }
+            static std::tuple<void*> C(Held held) { return {held}; }
+        };
+
+        template <>
+        struct Arg<kind::cptr>
+        {
+            using Held = const void*;
+            static Held Read(Reader& r) { return CheckAddress(r, "an address an event or a call handed you"); }
+            static std::tuple<const void*> C(Held held) { return {held}; }
         };
 
         /// A parameter a script may leave out: K's zero when it does, which the row's doc says.
@@ -446,6 +528,16 @@ namespace wxl::lua
         {
             if constexpr (std::is_same_v<K, kind::str>)
                 PushText(L, value);
+            else if constexpr (std::is_same_v<K, kind::vec3>)
+            {
+                lua_createtable(L, 0, 3);
+                lua_pushnumber(L, value.x);
+                lua_setfield(L, -2, "x");
+                lua_pushnumber(L, value.y);
+                lua_setfield(L, -2, "y");
+                lua_pushnumber(L, value.z);
+                lua_setfield(L, -2, "z");
+            }
             else if constexpr (std::is_same_v<K, kind::boolean>)
                 lua_pushboolean(L, value == WXL_TRUE);
             else
@@ -557,6 +649,20 @@ namespace wxl::lua
             static int Call(lua_State* L, Reader&, F&& f)
             {
                 lua_pushnumber(L, static_cast<lua_Number>(f()));
+                return 1;
+            }
+        };
+
+        /// An address of the client's, as a light userdata; nil, "not_found" for none.
+        template <>
+        struct Reply<kind::ptr>
+        {
+            template <class F>
+            static int Call(lua_State* L, Reader&, F&& f)
+            {
+                void* const address = f();
+                if (!address) return PushResultFailure(L, WXL_E_NOT_FOUND);
+                lua_pushlightuserdata(L, address);
                 return 1;
             }
         };
@@ -853,6 +959,7 @@ namespace wxl::lua
             const char*   name;
             lua_CFunction collect;
             lua_CFunction describe;
+            bool          address; ///< an address of the client's, which an address parameter takes
         };
 
         namespace rows
@@ -876,14 +983,7 @@ namespace wxl::lua
     LuaRow{#svc, #Name, &CloseCall<kind::Resource>, kind::Resource::kName, "(" #Resource " self)", \
            WXL_LUA_SINCE(svc, member)},
             const LuaRow kRows[] = {
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
+#include "wxl/services/tables.inc"
             };
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD
@@ -899,19 +999,12 @@ namespace wxl::lua
 #define WXL_API_SERVICE(svc, name, version, since, access, doc)
 #define WXL_API(svc, member, Name, answer, params, lua, cxx, doc)
 #define WXL_API_RESOURCE(svc, Name, ctype, none_value) \
-    LuaResource{#Name, &Collect<kind::Name>, &Describe<kind::Name>},
+    LuaResource{#Name, &Collect<kind::Name>, &Describe<kind::Name>, std::is_pointer_v<kind::Name::type>},
 #define WXL_API_SINCE(svc, member, since)
 #define WXL_API_FIELD(type, member, field_kind)
 #define WXL_API_CLOSE(svc, member, Name, answer, Resource, when, doc)
             const LuaResource kResources[] = {
-#include "wxl/services/script.def"
-#include "wxl/services/storage.def"
-#include "wxl/services/data.def"
-#include "wxl/services/hook.def"
-#include "wxl/services/hook_raw.def"
-#include "wxl/services/patch.def"
-#include "wxl/services/footprint.def"
-#include "wxl/services/profile.def"
+#include "wxl/services/tables.inc"
             };
 #undef WXL_API_CLOSE
 #undef WXL_API_FIELD
@@ -1023,6 +1116,8 @@ namespace wxl::lua
                 lua_setfield(L, -2, "__gc");
                 lua_pushcfunction(L, resource.describe);
                 lua_setfield(L, -2, "__tostring");
+                lua_pushboolean(L, resource.address ? 1 : 0);
+                lua_setfield(L, -2, "__wxl_address");
                 lua_pushboolean(L, 0);
                 lua_setfield(L, -2, "__metatable");
                 lua_pop(L, 1);
@@ -1054,7 +1149,7 @@ namespace wxl::lua
                 lua_setfield(L, -2, service.id);
                 continue;
             }
-            if (service.unsafe && !Declares(mod.Manifest(), service.name))
+            if (service.raw && !Declares(mod.Manifest(), service.name))
             {
                 PushUndeclared(L, mod, service);
                 lua_setfield(L, -2, service.id);

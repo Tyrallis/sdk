@@ -1,0 +1,5 @@
+# The few steps a person still plays with the in-game suite installed: the probe's plan.
+# /mark in the chat box shows the next one.
+Do not move, and wait for the green "wxl.selftest done" line in the chat box, about two minutes: the interface reloads once and the character logs out and back in by itself. Then type /mark.
+Play for two or three minutes: fight a few creatures (spells, melee, a heal), loot, target characters, change zones if you can. Then /mark.
+Quit the game from the menu.

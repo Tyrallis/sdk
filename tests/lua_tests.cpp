@@ -144,6 +144,69 @@ namespace
         return mods;
     }
 
+    /// A Lua mod that calls every generated object method from 0.1.18 on, on an object of a
+    /// kind it applies to, and prints "row <name> <Lua type of the answer>" or why not.
+    std::string EveryRowMod()
+    {
+        namespace names = wxl::lua::names;
+        std::string lua = "local objects = {}\n"
+                          "Observe('ObjectScript', 'OnObjectCreate', function(object, guid, type) objects[type] = object end)\n"
+                          "local function show(name, ok, value, why)\n"
+                          "    if not ok then print('row ' .. name .. ' error ' .. tostring(value))\n"
+                          "    elseif value == nil then print('row ' .. name .. ' nil ' .. tostring(why))\n"
+                          "    else print('row ' .. name .. ' ' .. type(value) .. ' ' .. tostring(type(value) == 'string' and value or '')) end\n"
+                          "end\n"
+                          "registerForEvent('onUpdate', function()\n"
+                          "    if not objects.Item or done then return end\n"
+                          "    done = true\n";
+        const std::vector<names::RowInfo>& rows  = names::Rows();
+        const std::vector<std::string>&    named = names::RowNames();
+        for (size_t i = 0; i < rows.size(); ++i)
+        {
+            const names::RowInfo& row = rows[i];
+            if (row.since[2] < 18) continue;
+            const std::string kinds = row.kinds_name;
+            std::string on = kinds == "Players" || kinds == "Active" ? "objects.Player"
+                           : kinds == "Items" || kinds == "Containers" ? "objects.Item"
+                           : kinds == "GameObjects" ? "objects.GameObject" : "objects.Unit";
+            std::string arg;
+            if (*row.arg_c)
+            {
+                const wxl::reflect::Enum* e = wxl::reflect::FindEnum(row.arg);
+                arg = std::strcmp(row.arg_c, "wxl_handle") == 0 ? "objects.Player"
+                    : std::strcmp(row.arg_c, "wxl_vec3") == 0   ? "{ x = 1, y = 2, z = 3 }"
+                    : e ? std::string("'") + e->values[1].name + "'" : "1";
+            }
+            lua += "    show('" + std::string(row.member) + "', pcall(function() return " + on + ":" + named[i] + "(" + arg + ") end))\n";
+        }
+        lua += "    show('Auras', pcall(function() return objects.Unit:Auras() end))\n"
+               "    show('Skills', pcall(function() return objects.Player:Skills() end))\n"
+               "    show('PartyMembers', pcall(function() return objects.Player:PartyMembers() end))\n"
+               "    show('Select', pcall(function() return objects.Unit:Select() end))\n"
+               "    show('CastAt', pcall(function() return objects.Unit:CastAt(116) end))\n"
+               "    show('Use', pcall(function() return objects.Item:Use(objects.Unit) end))\n"
+               "    show('UseOnUnit', pcall(function() return objects.Unit:Use() end))\n"
+               "    show('CastSpell', pcall(function() return wxl.action.CastSpell(133, objects.Unit) end))\n"
+               "    show('CastSpellBare', pcall(function() return wxl.action.CastSpell(133) end))\n"
+               "    show('MoveTo', pcall(function() return wxl.action.MoveTo({ x = 1, y = 2, z = 3 }) end))\n"
+               "    show('BadName', pcall(function() return objects.Unit:Speed('sprint') end))\n"
+               "end)\n";
+        return lua;
+    }
+
+    /// The Lua type a row's answer should arrive as.
+    std::string LuaTypeOf(const wxl::lua::names::RowInfo& row)
+    {
+        if (wxl::reflect::FindEnum(row.cxx)) return "string";
+        if (std::strcmp(row.type, "wxl_bool") == 0) return "boolean";
+        if (std::strcmp(row.type, "wxl_handle") == 0) return "userdata";
+        if (std::strcmp(row.type, "wxl_guid") == 0) return "string";
+        if (std::strcmp(row.type, "wxl_vec3") == 0 || std::strcmp(row.type, "wxl_aura") == 0 ||
+            std::strcmp(row.type, "wxl_skill") == 0)
+            return "table";
+        return "number";
+    }
+
     HostConfig Config(const fs::path& mods, CaptureSink& sink)
     {
         HostConfig config;
@@ -154,6 +217,8 @@ namespace
         config.events         = AllEvents();
         config.services.push_back(PublishedService{WXL_OBJECT_SERVICE, WXL_OBJECT_SERVICE_VERSION,
                                                    wxltest::FakeObjects::Table()});
+        config.services.push_back(PublishedService{WXL_ACTION_SERVICE, WXL_ACTION_SERVICE_VERSION,
+                                                   wxltest::FakeActions::Table()});
         return config;
     }
 
@@ -478,6 +543,11 @@ print("remove " .. show(s.RemoveSearchPath(wxl.mod.directory .. "\\assets"), s.R
                         s.RemoveSearchPath(wxl.mod.directory .. "\\assets")))
 print("remove other " .. show(s.RemoveSearchPath(wxl.mod.directory .. "\\..\\lua-services\\assets")))
 s.AddSearchPath(wxl.mod.directory .. "/assets/", 1)
+print("serve " .. show(s.Serve("Interface\\Served.txt", "served\0bytes", 1), s.Read("interface/served.TXT") == "served\0bytes",
+                       s.Unserve("Interface\\Served.txt"), s.Read("Interface\\Served.txt"), s.Unserve("Interface\\Served.txt")))
+print("no data " .. show(pcall(s.Serve, "Interface\\x.txt")))
+print("no serve priority " .. show(pcall(s.Serve, "Interface\\x.txt", "x")))
+s.Serve("Interface\\Kept.txt", "kept by services", 2)
 
 print("data " .. show(d.IsLoaded("Spell.dbc"), d.ServeTable("Item.dbc", "Interface\\hello.txt"), d.ServedFrom("Item.dbc"),
                       select(2, d.ServeTable("Item.dbc", "Interface\\hello.txt")), d.RestoreTable("Item.dbc"),
@@ -908,8 +978,9 @@ int main(int argc, char** argv)
     {
         namespace names = wxl::lua::names;
         std::vector<names::Member> rows = {
-#define WXL_OBJECT_READ(kinds, member, Method, type)    names::Member{#member, names::k##kinds},
-#define WXL_OBJECT_READ_AT(kinds, member, Method, type) names::Member{#member, names::k##kinds},
+#define WXL_OBJECT_READ(kinds, member, Method, type, source, Cxx, cxx, doc) names::Member{#member, names::k##kinds},
+#define WXL_OBJECT_READ_AT(kinds, member, Method, type, source, Cxx, cxx, Arg, arg, doc) \
+    names::Member{#member, names::k##kinds},
 #include "wxl/runtime/object_reads.def"
 #undef WXL_OBJECT_READ_AT
 #undef WXL_OBJECT_READ
@@ -976,6 +1047,80 @@ int main(int argc, char** argv)
         const std::vector<std::string>   both = names::LuaNames(tied);
         Check(both[0] == "UnitLevel" && both[1] == "UnitLevel" && !names::Clash(tied, both).empty(),
               "a clash no qualifier resolves is reported rather than shadowed");
+    }
+
+    Section("every object member in Lua");
+    {
+        using wxltest::FakeObjects;
+        namespace names = wxl::lua::names;
+        const fs::path mods = MakeTree(scratch, "rows", binary, fs::path());
+        WriteFile(mods / "rows" / "mod.json", LuaManifest("wxl.rows"));
+        WriteFile(mods / "rows" / "init.lua", EveryRowMod());
+        WriteFile(mods / "older" / "mod.json",
+                  "{\n  \"id\": \"wxl.older\",\n  \"name\": \"older\",\n  \"version\": \"1.0.0\",\n"
+                  "  \"abi\": \"0.1.16\",\n  \"lua\": \"init.lua\"\n}\n");
+        WriteFile(mods / "older" / "init.lua",
+                  "Observe('ObjectScript', 'OnObjectCreate', function(object, guid, type)\n"
+                  "    if type ~= 'Unit' then return end\n"
+                  "    local ok, err = pcall(function() return object:IsDead() end)\n"
+                  "    print('older ' .. tostring(ok) .. ' ' .. tostring(err))\n"
+                  "    print('older health ' .. tostring(object:Health()))\n"
+                  "end)\n");
+
+        CaptureSink sink;
+        ModHost     host(Config(mods, sink));
+        host.LoadAll();
+        host.Stage(WXL_STAGE_READY);
+        wxltest::FakeActions::Calls().clear();
+
+        const wxl_object_args created[] = {{FakeObjects::kPlayer, 0x100, WXL_OBJECT_PLAYER},
+                                           {FakeObjects::kBoar, 0x200, WXL_OBJECT_UNIT},
+                                           {FakeObjects::kChest, 0, WXL_OBJECT_GAMEOBJECT},
+                                           {FakeObjects::kItem, 0, WXL_OBJECT_ITEM}};
+        for (const wxl_object_args& args : created) host.Raise(WXL_EV_ObjectCreate, &args);
+        const wxl_update_args tick{0.1f};
+        host.Raise(WXL_EV_Update, &tick);
+
+        const std::vector<names::RowInfo>& rows = names::Rows();
+        std::string                        wrong;
+        int                                checked = 0;
+        for (const names::RowInfo& row : rows)
+        {
+            if (row.since[2] < 18) continue;
+            ++checked;
+            const bool held = std::strcmp(row.kinds_name, "Containers") != 0;
+            const std::string line = std::string("[wxl.rows] row ") + row.member + " " +
+                                     (held ? LuaTypeOf(row) : std::string("nil a Item has no"));
+            if (!sink.Has(line.c_str())) wrong += line + "; ";
+        }
+        Check(checked > 60 && wrong.empty(), "every 0.1.18 row answers in Lua as the type its row says");
+        if (!wrong.empty()) std::printf("        %s\n", wrong.c_str());
+        Check(sink.Has("[wxl.rows] row unit_reaction string hostile") &&
+                  sink.Has("[wxl.rows] row unit_stand_state string sitting") &&
+                  sink.Has("[wxl.rows] row item_quality string common"),
+              "an enumeration arrives as its name");
+        Check(sink.Has("[wxl.rows] row Auras table") && sink.Has("[wxl.rows] row Skills table") &&
+                  sink.Has("[wxl.rows] row PartyMembers table"),
+              "the lists are tables");
+        Check(sink.Has("[wxl.rows] row Select boolean") && sink.Has("[wxl.rows] row CastAt boolean") &&
+                  sink.Has("[wxl.rows] row Use boolean") && sink.Has("[wxl.rows] row CastSpell boolean") &&
+                  sink.Has("[wxl.rows] row CastSpellBare boolean") && sink.Has("[wxl.rows] row MoveTo boolean"),
+              "the actions answer true when the client takes them");
+        Check(sink.Has("[wxl.rows] row UseOnUnit nil a Unit has no Use"), "an action of another kind says why");
+        Check(sink.Has("[wxl.rows] row BadName error") && sink.Has("'sprint' is not one of walk, run"),
+              "an enumeration argument takes a name, and an unknown one is an error naming them");
+        const auto& calls = wxltest::FakeActions::Calls();
+        bool castAt = false, bare = false;
+        for (const auto& call : calls)
+        {
+            if (call.name == "cast_spell" && call.spell == 116 && call.target == FakeObjects::kBoar) castAt = true;
+            if (call.name == "cast_spell" && call.spell == 133 && call.target == WXL_HANDLE_NONE) bare = true;
+        }
+        Check(castAt && bare, "the calls reach wxl.action with their objects, none when left out");
+        Check(sink.Has("[wxl.older] older false") && sink.Has("came with abi 0.1.18") &&
+                  sink.Has("[wxl.older] older health 90"),
+              "a mod asking for an older abi cannot use a newer method, and keeps the older ones");
+        if (g_failures) sink.Dump();
     }
 
     Section("object identity");
@@ -1066,12 +1211,16 @@ int main(int argc, char** argv)
 
         const fs::path mods = MakeTree(scratch, "services", binary, fs::path());
         fs::copy(fs::path(example).parent_path() / "lua-services", mods / "lua-services", fs::copy_options::recursive);
+        fs::copy(fs::path(example).parent_path() / "lua-assets", mods / "lua-assets", fs::copy_options::recursive);
         WriteFile(mods / "services" / "mod.json",
                   LuaManifest("wxl.services", "\"requires\": [ { \"service\": \"wxl.patch\", \"version\": 1 } ]"));
         WriteFile(mods / "services" / "init.lua", kServices);
         WriteFile(mods / "services" / "assets" / "Interface" / "probe.txt", "from disk");
         WriteFile(mods / "services" / "assets" / "Interface" / "hello.txt", "hello, overridden");
         WriteFile(mods / "undeclared" / "mod.json", LuaManifest("wxl.undeclared"));
+        WriteFile(mods / "served" / "mod.json", LuaManifest("wxl.served"));
+        WriteFile(mods / "served" / "init.lua", "wxl.storage.Serve(\"interface/KEPT.txt\", \"lower\", 1)\n");
+        FakeStorage::Served().clear();
         WriteFile(mods / "undeclared" / "init.lua", kServicesUndeclared);
 
         const std::string toc = "## Interface: 30300\nGlobalStrings.lua\nFrameXML.xml\n";
@@ -1126,6 +1275,15 @@ int main(int argc, char** argv)
               "nil is a missing argument too");
         Check(sink.Has("[wxl.services] remove true nil nil not_found"),
               "a folder removed serves nothing, and removing it again finds nothing");
+        Check(sink.Has("[wxl.services] serve true true true nil nil not_found"),
+              "bytes a Lua mod serves read back as a file, in any case and with either slash, until it takes them back");
+        Check(sink.Has("[wxl.services] no data false ") &&
+                  sink.Has("wxl.storage.Serve: 'data' (argument 2) is missing; it takes a string") &&
+                  sink.Has("[wxl.services] no serve priority false ") &&
+                  sink.Has("wxl.storage.Serve: 'priority' (argument 3) is missing; it takes a whole number"),
+              "Serve names what is missing");
+        Check(FakeStorage::Served()["interface\\kept.txt"] == "kept by services",
+              "when two Lua mods serve one name, the runtime is handed the higher priority's bytes");
         Check(sink.Has("[wxl.services] remove other nil not_found"),
               "a mod cannot remove a folder another mod added");
         Check(sink.Has("[wxl.services] bad priority false ") && sink.Has("a whole number from -2147483648 to 2147483647"),
@@ -1151,9 +1309,9 @@ int main(int argc, char** argv)
         Check(sink.Has("[wxl.undeclared] undeclared false ") &&
                   sink.Has("wxl.patch reaches the client's memory, so a mod uses it only when its mod.json declares it: "
                            "add { \"service\": \"wxl.patch\", \"version\": 1 } to \"requires\""),
-              "an unsafe module the manifest does not declare refuses every use, saying how to declare it");
+              "a raw module the manifest does not declare refuses every use, saying how to declare it");
         Check(sink.Has("[wxl.undeclared] modules table table table table nil"),
-              "the safe modules are there for every mod; a native-only table has no module");
+              "the open modules are there for every mod; a native-only table has no module");
 
         // The example: what the guide quotes.
         Check(sink.Has(("[wxl.lua-services] Interface\\FrameXML\\FrameXML.toc: " + std::to_string(toc.size()) +
@@ -1162,6 +1320,21 @@ int main(int argc, char** argv)
         Check(sink.Has("[wxl.lua-services] from the assets folder: hello from the assets folder"),
               "and one of its own, through the search path");
         Check(sink.Has("[wxl.lua-services] it starts with \"## Interface\""), "and the first bytes of a file it opens");
+        Check(sink.Has("[wxl.lua-assets] served Interface\\lua-assets\\note.txt: true") &&
+                  sink.Has("[wxl.lua-assets] read back: This file lives in a Lua mod's memory."),
+              "lua-assets serves a file and reads it back through the storage");
+        {
+            const char*           tile = "World\\Maps\\Azeroth\\Azeroth_32_48.adt";
+            wxl_terrain_tile_args args{};
+            args.path   = wxl_str{tile, static_cast<uint32_t>(std::strlen(tile))};
+            args.tile_x = 32;
+            args.tile_y = 48;
+            args.data   = "MVER";
+            args.size   = 4;
+            raise(WXL_EV_TerrainTileLoad, &args);
+            Check(sink.Has("[wxl.lua-assets] first terrain tile: World\\Maps\\Azeroth\\Azeroth_32_48.adt (32, 48), 4 bytes"),
+                  "and its AssetScript handler hears a terrain tile load, with its place and size");
+        }
         Check(sink.Has("[wxl.lua-services] 1 table(s) of contents in Interface\\FrameXML") &&
                   sink.Has("[wxl.lua-services] Spell.dbc read already: true") &&
                   sink.Has("[wxl.lua-services] 1 hook point(s) named"),
@@ -1545,12 +1718,15 @@ print("later " .. tostring(s.Unredirect("Interface\\Nope.txt")) .. " " .. tostri
         host.LoadAll();
         host.Stage(WXL_STAGE_READY);
 
-        const size_t offered = static_cast<size_t>(WXL_EV_COUNT) - 1;
+        // Every event but the one this runtime lacks and the one the probe skips.
+        const size_t offered = static_cast<size_t>(WXL_EV_COUNT) - 2;
         Check(sink.Has(("[wxl.probe] listening to " + std::to_string(offered) + " events").c_str()) &&
                   sink.Has("[wxl.probe] not raised by this runtime: OnSoundPlay"),
               "the probe listens to every event the runtime raises, and names the one it does not");
         Check(host.Listening(WXL_EV_TextureLoad) && !host.Listening(WXL_EV_SoundPlay),
               "which turns every raised event on, as its README warns");
+        Check(!host.Listening(WXL_EV_ModelBatchDrawn) && sink.Has("[wxl.probe] not listened to: OnModelBatchDrawn (skipped)"),
+              "but the model batches, thousands a frame, which it skips and says so");
 
         const wxl_world_args world{571, {5000.25f, -12.5f, 31.0f}};
         host.Raise(WXL_EV_WorldEnter, &world);
@@ -1566,6 +1742,11 @@ print("later " .. tostring(s.Unredirect("Interface\\Nope.txt")) .. " " .. tostri
         Check(sink.Has("[wxl.probe] OnMessageReceived #1: 502, <4 bytes 01 00 FF 10>, nil"),
               "bytes are shown in hex, an answer the runtime gave nothing to answer through as nil");
 
+        const wxl_cvar_args cvar{wxl_str{"wxlProbe", 8}, wxl_str{"\x82", 1}, wxl_str{"caf\xC3\xA9", 5}};
+        host.Raise(WXL_EV_CVarChanged, &cvar);
+        Check(sink.Has("[wxl.probe] OnCVarChanged #1: \"wxlProbe\", <1 bytes 82>, \"caf\xC3\xA9\""),
+              "a string that is not UTF-8 is shown as its bytes, so the log stays text; UTF-8 is kept as text");
+
         wxl_ui_event_args ui{};
         ui.name = wxl_str{"PLAYER_ENTERING_WORLD", 21};
         for (int i = 0; i < 7; ++i) host.Raise(WXL_EV_UiEvent, &ui);
@@ -1580,8 +1761,8 @@ print("later " .. tostring(s.Unredirect("Interface\\Nope.txt")) .. " " .. tostri
         const wxl_update_args tick{40.0f};
         host.Raise(WXL_EV_Update, &tick);
         host.Raise(WXL_EV_Update, &tick);
-        Check(sink.Has("[wxl.probe] minute 1: 4 events, 11 raises: OnUiEvent 7, OnUpdate 2, OnMessageReceived 1, "
-                       "OnWorldEnter 1"),
+        Check(sink.Has("[wxl.probe] minute 1: 5 events, 12 raises: OnUiEvent 7, OnUpdate 2, OnCVarChanged 1, "
+                       "OnMessageReceived 1, OnWorldEnter 1"),
               "after a minute, a line of what came in it, busiest first");
 
         wxl_value text{};
@@ -1592,7 +1773,7 @@ print("later " .. tostring(s.Unredirect("Interface\\Nope.txt")) .. " " .. tostri
                   marked.results[0].as.number == 1.0,
               "WxlProbeMark answers the mark's number, and the text it marked");
         Check(sink.Has("[wxl.probe] ==== MARK 1: opened the bank ====") &&
-                  sink.Has("[wxl.probe] since the probe loaded (80.0 s): 4 events, 11 raises: OnUiEvent 7, OnUpdate 2"),
+                  sink.Has("[wxl.probe] since the probe loaded (80.0 s): 5 events, 12 raises: OnUiEvent 7, OnUpdate 2"),
               "a mark is a line of its own, followed by what came since the previous one");
         Check(sink.Has("[wxl.probe] memory at mark 1: no snapshot: unsupported"),
               "and the memory, or why there is none");
@@ -1616,9 +1797,12 @@ print("later " .. tostring(s.Unredirect("Interface\\Nope.txt")) .. " " .. tostri
               "the steps' text is trimmed, and a mark past the last says so");
 
         host.Stage(WXL_STAGE_SHUTDOWN);
-        Check(sink.Has("[wxl.probe] summary: 4 of ") && sink.Has("[wxl.probe] never seen: ") &&
+        Check(sink.Has("[wxl.probe] summary: 5 of ") && sink.Has("[wxl.probe] never seen: ") &&
                   sink.Has("OnTextureLoad"),
               "at exit, the totals and the events that never came");
+        Check(sink.Has("OnObjectFieldChanged (reaches only a mod that watches a field (wxl.object.Watch); the probe "
+                       "watches none)"),
+              "the never-seen line says why OnObjectFieldChanged cannot reach the probe");
         if (g_failures) sink.Dump();
     }
 
@@ -1658,6 +1842,86 @@ print("later " .. tostring(s.Unredirect("Interface\\Nope.txt")) .. " " .. tostri
         host.Raise(WXL_EV_Update, &tick);
         const std::string after = OrderSince(sink.lines, from);
         Check(after == "a1 b a1 a2 b", ("a reloaded mod keeps its place: " + after).c_str());
+
+        host.Shutdown();
+        if (g_failures) sink.Dump();
+    }
+
+    Section("the in-game suite's reload and order mods");
+    {
+        using wxltest::FakeScript;
+
+        // tests/ingame, next to the examples folder lua-hello sits in.
+        const fs::path ingame = fs::path(example).parent_path().parent_path() / "tests" / "ingame";
+        const fs::path mods   = MakeTree(scratch, "ingame", binary, fs::path());
+        for (const char* mod : {"wxl.selftest", "wxl.test-abi-old", "wxl.test-events", "wxl.test-fields",
+                                "wxl.test-order-a", "wxl.test-order-b", "wxl.test-reload", "wxl.test-search",
+                                "wxl.test-watch-other"})
+            fs::copy(ingame / mod, mods / mod, fs::copy_options::recursive);
+        FakeScript::Live() = WXL_SCRIPT_CONTEXT_GAME;
+        FakeScript::Functions().clear();
+
+        CaptureSink sink;
+        HostConfig  config = Config(mods, sink);
+        config.services.push_back(PublishedService{WXL_SCRIPT_SERVICE, WXL_SCRIPT_SERVICE_VERSION, FakeScript::Table()});
+        ModHost host(std::move(config));
+        host.LoadAll();
+        host.Stage(WXL_STAGE_READY);
+        const wxl_lua_api* api = static_cast<const wxl_lua_api*>(host.Table()->get_service(WXL_LUA_SERVICE, WXL_LUA_SERVICE_VERSION));
+
+        // Calls a registered function with one string argument, or none; answers its first
+        // value as text, or "error: <message>".
+        const auto ask = [](const char* name, const char* argument = nullptr) -> std::string {
+            wxl_value text{};
+            text.type      = WXL_VALUE_STRING;
+            text.as.string = wxl_str{argument, argument ? static_cast<uint32_t>(std::strlen(argument)) : 0u};
+            wxl_script_call call = argument ? ScriptCallOf({text}) : ScriptCallOf({});
+            if (!FakeScript::Invoke(name, call)) return "error: not registered";
+            if (!call.error.empty()) return "error: " + call.error;
+            if (call.results.empty()) return "nothing";
+            const wxl_value& first = call.results[0];
+            if (first.type == WXL_VALUE_STRING) return std::string(first.as.string.data, first.as.string.size);
+            if (first.type == WXL_VALUE_BOOL) return first.as.boolean ? "true" : "false";
+            return "other";
+        };
+        // The chat message wxl.selftest sends for the order check.
+        const auto send = [&](const char* text) {
+            wxl_bool                suppressed = WXL_FALSE;
+            const wxl_chat_send_args chat{wxl_str{text, static_cast<uint32_t>(std::strlen(text))}, wxl_str{"WHISPER", 7},
+                                          wxl_str{"", 0}, wxl_str{"Me", 2}, wxl_str{"", 0}, WXL_FALSE, &suppressed};
+            host.Raise(WXL_EV_ChatSend, &chat);
+            return suppressed == WXL_TRUE;
+        };
+        const auto seen = [&](const char* n) {
+            wxl_script_call call = ScriptCallOf({Number(std::atof(n))});
+            return FakeScript::Invoke("TestOrderSeen", call) && call.results.size() == 1 &&
+                   call.results[0].type == WXL_VALUE_BOOL && call.results[0].as.boolean;
+        };
+
+        Check(api && api->count() == 9 && !sink.Has("[ERROR]") && sink.Has("[wxl.selftest] ready: "),
+              "every Lua mod of the suite loads without an error");
+        Check(ask("TestReloadPart") == "part one", "wxl.test-reload answers the part it shipped with");
+        Check(send("wxl order 1") && seen("1"),
+              "wxl.test-order-a answers the order message, and wxl.test-order-b, after it, sees that answer");
+
+        Check(ask("TestReloadWrite", "part number two") == "part number two" && api && api->poll() == 1 &&
+                  ask("TestReloadPart") == "part number two",
+              "TestReloadWrite rewrites lib/part.lua; the mod reloads with the new part");
+
+        Check(ask("TestOrderTouch", "a-second") == "a-second" && api && api->poll() == 1 &&
+                  ask("TestOrderMark") == "a-second",
+              "TestOrderTouch rewrites mark.lua and wxl.test-order-a reloads");
+        Check(send("wxl order 2") && seen("2"), "wxl.test-order-a still runs first after its reload");
+
+        Check(ask("TestReloadBreak") == "true" && api && api->poll() == 1 &&
+                  ask("TestReloadPart").find("not running") != std::string::npos &&
+                  sink.Has("mod wxl.test-reload stays unloaded"),
+              "TestReloadBreak breaks mod.json: the mod unloads and stays so");
+        std::error_code ec;
+        fs::copy_file(mods / "wxl.test-reload" / "mod.json.good", mods / "wxl.test-reload" / "mod.json",
+                      fs::copy_options::overwrite_existing, ec);
+        Check(!ec && api && api->poll() == 1 && ask("TestReloadPart") == "part number two",
+              "mod.json.good put back, as wxl.test-manifest does, loads the mod again");
 
         host.Shutdown();
         if (g_failures) sink.Dump();
@@ -1779,6 +2043,201 @@ print("later " .. tostring(s.Unredirect("Interface\\Nope.txt")) .. " " .. tostri
 
         host.Shutdown();
         Check(FakeObjects::Watches().empty(), "the mods' watches are given back when they close");
+        if (g_failures) sink.Dump();
+    }
+
+    Section("the gameplay events");
+    {
+        const fs::path mods = MakeTree(scratch, "gameplay", binary, fs::path());
+        WriteFile(mods / "play" / "mod.json", LuaManifest("wxl.play"));
+        WriteFile(mods / "play" / "init.lua", R"(
+Observe("ObjectScript", "OnUnitAuraApplied", function(unit, guid, slot, spell, caster, caster_guid, stacks,
+                                                      previous, level, flags, harmful, duration, remaining)
+    print(string.format("aura %d slot %d stacks %d harmful %s left %d of %d caster %s", spell, slot, stacks,
+                        tostring(harmful), remaining, duration, tostring(caster)))
+end)
+Observe("LootScript", "OnLootOpened", function(source, guid, kind, money, count)
+    print("loot " .. kind .. " " .. money .. " " .. count)
+end)
+Observe("LootScript", "OnLootSlot", function(index, slot, item, quantity, display, suffix, property, slot_type)
+    print("slot " .. index .. " " .. item .. " x" .. quantity .. " " .. slot_type .. " " .. property)
+end)
+Observe("ItemScript", "OnInventorySlotChanged", function(container, container_guid, slot, previous, item, item_guid)
+    print("inventory slot " .. slot .. " item " .. tostring(item))
+end)
+Observe("QuestScript", "OnQuestGiverDetail", function(giver, giver_guid, quest, title, text, count, shared_by)
+    print("detail " .. quest .. " " .. title .. " / " .. text)
+end)
+Observe("QuestScript", "OnQuestObjectiveChanged", function(quest, slot, objective, previous, current)
+    print("objective " .. quest .. " #" .. objective .. " " .. previous .. "->" .. current)
+end)
+Observe("GroupScript", "OnGroupUpdated", function(group, raid, battleground, count, subgroup, leader, method)
+    print("group " .. count .. " " .. tostring(raid) .. " " .. method)
+end)
+Observe("SocialScript", "OnWindowOpened", function(kind, npc, npc_guid)
+    print("window " .. kind)
+end)
+Observe("PlayerScript", "OnReputationChanged", function(faction, previous, current, bonus)
+    print("reputation " .. faction .. " " .. previous .. "->" .. current)
+end)
+Override("GroupScript", "OnGroupInvite", function(inviter, can_accept)
+    print("invited by " .. inviter)
+    return true
+end)
+Override("SocialScript", "OnDuelRequested", function(challenger, challenger_guid, arbiter)
+    return nil, true
+end)
+function SocialScript:OnTradeStatus(status, partner)
+    print("trade " .. status)
+end
+)");
+
+        CaptureSink sink;
+        ModHost     host(Config(mods, sink));
+        host.LoadAll();
+        host.Stage(WXL_STAGE_READY);
+
+        wxl_aura_args aura{};
+        aura.unit = WXL_HANDLE_NONE, aura.slot = 2, aura.spell_id = 8050, aura.stacks = 1, aura.harmful = WXL_TRUE,
+        aura.duration = 18000, aura.remaining = 12000;
+        host.Raise(WXL_EV_UnitAuraApplied, &aura);
+        Check(sink.Has("[wxl.play] aura 8050 slot 2 stacks 1 harmful true left 12000 of 18000 caster nil"),
+              "UnitAuraApplied reaches Lua with every member, a caster out of view as nil");
+
+        wxl_loot_args loot{};
+        loot.kind = WXL_LOOT_FISHING, loot.money = 12, loot.count = 1;
+        host.Raise(WXL_EV_LootOpened, &loot);
+        wxl_loot_slot_args slot{};
+        slot.item_id = 6303, slot.quantity = 1, slot.slot_type = WXL_LOOT_SLOT_TAKE, slot.random_property_id = -3;
+        host.Raise(WXL_EV_LootSlot, &slot);
+        Check(sink.Has("[wxl.play] loot fishing 12 1") && sink.Has("[wxl.play] slot 0 6303 x1 take -3"),
+              "LootOpened and LootSlot name their enums and keep a signed property");
+
+        wxl_inventory_slot_args inventory{};
+        inventory.slot = 23, inventory.item = WXL_HANDLE_NONE;
+        host.Raise(WXL_EV_InventorySlotChanged, &inventory);
+        Check(sink.Has("[wxl.play] inventory slot 23 item nil"), "InventorySlotChanged, an emptied slot's item nil");
+
+        wxl_quest_giver_args detail{};
+        detail.quest_id = 783, detail.title = wxl_str{"A Threat Within", 15}, detail.text = wxl_str{"Hail.", 5};
+        host.Raise(WXL_EV_QuestGiverDetail, &detail);
+        const wxl_quest_objective_args objective{783, 0, 1, 2, 3};
+        host.Raise(WXL_EV_QuestObjectiveChanged, &objective);
+        Check(sink.Has("[wxl.play] detail 783 A Threat Within / Hail.") && sink.Has("[wxl.play] objective 783 #1 2->3"),
+              "the quest events carry their strings and counts");
+
+        wxl_group_args group{};
+        group.count = 4, group.raid = WXL_FALSE, group.loot_method = WXL_LOOT_NEED_BEFORE_GREED;
+        host.Raise(WXL_EV_GroupUpdated, &group);
+        Check(sink.Has("[wxl.play] group 4 false need_before_greed"), "GroupUpdated with its loot method by name");
+
+        wxl_window_args window{};
+        window.kind = WXL_WINDOW_AUCTION;
+        host.Raise(WXL_EV_WindowOpened, &window);
+        const wxl_reputation_args reputation{72, 2900, 3000, 0.0f};
+        host.Raise(WXL_EV_ReputationChanged, &reputation);
+        Check(sink.Has("[wxl.play] window auction") && sink.Has("[wxl.play] reputation 72 2900->3000"),
+              "WindowOpened and ReputationChanged");
+
+        wxl_bool              accept = WXL_FALSE, decline = WXL_FALSE;
+        wxl_group_invite_args invite{};
+        invite.inviter = wxl_str{"Jaina", 5}, invite.can_accept = WXL_TRUE, invite.accept = &accept,
+        invite.decline = &decline;
+        host.Raise(WXL_EV_GroupInvite, &invite);
+        Check(sink.Has("[wxl.play] invited by Jaina") && accept == WXL_TRUE && decline == WXL_FALSE,
+              "an Override of GroupInvite accepts by returning true");
+        accept = decline = WXL_FALSE;
+        wxl_duel_request_args duel{};
+        duel.accept = &accept, duel.decline = &decline;
+        host.Raise(WXL_EV_DuelRequested, &duel);
+        Check(accept == WXL_FALSE && decline == WXL_TRUE, "and one of DuelRequested declines with nil, true");
+
+        wxl_trade_args trade{};
+        trade.status = WXL_TRADE_COMPLETE;
+        host.Raise(WXL_EV_TradeStatus, &trade);
+        Check(sink.Has("[wxl.play] trade complete"), "a family method of a new family is subscribed: SocialScript");
+
+        host.Shutdown();
+        if (g_failures) sink.Dump();
+    }
+
+    Section("the model events and wxl.m2 in Lua");
+    {
+        const fs::path mods = MakeTree(scratch, "models", binary, fs::path());
+        WriteFile(mods / "tailor" / "mod.json",
+                  LuaManifest("wxl.tailor", "\"requires\": [ { \"service\": \"wxl.m2\", \"version\": 1 } ]"));
+        WriteFile(mods / "tailor" / "init.lua", R"(
+local kept = {}
+Observe("ObjectScript", "OnAppearanceChanged", function(change, wearer, model, race, sex, slot, display, npc)
+    print("appearance " .. change .. " slot " .. slot .. " display " .. display .. " " .. type(model) .. " npc " .. tostring(npc))
+    if change ~= "worn" then return end
+    local buckle = wxl.m2.CreateModel(model, "Item\\Buckle.m2")
+    print("made " .. tostring(buckle ~= nil) .. " " .. tostring(buckle):sub(1, 9))
+    print("attach " .. tostring(buckle:Attach(model, 53, 1)))
+    print("parent " .. tostring(buckle:Parent() == model))
+    print("missing " .. tostring(select(2, buckle:Attach(model, 99, 0))))
+    local point = wxl.m2.AttachmentPoint(model, 32)
+    print("point " .. tostring(point))
+    print("onbone " .. tostring(buckle:AttachToBone(model, 53, 5, { x = 0.5, y = 0, z = 1 })))
+    print("prefix " .. wxl.m2.RacePrefix(race))
+    kept[#kept + 1] = buckle
+    local spare = wxl.m2.CreateModel(model, "Item\\Spare.m2")
+    spare:Release()
+    print("released " .. tostring(pcall(function() return spare:Parent() end)))
+end)
+Observe("AssetScript", "OnModelParsed", function(path, file, header, size)
+    print("parsed " .. path .. " " .. type(file) .. " " .. size)
+end)
+Observe("AssetScript", "OnModelSequenceLoad", function(path, file, index, data)
+    print("sequence " .. path .. " #" .. index .. " " .. data)
+end)
+Observe("RenderScript", "OnModelBatchDrawn", function(model, root, kind, base, min, count, start, primitives)
+    print("batch " .. primitives .. " base " .. base)
+end)
+)");
+        WriteFile(mods / "plain" / "mod.json", LuaManifest("wxl.plain"));
+        WriteFile(mods / "plain" / "init.lua",
+                  "print('undeclared ' .. tostring(select(2, pcall(function() return wxl.m2.RacePrefix(1) end))))\n");
+
+        CaptureSink sink;
+        HostConfig  config = Config(mods, sink);
+        config.services.push_back(PublishedService{WXL_M2_SERVICE, WXL_M2_SERVICE_VERSION, wxltest::FakeModels::Table()});
+        const int released = wxltest::FakeModels::Released();
+        ModHost   host(std::move(config));
+        host.LoadAll();
+        host.Stage(WXL_STAGE_READY);
+
+        int                       wearer = 0;
+        const wxl_appearance_args worn{WXL_APPEARANCE_WORN, &wearer, wxltest::FakeModels::UnitModel(), 1, 0, 4, 416036,
+                                       WXL_FALSE};
+        host.Raise(WXL_EV_AppearanceChanged, &worn);
+        Check(sink.Has("[wxl.tailor] appearance worn slot 4 display 416036 userdata npc false"),
+              "AppearanceChanged reaches Lua: the change by name, the model as an address");
+        Check(sink.Has("[wxl.tailor] made true Model(0x") && sink.Has("[wxl.tailor] attach true") &&
+                  sink.Has("[wxl.tailor] parent true") && sink.Has("[wxl.tailor] missing not_found"),
+              "a wxl.Model is made on the event's model and hangs on it; a missing point is not_found");
+        Check(sink.Has("[wxl.tailor] point table") && sink.Has("[wxl.tailor] onbone true") &&
+                  sink.Has("[wxl.tailor] prefix Hu"),
+              "AttachmentPoint answers {x, y, z}, AttachToBone takes one, RacePrefix a string");
+        Check(sink.Has("[wxl.tailor] released false") && wxltest::FakeModels::Released() == released + 1,
+              "a model given back is given back once, and refuses its methods after");
+        Check(sink.Has("[wxl.plain] undeclared") && sink.Has("reaches the client's memory"),
+              "a mod that does not declare wxl.m2 is told how to");
+
+        int                         file = 0;
+        const wxl_model_parsed_args parsed{wxl::Str("Boar.m2"), &file, &file, 2048};
+        host.Raise(WXL_EV_ModelParsed, &parsed);
+        const wxl_model_sequence_args sequence{wxl::Str("Boar.m2"), &file, 3, "keys", 4};
+        host.Raise(WXL_EV_ModelSequenceLoad, &sequence);
+        wxl_model_batch_args batch{};
+        batch.primitive_count = 12, batch.base_vertex = -4;
+        host.Raise(WXL_EV_ModelBatchDrawn, &batch);
+        Check(sink.Has("[wxl.tailor] parsed Boar.m2 userdata 2048") && sink.Has("[wxl.tailor] sequence Boar.m2 #3 keys") &&
+                  sink.Has("[wxl.tailor] batch 12 base -4"),
+              "the loader's stages and a drawn batch reach Lua");
+
+        host.Shutdown();
+        Check(wxltest::FakeModels::Released() == released + 2, "the mod's models are given back when it unloads");
         if (g_failures) sink.Dump();
     }
 

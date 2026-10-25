@@ -1,0 +1,13 @@
+{
+  "$schema": "../../../schema/mod.json",
+  "id": "wxl.test-search",
+  "name": "Test search",
+  "version": "1.0.0",
+  "abi": "0.1.10",
+  "description": "Adds a folder to the client's files, reads from it, removes it again; and the error of an argument left out.",
+  "lua": "init.lua",
+  "optional": [
+    { "service": "wxl.storage", "version": 1 },
+    { "service": "wxl.script", "version": 1 }
+  ]
+}

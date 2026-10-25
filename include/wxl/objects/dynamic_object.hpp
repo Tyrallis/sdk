@@ -23,12 +23,7 @@ namespace wxl
         /// kind (`Accepts(type)`). As<T>() is the checked way.
         explicit constexpr DynamicObject(const Object& object) : Object(object.Handle()) {}
 
-        /// The unit that cast it.
-        Expected<wxl_guid> CasterGuid() const { return Read(&wxl_object_api::dynamic_caster); }
-        Expected<uint32_t> SpellId() const { return Read(&wxl_object_api::dynamic_spell_id); }
-        Expected<float>    Radius() const { return Read(&wxl_object_api::dynamic_radius); }
-        /// The client time it was cast at, in milliseconds.
-        Expected<uint32_t> CastTime() const { return Read(&wxl_object_api::dynamic_cast_time); }
+#include "wxl/objects/generated/dynamic_object.inc"
     };
 } // namespace wxl
 

@@ -1,0 +1,12 @@
+{
+  "$schema": "../../../schema/mod.json",
+  "id": "wxl.test-order-b",
+  "name": "Test order B",
+  "version": "1.0.0",
+  "abi": "0.1.6",
+  "description": "Runs after wxl.test-order-a on the same event: it tells whether that mod had answered first.",
+  "lua": "init.lua",
+  "optional": [
+    { "service": "wxl.script", "version": 1 }
+  ]
+}

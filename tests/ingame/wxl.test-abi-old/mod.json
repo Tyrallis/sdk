@@ -1,0 +1,9 @@
+{
+  "$schema": "../../../schema/mod.json",
+  "id": "wxl.test-abi-old",
+  "name": "Test old abi",
+  "version": "1.0.0",
+  "abi": "0.1.5",
+  "description": "Asks for abi 0.1.5: an event of a later feature is refused, naming the version to ask for.",
+  "lua": "init.lua"
+}

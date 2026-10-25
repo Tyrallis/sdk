@@ -1,0 +1,13 @@
+{
+  "$schema": "../../../schema/mod.json",
+  "id": "wxl.test-both",
+  "name": "Test both",
+  "version": "1.0.0",
+  "abi": "0.1.5",
+  "binaries": {
+    "win-x86": "bin/x86/none.dll",
+    "win-x64": "bin/x64/none.dll"
+  },
+  "description": "Names both a binary and a Lua entry file: the runtime refuses the folder and says why; nothing of it ever runs.",
+  "lua": "init.lua"
+}

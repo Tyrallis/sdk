@@ -8,7 +8,7 @@
 #error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including storage.def"
 #endif
 
-WXL_API_SERVICE(storage, WXL_STORAGE_SERVICE, WXL_STORAGE_SERVICE_VERSION, (0, 1, 5), safe,
+WXL_API_SERVICE(storage, WXL_STORAGE_SERVICE, WXL_STORAGE_SERVICE_VERSION, (0, 1, 5), open,
                 "The client's files, whatever they are packed in: named as the client names them.")
 
 // An open file, from open, closed by close; a Lua mod's are closed when it lets go of them.
@@ -42,3 +42,13 @@ WXL_API(storage, redirect, Redirect, result, (str from, str to), shim, generated
         "the latest of two mods' wins.")
 WXL_API(storage, unredirect, Unredirect, result, (str from), shim, generated,
         "Takes the mod's redirect of a name back; not_found for one it did not redirect.")
+WXL_API_SINCE(storage, add_provider, (0, 1, 19))
+WXL_API(storage, add_provider, AddProvider, out<u64>, (provider provider, i32 priority), native, by_hand, "")
+WXL_API(storage, remove_provider, RemoveProvider, result, (u64 provider), native, by_hand, "")
+WXL_API(storage, add_transform, AddTransform, out<u64>, (transform transform, i32 priority), native, by_hand, "")
+WXL_API(storage, remove_transform, RemoveTransform, result, (u64 transform), native, by_hand, "")
+WXL_API(storage, serve, Serve, result, (str path, bytes data, bytes_size size, i32 priority), shim, by_hand,
+        "Serves bytes under a name, on every thread, until the mod takes them back or goes: the client "
+        "reads them as one of its files. Priority as AddSearchPath's.")
+WXL_API(storage, unserve, Unserve, result, (str path), shim, generated,
+        "Takes back what the mod serves under a name; not_found for one it does not serve.")

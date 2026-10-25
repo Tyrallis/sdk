@@ -23,22 +23,7 @@ namespace wxl
         /// kind (`Accepts(type)`). As<T>() is the checked way.
         explicit constexpr GameObject(const Object& object) : Object(object.Handle()) {}
 
-        /// Who summoned or spawned it, or WXL_GUID_NONE for a world-placed one.
-        Expected<wxl_guid> CreatedByGuid() const { return Read(&wxl_object_api::gameobject_created_by); }
-
-        Expected<uint32_t> DisplayId() const { return Read(&wxl_object_api::gameobject_display_id); }
-        Expected<uint32_t> Flags() const { return Read(&wxl_object_api::gameobject_flags); }
-        Expected<uint32_t> DynamicFlags() const { return Read(&wxl_object_api::gameobject_dynamic_flags); }
-        Expected<uint32_t> Faction() const { return Read(&wxl_object_api::gameobject_faction); }
-        Expected<uint32_t> Level() const { return Read(&wxl_object_api::gameobject_level); }
-
-        /// 0 active, 1 ready, 2 destroyed.
-        Expected<uint32_t> State() const { return Read(&wxl_object_api::gameobject_state); }
-
-        /// The game-object type, in the server's GameObjectType numbering (door 0, button 1, ...).
-        Expected<uint32_t> GoType() const { return Read(&wxl_object_api::gameobject_type); }
-
-        Expected<uint32_t> ArtKit() const { return Read(&wxl_object_api::gameobject_art_kit); }
+#include "wxl/objects/generated/game_object.inc"
     };
 } // namespace wxl
 

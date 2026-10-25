@@ -735,6 +735,56 @@ namespace wxl
         virtual ~ChatScript() = default;
     };
 
+    /// The loot window and the rolls of a group's loot.
+    class LootScript : public detail::ScriptRoot
+#define WXL_EVENT_Loot(name, id, args) , public detail::Hook##name<HandlerOf<WXL_EV_##name>>
+#include "wxl/events.def"
+#undef WXL_EVENT_Loot
+    {
+    public:
+        virtual ~LootScript() = default;
+    };
+
+    /// The local player's items: received, moved, worn down, stacked, refused.
+    class ItemScript : public detail::ScriptRoot
+#define WXL_EVENT_Item(name, id, args) , public detail::Hook##name<HandlerOf<WXL_EV_##name>>
+#include "wxl/events.def"
+#undef WXL_EVENT_Item
+    {
+    public:
+        virtual ~ItemScript() = default;
+    };
+
+    /// The quest log and the quest givers' pages.
+    class QuestScript : public detail::ScriptRoot
+#define WXL_EVENT_Quest(name, id, args) , public detail::Hook##name<HandlerOf<WXL_EV_##name>>
+#include "wxl/events.def"
+#undef WXL_EVENT_Quest
+    {
+    public:
+        virtual ~QuestScript() = default;
+    };
+
+    /// The local player's group: invitations, the member list, loot rules, ready checks.
+    class GroupScript : public detail::ScriptRoot
+#define WXL_EVENT_Group(name, id, args) , public detail::Hook##name<HandlerOf<WXL_EV_##name>>
+#include "wxl/events.def"
+#undef WXL_EVENT_Group
+    {
+    public:
+        virtual ~GroupScript() = default;
+    };
+
+    /// The people around: duels, trades, emotes, resurrection offers, the windows an NPC opens.
+    class SocialScript : public detail::ScriptRoot
+#define WXL_EVENT_Social(name, id, args) , public detail::Hook##name<HandlerOf<WXL_EV_##name>>
+#include "wxl/events.def"
+#undef WXL_EVENT_Social
+    {
+    public:
+        virtual ~SocialScript() = default;
+    };
+
     namespace detail
     {
         /// One family's registered scripts and the subscriptions that feed them. Lives in the mod.
@@ -1009,37 +1059,115 @@ namespace wxl
             }
         };
 
+        template <>
+        struct Rows<LootScript>
+        {
+            template <class D>
+            static void For(Family<LootScript>& family)
+            {
+                (void)family;
+#define WXL_EVENT_Loot(name, id, args) WXL_SDK_SUBSCRIBE_ROW(LootScript, name, args)
+#include "wxl/events.def"
+#undef WXL_EVENT_Loot
+            }
+        };
+
+        template <>
+        struct Rows<ItemScript>
+        {
+            template <class D>
+            static void For(Family<ItemScript>& family)
+            {
+                (void)family;
+#define WXL_EVENT_Item(name, id, args) WXL_SDK_SUBSCRIBE_ROW(ItemScript, name, args)
+#include "wxl/events.def"
+#undef WXL_EVENT_Item
+            }
+        };
+
+        template <>
+        struct Rows<QuestScript>
+        {
+            template <class D>
+            static void For(Family<QuestScript>& family)
+            {
+                (void)family;
+#define WXL_EVENT_Quest(name, id, args) WXL_SDK_SUBSCRIBE_ROW(QuestScript, name, args)
+#include "wxl/events.def"
+#undef WXL_EVENT_Quest
+            }
+        };
+
+        template <>
+        struct Rows<GroupScript>
+        {
+            template <class D>
+            static void For(Family<GroupScript>& family)
+            {
+                (void)family;
+#define WXL_EVENT_Group(name, id, args) WXL_SDK_SUBSCRIBE_ROW(GroupScript, name, args)
+#include "wxl/events.def"
+#undef WXL_EVENT_Group
+            }
+        };
+
+        template <>
+        struct Rows<SocialScript>
+        {
+            template <class D>
+            static void For(Family<SocialScript>& family)
+            {
+                (void)family;
+#define WXL_EVENT_Social(name, id, args) WXL_SDK_SUBSCRIBE_ROW(SocialScript, name, args)
+#include "wxl/events.def"
+#undef WXL_EVENT_Social
+            }
+        };
+
 #undef WXL_SDK_SUBSCRIBE_ROW
 
-        /// How many of the ten families a script derives from.
+        /// Every script family, in the order the table lists them.
+        template <class... F>
+        struct FamilyList
+        {
+        };
+        using Families = FamilyList<WorldScript, RenderScript, ObjectScript, AssetScript, NetScript,
+                                    LuaScript, CombatScript, PlayerScript, GlueScript, ChatScript,
+                                    LootScript, ItemScript, QuestScript, GroupScript, SocialScript>;
+
+        template <class D, class List>
+        struct CountFamilies;
+        template <class D, class... F>
+        struct CountFamilies<D, FamilyList<F...>>
+        {
+            static constexpr int value = (int(std::is_base_of_v<F, D>) + ... + 0);
+        };
+
+        template <class D, class... F>
+        struct FirstFamily
+        {
+            using type = void;
+        };
+        template <class D, class Head, class... Tail>
+        struct FirstFamily<D, Head, Tail...>
+        {
+            using type = std::conditional_t<std::is_base_of_v<Head, D>, Head,
+                                            typename FirstFamily<D, Tail...>::type>;
+        };
+        template <class D, class List>
+        struct PickFamily;
+        template <class D, class... F>
+        struct PickFamily<D, FamilyList<F...>> : FirstFamily<D, F...>
+        {
+        };
+
+        /// How many of the families a script derives from.
         template <class D>
-        constexpr int kFamilies =
-            int(std::is_base_of_v<WorldScript, D>) + int(std::is_base_of_v<RenderScript, D>) +
-            int(std::is_base_of_v<ObjectScript, D>) + int(std::is_base_of_v<AssetScript, D>) +
-            int(std::is_base_of_v<NetScript, D>) + int(std::is_base_of_v<LuaScript, D>) +
-            int(std::is_base_of_v<CombatScript, D>) + int(std::is_base_of_v<PlayerScript, D>) +
-            int(std::is_base_of_v<GlueScript, D>) + int(std::is_base_of_v<ChatScript, D>);
+        constexpr int kFamilies = CountFamilies<D, Families>::value;
 
         /// The family a script belongs to, for one that belongs to exactly one.
         template <class D>
-        using FamilyFor = std::conditional_t<
-            std::is_base_of_v<WorldScript, D>, WorldScript,
-            std::conditional_t<
-                std::is_base_of_v<RenderScript, D>, RenderScript,
-                std::conditional_t<
-                    std::is_base_of_v<ObjectScript, D>, ObjectScript,
-                    std::conditional_t<
-                        std::is_base_of_v<AssetScript, D>, AssetScript,
-                        std::conditional_t<
-                            std::is_base_of_v<NetScript, D>, NetScript,
-                            std::conditional_t<
-                                std::is_base_of_v<LuaScript, D>, LuaScript,
-                                std::conditional_t<
-                                    std::is_base_of_v<CombatScript, D>, CombatScript,
-                                    std::conditional_t<
-                                        std::is_base_of_v<PlayerScript, D>, PlayerScript,
-                                        std::conditional_t<std::is_base_of_v<GlueScript, D>,
-                                                           GlueScript, ChatScript>>>>>>>>>;
+        using FamilyFor = typename PickFamily<D, Families>::type;
 
         /// Keeps one script, and subscribes what it handles that its family does not have yet.
         template <class Script, class D>
@@ -1074,6 +1202,13 @@ namespace wxl
             family.subscriptions.clear();
             for (bool& fed : family.fed) fed = false;
         }
+
+        /// Drops every family's scripts and subscriptions.
+        template <class... F>
+        void ClearFamilies(FamilyList<F...>)
+        {
+            (ClearFamily<F>(), ...);
+        }
     } // namespace detail
 
     /**
@@ -1106,7 +1241,8 @@ namespace wxl
             static_assert(detail::kFamilies<D> != 0,
                           "ScriptMgr::Add takes a script: a class deriving from WorldScript, "
                           "RenderScript, ObjectScript, AssetScript, NetScript, LuaScript, "
-                          "CombatScript, PlayerScript, GlueScript or ChatScript");
+                          "CombatScript, PlayerScript, GlueScript, ChatScript, LootScript, "
+                          "ItemScript, QuestScript, GroupScript or SocialScript");
             static_assert(detail::kFamilies<D> < 2,
                           "this script derives from more than one family; add it once per family, "
                           "through that family: ScriptMgr::Add(static_cast<wxl::WorldScript*>("
@@ -1120,7 +1256,8 @@ namespace wxl
             static_assert(detail::kFamilies<D> != 0,
                           "ScriptMgr::Remove takes a script: a class deriving from WorldScript, "
                           "RenderScript, ObjectScript, AssetScript, NetScript, LuaScript, "
-                          "CombatScript, PlayerScript, GlueScript or ChatScript");
+                          "CombatScript, PlayerScript, GlueScript, ChatScript, LootScript, "
+                          "ItemScript, QuestScript, GroupScript or SocialScript");
             static_assert(detail::kFamilies<D> < 2,
                           "this script derives from more than one family; remove it once per "
                           "family, through that family");
@@ -1131,16 +1268,7 @@ namespace wxl
         /// Drops every script and every family subscription.
         static void Clear()
         {
-            detail::ClearFamily<WorldScript>();
-            detail::ClearFamily<RenderScript>();
-            detail::ClearFamily<ObjectScript>();
-            detail::ClearFamily<AssetScript>();
-            detail::ClearFamily<NetScript>();
-            detail::ClearFamily<LuaScript>();
-            detail::ClearFamily<CombatScript>();
-            detail::ClearFamily<PlayerScript>();
-            detail::ClearFamily<GlueScript>();
-            detail::ClearFamily<ChatScript>();
+            detail::ClearFamilies(detail::Families{});
         }
     };
 

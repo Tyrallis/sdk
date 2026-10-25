@@ -201,7 +201,8 @@ destructor that throws still ends the process: C++ makes destructors `noexcept`.
 ### Events
 
 Derive from a script family (`WorldScript`, `RenderScript`, `ObjectScript`, `AssetScript`,
-`NetScript`, `LuaScript`, `CombatScript`, `PlayerScript`, `GlueScript`, `ChatScript`), override
+`NetScript`, `LuaScript`, `CombatScript`, `PlayerScript`, `GlueScript`, `ChatScript`,
+`LootScript`, `ItemScript`, `QuestScript`, `GroupScript`, `SocialScript`), override
 the events you want,
 `wxl::ScriptMgr::Add(&script)`. `Add` subscribes only the events the script overrides, decided at
 compile time, so an event you leave alone costs nothing at all. That needs the script's own type:
@@ -282,6 +283,82 @@ The bytes have to be a model the client can parse: a file of the same version, a
 own tools write it. If the runtime cannot make the copy, the log says so and the client parses
 the file as it read it.
 
+### Gameplay events
+
+The families `LootScript`, `ItemScript`, `QuestScript`, `GroupScript` and `SocialScript`, and the
+aura, mount, death, reputation and achievement events of `ObjectScript` and `PlayerScript`, came
+with abi `0.1.17`: build against headers of that version or later. They tell what happens to the
+player's character and around it, raised where the client takes the fact in (the aura slot it
+fills, the loot window it opens, the inventory slot it updates), so a handler sees what the
+player sees, when the client knows it.
+
+A script that keeps what the player loots and joins any group a friend invites it to:
+
+```cpp
+class Companion final : public wxl::GroupScript
+{
+public:
+    void OnGroupInvite(std::string_view inviter, bool can_accept, wxl::Answer accept,
+                       wxl::Answer decline) override
+    {
+        if (can_accept && (inviter == "Jaina" || inviter == "Thrall")) accept.Set();
+        (void)decline; // left alone: the dialog shows as usual for anyone else
+    }
+};
+
+class Looter final : public wxl::LootScript
+{
+public:
+    void OnLootSlot(uint32_t index, uint32_t slot, uint32_t item_id, uint32_t quantity,
+                    uint32_t display_id, uint32_t random_suffix, int32_t random_property_id,
+                    wxl_loot_slot_type slot_type) override
+    {
+        if (slot_type == WXL_LOOT_SLOT_TAKE) wxl::Log("loot: item {} x{}", item_id, quantity);
+    }
+};
+```
+
+Three events are requests, with two answers each, `accept` and `decline`:
+`GroupScript::OnGroupInvite`, `SocialScript::OnDuelRequested` and
+`SocialScript::OnResurrectRequest`. Setting one makes the runtime do what the dialog's button would
+have done, and the client never shows the dialog; setting neither leaves the dialog to the player.
+When two handlers disagree, decline wins.
+
+| Family | Events | What they tell |
+|---|---|---|
+| `ObjectScript` | `OnUnitAuraApplied`, `OnUnitAuraRemoved`, `OnUnitAuraRefreshed` | an aura in a unit's aura slot: the slot, the spell, the caster (`wxl::Object` and guid), stacks and the count before, level, flags, `harmful`, the duration and what is left, in milliseconds |
+| | `OnUnitAuraChanged` | the coarse one, older than these: something about this unit's auras changed (an aura on, or off with `removed`); the three above say what |
+| | `OnUnitMountChanged` | a unit's mount display id before and after: on a mount, off it, another one |
+| `LootScript` | `OnLootOpened`, `OnLootSlot`, `OnLootSlotCleared`, `OnLootClosed` | the loot window: its source, its `wxl_loot_kind`, its money and item count, then one `OnLootSlot` per item; an item taken; the window closed |
+| | `OnLootMoney` | the player's share of looted money |
+| | `OnLootRollStart`, `OnLootRoll`, `OnLootRollWon`, `OnLootAllPassed` | a roll on a group's loot: started (with the `roll_id` the interface's `RollOnLoot` takes), someone's choice as `wxl_roll_type`, the winner, nobody |
+| `ItemScript` | `OnItemPushed` | an item looted, given or made, with its bag, slot, count and total |
+| | `OnInventorySlotChanged` | a slot of the player's bags or bank bags, or of one of its bags, got another item or none |
+| | `OnItemDurabilityChanged`, `OnItemStackChanged` | an item's durability (with its maximum) or stack count, before and after |
+| | `OnInventoryError` | the server refused an inventory change, with its result code |
+| `QuestScript` | `OnQuestAccepted`, `OnQuestRemoved`, `OnQuestObjectiveChanged`, `OnQuestCompleted`, `OnQuestFailed` | the quest log as the server writes it: a quest in or out of a slot, an objective's count, its state |
+| | `OnQuestTurnedIn` | a quest turned in, with xp, money, honor, talents and arena points |
+| | `OnQuestGiverGreeting`, `OnQuestGiverDetail`, `OnQuestGiverProgress`, `OnQuestGiverReward` | a quest giver's pages: the giver, the quest, its title and text |
+| `GroupScript` | `OnGroupInvite` | an invitation, answerable |
+| | `OnGroupUpdated`, `OnGroupMember`, `OnGroupLeft`, `OnGroupLootMethodChanged` | the group as the server lists it, one `OnGroupMember` per other member, leaving it, its loot rules as `wxl_loot_method` |
+| | `OnReadyCheck`, `OnReadyCheckResponse`, `OnReadyCheckFinished` | a ready check and its answers |
+| `SocialScript` | `OnDuelRequested`, `OnDuelCountdown`, `OnDuelWon`, `OnDuelFinished` | a duel challenge (answerable), its countdown, a winner, its end |
+| | `OnTradeStatus` | a trade's step as `wxl_trade_status`, with the proposer for a proposal |
+| | `OnEmote`, `OnTextEmote` | an emote's animation; a `/wave` or `/dance` |
+| | `OnResurrectRequest` | an offer to resurrect, answerable |
+| | `OnWindowOpened`, `OnWindowClosed` | a window on someone the player talks to, as `wxl_window_kind`: merchant, trainer, bank, quest, mail, taxi, trade, ... |
+| `PlayerScript` | `OnPlayerDied`, `OnPlayerReleased`, `OnPlayerResurrected` | the player's life: dead, a ghost, alive again |
+| | `OnReputationChanged` | a faction's standing before and after, counted as the reputation panel counts it |
+| | `OnAchievementEarned` | an achievement earned by the player or one near it |
+
+Each parameter list is the struct of [`fields.def`](../include/wxl/fields.def) the event names in
+[`events.def`](../include/wxl/events.def); `wxl::HandlerOf<WXL_EV_LootSlot>` spells it as a
+function type. A handle parameter is `WXL_HANDLE_NONE` when the client does not hold the object
+(out of view); its guid is there all the same. A unit's auras when it comes into view, and the
+equipped items (`ObjectScript::OnEquipmentChanged`'s), are not part of these events. `SocialScript::OnTextEmote` is
+raised as the server sent it, before the client consults the player's ignore list: a mod that
+should not react to an ignored player checks the sender itself.
+
 ### Reads that can fail
 
 Every read through a service answers `wxl::Expected<T>` (`include/wxl/expected.hpp`): the value,
@@ -329,6 +406,255 @@ erases an entry when its object leaves -- after the mod's own `OnObjectDestroy` 
 wxl::ObjectMap<uint32_t> hits;                                // a member of the script
 void OnUnitDeath(wxl::Object unit) override { ++hits[unit]; } // gone with the unit
 ```
+
+#### Reading what an object is and does
+
+Each kind's class has a method for what the client knows of that kind (abi `0.1.18`): a unit's
+level, health and power, whether it is dead, in combat, casting or mounted, its auras, how it
+stands towards you; a player's money, experience, skills, bags and group; an item's durability,
+enchantments and what the item cache says of it. Each answers an `Expected` of the type that fits:
+a number, a `bool`, an enumeration of `wxl/enums.def` (`wxl_reaction`, `wxl_creature_type`,
+`wxl_item_quality`...), another object (`wxl::Item`), or a struct (`wxl_aura`, `wxl_skill`).
+
+Say your mod should warn when the target is a rare elite that hates you. Start from the event that
+hands you the new target:
+
+```cpp
+void OnTargetChanged(wxl::Object, wxl::Object current) override
+{
+    const wxl::Unit unit(current);                 // the event says a target is a unit or nothing
+    if (!unit) return;                             // targets nothing in view
+
+    const wxl::Expected<wxl_classification> rank     = unit.Classification();
+    const wxl::Expected<wxl_reaction>       reaction = unit.Reaction();
+    if (rank && *rank == WXL_CLASSIFICATION_RARE_ELITE && reaction && *reaction <= WXL_REACTION_HOSTILE)
+        wxl::Log(WXL_LOG_INFO, "alert", "a rare elite, level {}", unit.Level().ValueOr(0));
+}
+```
+
+`Reaction()` asks the client's own function, the one that colours the name plate: you get the
+same answer the player sees. A read that has nothing to answer says why in its `Error()`:
+`WXL_E_NOT_FOUND` once the object has left, `WXL_E_INVALID` for a read its kind does not have,
+`WXL_E_UNSUPPORTED` on a runtime older than the read.
+
+Your own player has more: the client keeps money, experience, the inventory and the skills for the
+player it controls only, and those reads answer `WXL_E_INVALID` for any other player.
+
+```cpp
+const wxl::Player me = wxl::Player::Local();
+const uint32_t    gold = me.Money().ValueOr(0) / 10000;
+if (wxl::Expected<wxl::Item> weapon = me.InventoryItem(WXL_INVENTORY_MAIN_HAND); weapon && *weapon)
+{
+    const uint32_t durability = weapon->Durability().ValueOr(0);
+    const auto     quality    = weapon->Quality();    // WXL_E_FAILED until the item cache has it
+}
+for (const wxl_aura& aura : me.Auras().ValueOr(std::vector<wxl_aura>{}))
+    if (aura.spell_id == 1459) ...                     // Arcane Intellect is up
+```
+
+An empty slot answers a null `wxl::Item` (`*weapon` tests false), not an error. A read of the item
+cache -- `Quality()`, `Level()`, `Class()`, `SellPrice()` -- answers `WXL_E_FAILED` while the
+client has not received the item's record from the server; ask again later.
+
+#### What the player can do: `wxl.action`
+
+The same objects carry what the player could do with them, done through the function the client
+runs for a click, a key or a slash command, with the client's own checks: a spell out of range
+is refused as it would be for the player.
+
+```cpp
+unit.Select();                              // targets it, as a left click does
+unit.Interact();                            // a right click: talk, loot, open, use
+unit.CastAt(133);                           // casts a spell the player knows at it
+weapon->Use();                              // uses an item, on what it picks itself
+unit.Follow();                              // as /follow
+unit.Assist();                              // targets what it targets, as /assist
+wxl::ActionService::ClearTarget();          // as Escape
+wxl::ActionService::StopCasting();
+wxl::ActionService::MoveTo(wxl_vec3{-8913.0f, 554.0f, 93.0f}); // click-to-move to a point
+```
+
+Each answers a `wxl_result`: `WXL_OK` when the client took the action, `WXL_E_FAILED` when it
+refused it, `WXL_E_UNSUPPORTED` out of the world. An action runs on the thread that runs the game,
+where your handlers of world events run; from any other thread it is refused with `WXL_E_INVALID`
+and the log says why.
+
+#### Every member
+
+Each class reads what its kind holds, every method answering an `Expected`; a class has its
+parents' members too (a `Player` is a `Unit` is an `Object`). The tables are made from the same
+rows as the methods, by `wxl-object-members`.
+
+<!-- object-members:cxx (written by wxl-object-members) -->
+
+**`wxl::Object`**: Every object
+
+| Method | Answers | What |
+|---|---|---|
+| `Position()` | `wxl_vec3` | Where it stands in the world, in yards; an item has no place. |
+| `Facing()` | `float` | The way it faces, in radians. |
+| `Entry()` | `uint32_t` | The server's template id: a creature, item or game-object entry; 0 for a player. |
+| `Scale()` | `float` | Its size, 1 being the model's own. |
+| `IsActivePlayer()` | `bool` | Whether it is the unit the client controls. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Distance(const Object& other)` | `float` | Yards from it to another object, centre to centre; invalid when either has no place in the world. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `DistanceTo(wxl_vec3 point)` | `float` | Yards from it to a point; invalid for an object with no place in the world. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+
+**`wxl::Unit`**: Units, players included
+
+| Method | Answers | What |
+|---|---|---|
+| `Health()` | `int32_t` | Its health; 0 or less is a dead unit, as the client reads it. |
+| `MaxHealth()` | `uint32_t` | Its maximum health. |
+| `Level()` | `uint32_t` | Its level. |
+| `PowerValue(Power power)` | `uint32_t` | Its power of a type (0 mana, 1 rage, 2 focus, 3 energy, 4 happiness, 5 runes, 6 runic power). |
+| `MaxPowerValue(Power power)` | `uint32_t` | Its maximum power of a type. |
+| `PowerType()` | `Power` | The type of power it runs on, as PowerValue takes it. |
+| `Race()` | `uint32_t` | Its race, as ChrRaces.dbc numbers it. |
+| `Class()` | `uint32_t` | Its class, as ChrClasses.dbc numbers it. |
+| `Sex()` | `uint32_t` | 0 male, 1 female, 2 none. |
+| `DisplayId()` | `uint32_t` | The model it shows now, a CreatureDisplayInfo.dbc id. |
+| `NativeDisplayId()` | `uint32_t` | The model it shows when nothing changes its shape. |
+| `MountDisplayId()` | `uint32_t` | The model of its mount; 0 while not mounted. |
+| `FactionTemplate()` | `uint32_t` | Its FactionTemplate.dbc id. |
+| `Flags()` | `uint32_t` | UNIT_FIELD_FLAGS as the server sends it. |
+| `Flags2()` | `uint32_t` | UNIT_FIELD_FLAGS_2 as the server sends it. |
+| `DynamicFlags()` | `uint32_t` | UNIT_DYNAMIC_FLAGS as the server sends it to this client. |
+| `NpcFlags()` | `uint32_t` | What it offers to talk about: vendor, trainer, quest giver, ... as UNIT_NPC_FLAGS. |
+| `BoundingRadius()` | `float` | The radius of its body, in yards. |
+| `CombatReach()` | `float` | How far it reaches in melee, in yards. |
+| `CharmGuid()` | `wxl_guid` | The unit it charms, or 0. |
+| `SummonGuid()` | `wxl_guid` | The unit it summoned, its pet among them, or 0. |
+| `CharmedByGuid()` | `wxl_guid` | Who charms it, or 0. |
+| `SummonedByGuid()` | `wxl_guid` | Who summoned it: a pet's owner, or 0. |
+| `CreatedByGuid()` | `wxl_guid` | Who created it: a totem's shaman, or 0. |
+| `TargetGuid()` | `wxl_guid` | What it targets, as a guid, whether that is in view or not; 0 for nothing. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Reaction()` | `wxl_reaction` | How it stands towards the active player, by the client's own reckoning: the colour of its name. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `ReactionTo(const Object& other)` | `wxl_reaction` | How it stands towards another unit, by the client's own reckoning. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsDead()` | `bool` | Whether it is dead: no health left, or marked dead by the server. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `InCombat()` | `bool` | Whether it is in combat, as the client's UnitAffectingCombat reads it. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsPvp()` | `bool` | Whether it is flagged for player-versus-player combat. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsTapped()` | `bool` | Whether someone has tapped it: its kill and loot are theirs. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsTappedByPlayer()` | `bool` | Whether the active player, or their group, has tapped it. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsLootable()` | `bool` | Whether it has loot for the active player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsSkinnable()` | `bool` | Whether its corpse can be skinned. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `StandState()` | `wxl_stand_state` | How it stands: standing, sitting, sleeping, kneeling, ... Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsSitting()` | `bool` | Whether it sits, on the ground or in a chair. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsStealthed()` | `bool` | Whether it is stealthed, as the client's IsStealthed reads it. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsMounted()` | `bool` | Whether it rides a mount, as the client's IsMounted reads it. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `CastingSpellId()` | `uint32_t` | The spell it casts now; 0 for none. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `CastStart()` | `uint32_t` | When the cast began, in milliseconds on the client's clock (the client's GetTime() * 1000). Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `CastEnd()` | `uint32_t` | When the cast ends, on the same clock. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsCasting()` | `bool` | Whether it is casting, its cast not yet over, as the client's UnitCastingInfo reads it. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `ChannelSpellId()` | `uint32_t` | The spell it channels now; 0 for none. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `ChannelStart()` | `uint32_t` | When the channel began, on the client's clock. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `ChannelEnd()` | `uint32_t` | When the channel ends, on the client's clock. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsChanneling()` | `bool` | Whether it is channeling, its channel not yet over. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `AuraCount()` | `uint32_t` | How many auras the client holds on it, buffs and debuffs alike. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Aura(uint32_t slot)` | `wxl_aura` | The aura in a slot, 0 to AuraCount - 1: its spell, caster, stacks, duration, expiration and flags. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `HasAura(uint32_t spell_id)` | `bool` | Whether an aura of a spell is on it. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `CreatureType()` | `wxl_creature_type` | What kind of creature it is, as the client works it out: beast, humanoid, undead, ... Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `CreatureFamily()` | `uint32_t` | Its beast family, a CreatureFamily.dbc id; 0 for none. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Classification()` | `wxl_classification` | Its rank: normal, elite, rare, rare elite, world boss. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `KnowsSpell(uint32_t spell_id)` | `bool` | Whether it knows a spell: the active player's spell book or its pet's; false for any other unit. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `MovementFlags()` | `uint32_t` | The flags of its movement: forward 0x1, backward 0x2, ..., falling 0x1000, flying 0x2000000. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Speed(wxl_move_type type)` | `float` | One of its speeds, in yards a second: walk, run, swim, flight, ...; the turn and pitch rates in radians a second. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsSwimming()` | `bool` | Whether it swims, as the client's IsSwimming reads it. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsFlying()` | `bool` | Whether it flies, as the client's IsFlying reads it. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsFalling()` | `bool` | Whether it is falling, as the client's IsFalling reads it. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+
+**`wxl::Player`**: Players
+
+| Method | Answers | What |
+|---|---|---|
+| `Flags()` | `uint32_t` | PLAYER_FLAGS as the server sends it. |
+| `GuildId()` | `uint32_t` | Its guild's id; 0 while unguilded. |
+| `GuildRank()` | `uint32_t` | Its rank in the guild, 0 for the guild master. |
+| `ChosenTitle()` | `uint32_t` | The title it shows, a CharTitles.dbc bit index; 0 for none. |
+| `VisibleItem(EquipSlot slot)` | `uint32_t` | The item id an equipment slot shows (0 head .. 18 tabard); 0 when the slot is empty. |
+| `IsGhost()` | `bool` | Whether it is a ghost, released from its corpse. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsAfk()` | `bool` | Whether it is away from the keyboard. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsDnd()` | `bool` | Whether it asked not to be disturbed. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `IsResting()` | `bool` | Whether it rests in an inn or a city, gaining rested experience. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Money()` | `uint32_t` | Its money, in copper. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Xp()` | `uint32_t` | Its experience in this level. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `NextLevelXp()` | `uint32_t` | The experience this level takes. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `RestedXp()` | `uint32_t` | Its rested experience: kills give twice as much until it is spent. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `HonorPoints()` | `uint32_t` | Its honor points. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `ArenaPoints()` | `uint32_t` | Its arena points. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `InventoryItem(wxl_inventory_slot slot)` | `Item` | The item in an equipment slot, or the bag in a bag slot (19 to 22); none for an empty slot. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `BackpackItem(uint32_t slot)` | `Item` | The item in a slot of the backpack, 0 to 15; none for an empty slot. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Skill(uint32_t line)` | `wxl_skill` | The skill on a line of the skill list, 0 to 127: its id, value and maximum; an id of 0 for an empty line. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `SkillOf(uint32_t skill_id)` | `wxl_skill` | A skill by its SkillLine.dbc id; invalid for a skill the player does not have. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `PartySize()` | `uint32_t` | How many others are in its party, 0 to 4. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `PartyMemberGuid(uint32_t slot)` | `wxl_guid` | The other party member in a party slot, 0 to 3, whether in view or not; 0 for an empty slot. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `RaidSize()` | `uint32_t` | How many are in its raid, itself included; 0 outside a raid. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `RaidMemberGuid(uint32_t slot)` | `wxl_guid` | The raid member in a raid slot, 0 to 39, whether in view or not; 0 for an empty slot. The active player only: WXL_E_INVALID for another player. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+
+**`wxl::Item`**: Items, containers included
+
+| Method | Answers | What |
+|---|---|---|
+| `OwnerGuid()` | `wxl_guid` | The player who owns it. |
+| `ContainedInGuid()` | `wxl_guid` | The bag holding it, or 0 in the backpack or when equipped. |
+| `CreatorGuid()` | `wxl_guid` | Who crafted it, or 0. |
+| `StackCount()` | `int32_t` | How many the stack holds. |
+| `Duration()` | `uint32_t` | Seconds left before it expires; 0 when it does not. |
+| `Flags()` | `uint32_t` | ITEM_FIELD_FLAGS as the server sends it: soulbound 0x1, ... |
+| `Durability()` | `uint32_t` | Its durability now. |
+| `MaxDurability()` | `uint32_t` | Its durability when repaired; 0 for an item that does not wear. |
+| `Enchant(uint32_t slot)` | `uint32_t` | The enchantment in a slot, 0 to 11 (0 permanent, 1 temporary, 2 to 4 sockets, ...), a SpellItemEnchantment.dbc id; 0 for none. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Quality()` | `wxl_item_quality` | Its quality: poor, common, uncommon, rare, epic, legendary, artifact, heirloom. WXL_E_FAILED until the client has the item's record from the server. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Level()` | `uint32_t` | Its item level. WXL_E_FAILED until the client has the item's record from the server. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `RequiredLevel()` | `uint32_t` | The level it takes to use. WXL_E_FAILED until the client has the item's record from the server. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Class()` | `uint32_t` | Its class, an ItemClass.dbc id: weapon 2, armor 4, ... WXL_E_FAILED until the client has the item's record from the server. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `Subclass()` | `uint32_t` | Its subclass within the class: a sword, a cloth robe, ... WXL_E_FAILED until the client has the item's record from the server. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `InventoryType()` | `uint32_t` | Where it is worn: head 1, neck 2, ...; 0 for an item that is not worn. WXL_E_FAILED until the client has the item's record from the server. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `MaxStack()` | `uint32_t` | How many a stack of it holds at most. WXL_E_FAILED until the client has the item's record from the server. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+| `SellPrice()` | `uint32_t` | What a vendor pays for one, in copper. WXL_E_FAILED until the client has the item's record from the server. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+
+**`wxl::Container`**: Containers
+
+| Method | Answers | What |
+|---|---|---|
+| `NumSlots()` | `uint32_t` | How many slots the bag has. |
+| `SlotGuid(uint32_t slot)` | `wxl_guid` | The item in a slot, as a guid; 0 for an empty one, invalid past NumSlots. |
+| `SlotItem(uint32_t slot)` | `Item` | The item in a slot of the bag; none for an empty one, invalid past NumSlots. Came with abi 0.1.18: WXL_E_UNSUPPORTED on an older runtime. |
+
+**`wxl::GameObject`**: Game objects
+
+| Method | Answers | What |
+|---|---|---|
+| `CreatedByGuid()` | `wxl_guid` | Who summoned or spawned it, or 0 for one placed in the world. |
+| `DisplayId()` | `uint32_t` | Its model, a GameObjectDisplayInfo.dbc id. |
+| `Flags()` | `uint32_t` | GAMEOBJECT_FLAGS: in use 0x1, locked 0x2, ... |
+| `DynamicFlags()` | `uint32_t` | GAMEOBJECT_DYNAMIC's flags, as the server sends them to this client. |
+| `Faction()` | `uint32_t` | Its FactionTemplate.dbc id. |
+| `Level()` | `uint32_t` | Its level. |
+| `State()` | `uint32_t` | 0 active, 1 ready, 2 destroyed. |
+| `GoType()` | `uint32_t` | The game-object type, in the server's numbering (door 0, button 1, chest 3, ...). |
+| `ArtKit()` | `uint32_t` | The art kit it shows. |
+
+**`wxl::DynamicObject`**: Dynamic objects
+
+| Method | Answers | What |
+|---|---|---|
+| `CasterGuid()` | `wxl_guid` | The unit that cast it. |
+| `SpellId()` | `uint32_t` | The spell it is the area of. |
+| `Radius()` | `float` | Its radius, in yards. |
+| `CastTime()` | `uint32_t` | The client time it was cast at, in milliseconds. |
+
+**`wxl::Corpse`**: Corpses
+
+| Method | Answers | What |
+|---|---|---|
+| `OwnerGuid()` | `wxl_guid` | The player it belongs to. |
+| `PartyGuid()` | `wxl_guid` | The party the owner was in when they died, or 0. |
+| `DisplayId()` | `uint32_t` | Its model. |
+| `Guild()` | `uint32_t` | The owner's guild id. |
+| `Flags()` | `uint32_t` | CORPSE_FIELD_FLAGS: bones 0x1, ... |
+| `DynamicFlags()` | `uint32_t` | CORPSE_FIELD_DYNAMIC_FLAGS: lootable 0x1. |
+
+<!-- /object-members:cxx -->
 
 ### Descriptor fields
 
@@ -406,7 +732,8 @@ same value, in the same type: health is an `int32_t` both ways, as the client ho
 
 Each service has a typed facade with its name and version sealed in: `wxl::ObjectService`,
 `wxl::ScriptService`, `wxl::StorageService`, `wxl::DataService`, `wxl::NetService`,
-`wxl::UiService`, `wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService`
+`wxl::UiService`, `wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService`, `wxl::PointService`,
+`wxl::ActionService`, `wxl::M2Service`, `wxl::M2FileService`, `wxl::GxService`
 (`include/wxl/services/*.hpp`, or all of them through `include/wxl/services.hpp`). A facade is stateless -- construct one
 wherever it is needed -- and resolves its table on first use. It tests false while the runtime
 does not publish the service, and every call through it then answers `WXL_E_UNSUPPORTED` or the
@@ -460,6 +787,380 @@ of `RegisterFunction`. The same rows build the Lua modules of `wxl.lua`, so a me
 and Lua alike from its one row.
 
 `wxl::Service<T>(name, version)` still gives the raw table, for a service these do not cover.
+
+### Serving and converting assets
+
+The client reads every file it uses -- models, textures, terrain, sounds, the interface, its
+databases -- by name, from its archives. Your mod can stand among those archives in three ways,
+from the simplest to the most capable:
+
+| Way | What you give | Good for |
+|---|---|---|
+| a search folder (`AddSearchPath`) | a folder of files inside the client's folder | files you ship with the mod |
+| served bytes (`Serve`) | a name and its bytes, copied | a few files you make at run time |
+| a provider (`AddProvider`) | an object the client asks for files | files kept elsewhere: an archive format the client does not read, a cache, a generator |
+
+And one way to change what the client reads, whichever of those it comes from: a **transform**
+(`AddTransform`) receives a kind of file's bytes once they are read and before the client parses
+them, and may answer other bytes.
+
+Two rules hold for all of them. **Priority**: above 0, your file wins a name over the client's own
+data; 0 or below, it only fills a name the client does not have. **Threads**: the client opens
+most files on its loading threads, several at once, so a provider and a transform are called on
+any thread, concurrently, and must not touch anything the main thread changes without a lock.
+That is why they are C++ only; a Lua mod uses `Serve`, whose bytes the runtime holds.
+
+The example `examples/asset-provider` serves an add-on, HelloProvider, that exists in the mod's
+memory and nowhere on the disk.
+
+**`examples/asset-provider/src/AssetProvider.cpp`**
+
+```cpp
+    /// The add-on's files, by name.
+    class HelloAddOn final : public wxl::AssetProvider
+    {
+    public:
+        HelloAddOn()
+        {
+            files_[Key("Interface\\AddOns\\HelloProvider\\HelloProvider.toc")] =
+                "## Interface: 30300\n## Title: HelloProvider\nHelloProvider.lua\n";
+            files_[Key("Interface\\AddOns\\HelloProvider\\HelloProvider.lua")] =
+                "DEFAULT_CHAT_FRAME:AddMessage(\"Hello from a provider, version $VERSION\")\n";
+        }
+
+        // Asked at every open and existence check: a lookup, nothing more.
+        wxl::AssetState Lookup(std::string_view path) override
+        {
+            return files_.count(Key(path)) ? wxl::AssetState::Present : wxl::AssetState::Missing;
+        }
+
+        // The work: here, a copy of the text. A provider over an archive would read it here.
+        std::unique_ptr<wxl::AssetFile> Open(std::string_view path) override
+        {
+            const auto found = files_.find(Key(path));
+            if (found == files_.end()) return nullptr;
+            const std::string& text = found->second;
+            return std::make_unique<wxl::MemoryAssetFile>(std::vector<uint8_t>(text.begin(), text.end()));
+        }
+
+        // The client lists Interface\AddOns from the disk; what is told here joins that list.
+        void List(std::string_view folder, const std::function<void(std::string_view, bool)>& entry) override
+        {
+            if (Key(folder) == "interface\\addons") entry("HelloProvider", true);
+        }
+
+    private:
+        std::map<std::string, std::string> files_;
+    };
+```
+
+`Lookup` is asked at every open and every existence check the provider could win, often from
+several threads at once: keep it a lookup. It answers `wxl::AssetState::Present`, `Missing`, or
+`Pending` for a file the provider will have but has not yet -- one still being downloaded, say.
+A pending name is looked for further down meanwhile (the next provider, the client's own files);
+the client sees no such file if nobody has it, and a mod reading it through `wxl.storage` gets
+`WXL_E_PENDING`, not `WXL_E_NOT_FOUND`, so it can try again later.
+
+`Open` does the work and answers a `wxl::AssetFile`: its size, and `ReadAt(offset, buffer, size)`.
+`wxl::MemoryAssetFile` is one over a vector; a provider over a large archive writes its own, which
+reads a piece at a time: the client may read a sound or a movie a little at a time. The client
+closes the file when it is done, which destroys the object.
+
+`List` is optional. The client lists a few of its folders from the disk itself -- the add-ons, the
+macro icons -- and what `List` tells joins those listings: that is how the client finds
+HelloProvider among its add-ons, then reads its `.toc` and its `.lua` through the provider. What
+`List` tells is also there when the client asks about one entry, a folder or a file, as the
+add-on list does of each name it is told before it keeps it.
+`StorageService::Find` walks the providers' folders too.
+
+A transform is a function, or an object deriving from `wxl::AssetTransform`:
+
+**`examples/asset-provider/src/AssetProvider.cpp`**
+
+```cpp
+    /// Replaces $VERSION in the add-on's Lua; every other Lua file goes by untouched.
+    bool FillVersion(std::string_view path, const uint8_t* data, size_t size, const wxl::AssetOutput& out)
+    {
+        if (Key(path) != "interface\\addons\\helloprovider\\helloprovider.lua") return false;
+        std::string text(reinterpret_cast<const char*>(data), size);
+        const size_t at = text.find("$VERSION");
+        if (at == std::string::npos) return false;
+        text.replace(at, 8, kVersion);
+        return out.Replace(text.data(), text.size());
+    }
+```
+
+It is registered for a kind of file, the extension without its dot, and optionally the file's
+first four bytes (`wxl::Magic("MD20")`, 0 for any). Answering `true` after `out.Replace` gives the
+client other bytes; answering `false` leaves them as they came. Several transforms of one kind run
+in priority order, highest first, each given what the one before left, so their sizes may change
+freely. A transform sees every file of its kind the client reads, from any source: check the name
+first and leave the others alone, as `FillVersion` does.
+
+**`examples/asset-provider/src/AssetProvider.cpp`**
+
+```cpp
+        wxl_result OnLoad() override
+        {
+            const wxl::StorageService storage;
+            // Priority 1: above the client's own files, which are at 0.
+            auto provider = storage.AddProvider(addOn_, 1);
+            if (!provider)
+            {
+                wxl::Log(WXL_LOG_WARN, kTag, "no provider: {}", wxl::ResultName(provider.Error()));
+                return WXL_OK;
+            }
+            provider_ = std::move(*provider);
+
+            // Every .lua file the client reads passes through here, so the check is cheap.
+            auto transform = storage.AddTransform("lua", 0, 0, &FillVersion);
+            if (transform) transform_ = std::move(*transform);
+            wxl::Log(WXL_LOG_INFO, kTag, "HelloProvider served; look for it in the add-on list");
+            return WXL_OK;
+        }
+```
+
+`AddProvider` and `AddTransform` answer a `wxl::AssetRegistration`, which takes the registration
+back when it goes. The runtime takes back whatever your mod still holds when it is disabled or
+unloaded: it waits for the calls in progress, and the provider closes the files the client still
+has open from it (their next reads fail). The provider object must outlive its registration; here
+both are members of the mod.
+
+`StorageService().Serve(name, text, priority)` serves bytes without a provider: the runtime keeps a
+copy and answers every thread from it until `Unserve(name)` or the mod goes. When two mods serve
+one name, the higher priority wins, then the later one.
+
+What the client then does with what it read can be watched through `AssetScript`'s events:
+`OnTerrainTileLoad` (a map tile's file, with its place on the grid), `OnMapObjectGroupLoad` (a
+building's group file), `OnSkinProfileLoad` (a model's `.skin`), `OnTextureDecode` (a texture's
+size, encoding and alpha, from its header), `OnShaderLoad` and `OnSoundFileLoad` (abi `0.1.19`).
+They come on the main thread, and only while someone listens. The bytes they show are the ones
+transforms left; to change bytes, write a transform. `OnModelLoad` still lets a handler answer a
+model's bytes on the main thread, after the transforms of `m2` ran.
+
+### Models: what characters wear, models of your own, model files
+
+Three things about models reach a mod, from the simplest to the most technical. This part of the
+platform is the work of Tyrallis, who contributed it for his own mods: an equipment mod, an outline
+mod and a mod that teaches the client a later expansion's model format.
+
+| Want to | Use | Where |
+|---|---|---|
+| know what a character puts on and takes off | `ObjectScript::OnAppearanceChanged` | every runtime |
+| hang a model of your own on a character, a creature, a mount | `wxl::M2Service`, `wxl::M2Model` | every runtime |
+| reshape a model file as the client loads it | `AssetScript::OnModelParsed` and the stages after it, `wxl::M2FileService` | every runtime |
+| draw a batch of a model again, with your own state | `RenderScript::OnModelBatchDrawn`, `wxl::GxService` | every runtime |
+
+The three services are **raw**: they hand you the client's own models and memory, which no
+check stands between. A native mod names each one it uses in its manifest, as any service.
+
+**What characters wear.** A character's appearance is what the client dresses: every player, every
+NPC dressed from its display, and every copy the interface makes of one (the character panel,
+portraits, character select). `OnAppearanceChanged` comes when one puts an item display on a slot
+(`WXL_APPEARANCE_WORN`, once the client's own models for it hang on the body), is about to take
+one off (`WXL_APPEARANCE_REMOVED`), and when the appearance goes away (`WXL_APPEARANCE_FREED`: drop
+whatever you kept for it). `wearer` names the appearance until then; `model` is its body, what
+items hang on. `wxl::M2Service::ItemDisplay(id)` reads the display's row of `ItemDisplayInfo.dbc`.
+
+**`examples/murloc-hat/src/MurlocHat.cpp`**
+
+```cpp
+    /// Logs the first items characters put on, with the model file the item display names.
+    class Wardrobe final : public wxl::ObjectScript
+    {
+    public:
+        void OnAppearanceChanged(wxl_appearance_change change, void*, void*, uint32_t, uint32_t, uint32_t slot,
+                                 uint32_t display, bool) override
+        {
+            if (change != WXL_APPEARANCE_WORN || told_ >= 10) return;
+            ++told_;
+            const wxl::Expected<wxl_m2_item_display> row   = wxl::M2Service::ItemDisplay(display);
+            const char*                              model = row && *row->model[0] ? row->model[0] : "no model";
+            wxl::Log(WXL_LOG_INFO, kTag, "slot {} puts on display {} ({})", slot, display, model);
+        }
+
+    private:
+        int told_ = 0;
+    };
+```
+
+**A model of your own.** `wxl::M2Model(scene, path)` makes a model of a file in the scene of a
+model you name, and gives it back when the object goes. `Attach(parent, point, flags)` hangs it on
+another model at one of its attachment points: 11 is the top of a character's head, 1 and 2 its
+hands, 32 its hip. The example hangs a murloc on the player's head:
+
+**`examples/murloc-hat/src/MurlocHat.cpp`**
+
+```cpp
+        void OnUpdate(float delta) override
+        {
+            if (hat_ && hat_.Parent()) return; // still on the head
+            wait_ -= delta;
+            if (wait_ > 0.0f) return;
+            wait_ = 1.0f; // one try a second while it is not
+
+            // The model the player draws with: its mount's, while it rides one.
+            void* body = wxl::M2Service::ObjectModel(wxl::Player::Local());
+            if (!body) return; // not in the world yet
+
+            if (!hat_) hat_ = wxl::M2Model(body, "Creature\\Murloc\\Murloc.m2");
+            const wxl_result hung = hat_.Attach(body, kHead);
+            if (hung == WXL_OK)
+                wxl::Log(WXL_LOG_INFO, kTag, "a murloc sits on the player's head");
+            else
+                wxl::Log(WXL_LOG_WARN, kTag, "the murloc could not be hung: {}", wxl::ResultName(hung));
+        }
+```
+
+Why the loop: the client lets your model go whenever the model it hangs on goes -- the player
+changes shape, mounts, leaves the world. `Parent()` then answers null, and the mod hangs it again
+on the new body. Your model stays yours until the `M2Model` goes; the runtime takes it off and
+gives it back when your mod is disabled or unloads.
+
+Two flags change how it hangs. `WXL_M2_ATTACH_ROOT` hangs it even where the parent has no such
+point, at the parent's origin: what a piece skinned to the whole body wants. `WXL_M2_ATTACH_FOLLOW_BONES`
+poses its bones every frame as the parent's bones of the same key bone or name, so a piece made for
+a body's skeleton (a later expansion's collection piece) moves with the body. `AttachToBone(parent,
+point, key_bone, offset)` makes a point the parent's file does not have: every bone of your model
+takes the pose of one key bone of the parent, moved by `offset`. `SetGeosets` shows or hides parts
+of your model, `ReplaceTexture` gives it a texture of your own. The client strips the attachments
+of the copies its interface draws (the character panel, portraits); the runtime hangs yours back on
+them.
+
+**Model files.** A mod that teaches the client a model format reshapes each file as it loads, at
+five stages, all on the main thread:
+
+| Event | When |
+|---|---|
+| `AssetScript::OnModelLoad` | the file is read, nothing parsed: answer other bytes (or convert them with an `m2` transform, above) |
+| `AssetScript::OnModelParsed` | the header is parsed and nothing made from it: point its arrays elsewhere |
+| `AssetScript::OnSkinProfileLoad` | the `.skin` is read, before it is parsed |
+| `AssetScript::OnSkinProfileParsed` | the skin is parsed, before the client sizes its draw state from it |
+| `AssetScript::OnModelSequenceLoad` | an external sequence (`.anim`) is read, before it is parsed against the model |
+
+The parsed header is the file's own layout, and an array in it is two 32-bit words, a count and
+where its elements are -- an address on the stock client, an offset from the array on the
+recompiled one, whose addresses are 64-bit. `wxl::M2FileService` reads and writes an array the same
+way on both:
+
+```cpp
+void OnModelParsed(std::string_view, void* file, void* header, uint32_t) override
+{
+    uint8_t* textures = static_cast<uint8_t*>(header) + 0x50;   // the header's texture array
+    auto     current  = wxl::M2FileService::Elements<uint8_t>(textures);
+    void*    more     = wxl::M2FileService::AllocNear(textures, (current.size() + 1) * 16);
+    // ... copy the 16-byte entries over, add one ...
+    wxl::M2FileService::SetArray(textures, more, current.size() + 1);
+    wxl::M2FileService::AnimateBones(file); // its shadow moves with its bones
+}
+```
+
+`AllocNear(anchor, size)` gives zeroed memory an array at `anchor` can point at: on the recompiled
+client an offset reaches 2 GB at most, which the client's allocator does not promise. It lives for
+the session, as the client's arrays do. `AnimateBones(file)` has the client animate the file's bones
+when it draws their shadows: it skips that for a file whose bones carry none of the flags it counts.
+
+**Drawing a batch again.** `RenderScript::OnModelBatchDrawn` comes after every batch the device
+drew, with the numbers of its `DrawIndexedPrimitive` and everything it drew
+with still bound: an outline mod sets a render target and a pixel shader of its own on
+`wxl::GxService::D3d9Device()`, draws the same numbers again, puts the target back and calls
+`wxl::GxService::InvalidateState()` so that the client sends its own state again. It comes for
+every batch of every model, thousands a frame: return at once for the ones you do not want, and
+subscribe only while you draw. Both clients raise it with the same numbers: the recompiled client
+records them as the device draws, and on the stock one the runtime rebuilds them from what the batch
+was drawn from.
+
+These came with abi `0.1.20`.
+
+### Changing the engine: points
+
+Events tell your mod what happened. A **point** lets it change what happens: it is a function of
+the client's engine -- the camera's update, the model cache, the world's render pass, the network's
+packet handler -- that your mod runs code in front of, instead of, or after. The runtime names the
+points it keeps working on every client, in `include/wxl/points.def`, and each one is a C++ class
+in `wxl::points` once you include `wxl/services/point.hpp`.
+
+A handler goes on one of three sides:
+
+| Side | Runs | Can change |
+|---|---|---|
+| `Before` | when the function is entered | its arguments: each is handed by reference |
+| `Replace` | instead of the function | everything: it answers in the function's place, and calls `original(...)` to run the function, with the arguments it chooses |
+| `After` | once the function has returned | its answer, handed by reference first |
+
+The example `examples/model-swap` works on `CM2Cache::CreateShared`, the function every model of
+the client goes through by file name before the cache is searched. Its row in `points.def` gives
+the signature your handlers take: `(void* self, void* name, uint32_t flags)`, answering a `void*`.
+Every pointer is a `void*` for now; `name` is the model's path as a C string.
+
+The Replace hands the function another file name for one model. It receives `original` first,
+then the arguments; whatever it returns is what the client gets:
+
+**`examples/model-swap/src/ModelSwap.cpp`**
+
+```cpp
+            swap_ = CreateShared::Replace([](auto original, void* cache, void* name, uint32_t flags) {
+                if (name && IsMurloc(static_cast<const char*>(name)))
+                    return original(cache, const_cast<char*>("Creature\\Gnoll\\Gnoll.m2"), flags);
+                return original(cache, name, flags);
+            });
+```
+
+Calling `original` is a choice, not a duty. A Replace that never calls it takes the call away from
+the function -- and from every other mod's Replace attached below yours; the log says so once, by
+name, so that two mods fighting over a point are easy to tell apart.
+
+The After sees the answer. Here it logs each model the first time it loads; `model` is a reference,
+so writing it would change what the client receives:
+
+**`examples/model-swap/src/ModelSwap.cpp`**
+
+```cpp
+            log_ = CreateShared::After([this](void*& model, void*, void* name, uint32_t) {
+                if (!name || !seen_.insert(static_cast<const char*>(name)).second) return;
+                char line[320];
+                std::snprintf(line, sizeof line, "model %s%s", static_cast<const char*>(name),
+                              model ? "" : " (not found)");
+                wxl::Log(WXL_LOG_INFO, kTag, line);
+            });
+```
+
+Each call answers a `wxl::PointAttachment`, which detaches the handler when it is destroyed: keep it
+as a member of your mod, as the example does, and the handler lives as long as the mod. The
+runtime detaches whatever your mod still holds when it is unloaded or disabled.
+
+Build the example as any mod, put `build/dist/wxl.model-swap/` in the client's `Mods/`, and walk to a
+place with murlocs: they are gnolls, and `Logs\WarcraftXL.log` holds a `[model-swap] model ...`
+line per model. The mod's manifest asks for `"abi": "0.1.16"`, which brought `wxl.point`, and
+requires the service.
+
+What to know before writing your own:
+
+- **Order.** Handlers of a lower priority (the second argument of `Before`, `Replace`, `After`,
+  0 by default) run first among Befores, outermost among Replaces and last among Afters, so that
+  your mod's Before and After nest around the others'. Equal priorities follow the mods' load order.
+- **Faults.** A handler that crashes is stopped there, its mod disabled, and the call goes on: a
+  Replace that crashed before calling the original is followed by the original. A C++ exception
+  is caught at the handler and logged, and the call goes on the same way.
+- **Threads.** The points of `thread main` run on the client's main thread, as events do. A point
+  of `thread any` may run on several threads at once: its handler must hold no state (a lambda
+  without captures, or a function), which the facade checks when it compiles.
+- **One runtime only.** A function the 2008 compiler inlined everywhere has no address in the stock
+  client, so it is a point of the recompiled client alone (`CM2Shared::FinishLoading`, the end of a
+  model's load). `Here()` tells whether this runtime has a point and `Absent()` why not; attaching
+  where it is absent attaches nothing and logs why.
+- **Signatures.** Each attach carries the point's layout hash from your headers. If a later SDK
+  changes a point's signature, a mod built against the old one is refused with a line asking to
+  rebuild it, instead of being called with the wrong arguments. The points of `stable` never change
+  signature; a `provisional` one may, with a new version of the contract.
+- **Cost.** A point nobody is attached to costs nothing: on the stock client its function is not
+  hooked at all, and on the recompiled client it is the test of one byte. Attached, a call costs
+  about what an event's dispatch costs.
+
+For a point your mod only knows by name at run time, `wxl::PointService` lists them all
+(`Points()`), finds one (`Find(name)`), and attaches a handler of the generic shape, which is
+handed the call: `call->args[i]` is the address of argument `i` and `call->result` the address of
+the answer.
 
 ### Profiling memory
 

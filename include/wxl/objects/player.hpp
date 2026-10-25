@@ -6,6 +6,7 @@
 #ifndef WXL_OBJECTS_PLAYER_HPP
 #define WXL_OBJECTS_PLAYER_HPP
 
+#include "wxl/objects/container.hpp"
 #include "wxl/objects/unit.hpp"
 
 namespace wxl
@@ -51,16 +52,45 @@ namespace wxl
             return Player(api ? api->local_player() : WXL_HANDLE_NONE);
         }
 
-        Expected<uint32_t> Flags() const { return Read(&wxl_object_api::player_flags); }
-        /// 0 while unguilded.
-        Expected<uint32_t> GuildId() const { return Read(&wxl_object_api::player_guild_id); }
-        Expected<uint32_t> GuildRank() const { return Read(&wxl_object_api::player_guild_rank); }
-        Expected<uint32_t> ChosenTitle() const { return Read(&wxl_object_api::player_chosen_title); }
+#include "wxl/objects/generated/player.inc"
 
-        /// The item id shown in an equipment slot; 0 when the slot is empty.
-        Expected<uint32_t> VisibleItem(EquipSlot slot) const
+        /// The lines of its skill list that hold a skill, in list order. The active player only.
+        Expected<std::vector<wxl_skill>> Skills() const
         {
-            return ReadAt(&wxl_object_api::player_visible_item, static_cast<uint32_t>(slot));
+            std::vector<wxl_skill> skills;
+            for (uint32_t line = 0; line < 128; ++line)
+            {
+                Expected<wxl_skill> skill = Skill(line);
+                if (!skill) return Unexpected{skill.Error()};
+                if (skill->id) skills.push_back(*skill);
+            }
+            return skills;
+        }
+
+        /// The other members of its party, by guid, in party order. The active player only.
+        Expected<std::vector<wxl_guid>> PartyMembers() const
+        {
+            std::vector<wxl_guid> members;
+            for (uint32_t slot = 0; slot < 4; ++slot)
+            {
+                Expected<wxl_guid> guid = PartyMemberGuid(slot);
+                if (!guid) return Unexpected{guid.Error()};
+                if (*guid) members.push_back(*guid);
+            }
+            return members;
+        }
+
+        /// The members of its raid, itself included, by guid. The active player only.
+        Expected<std::vector<wxl_guid>> RaidMembers() const
+        {
+            std::vector<wxl_guid> members;
+            for (uint32_t slot = 0; slot < 40; ++slot)
+            {
+                Expected<wxl_guid> guid = RaidMemberGuid(slot);
+                if (!guid) return Unexpected{guid.Error()};
+                if (*guid) members.push_back(*guid);
+            }
+            return members;
         }
     };
 } // namespace wxl

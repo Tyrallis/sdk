@@ -23,14 +23,7 @@ namespace wxl
         /// kind (`Accepts(type)`). As<T>() is the checked way.
         explicit constexpr Corpse(const Object& object) : Object(object.Handle()) {}
 
-        /// The player it belongs to.
-        Expected<wxl_guid> OwnerGuid() const { return Read(&wxl_object_api::corpse_owner); }
-        /// The party the owner was in when they died, or WXL_GUID_NONE.
-        Expected<wxl_guid> PartyGuid() const { return Read(&wxl_object_api::corpse_party); }
-        Expected<uint32_t> DisplayId() const { return Read(&wxl_object_api::corpse_display_id); }
-        Expected<uint32_t> Guild() const { return Read(&wxl_object_api::corpse_guild); }
-        Expected<uint32_t> Flags() const { return Read(&wxl_object_api::corpse_flags); }
-        Expected<uint32_t> DynamicFlags() const { return Read(&wxl_object_api::corpse_dynamic_flags); }
+#include "wxl/objects/generated/corpse.inc"
     };
 } // namespace wxl
 

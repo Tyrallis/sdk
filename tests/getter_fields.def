@@ -84,6 +84,15 @@ WXL_GETTER_FIELD(corpse_guild, Corpse, Guild)
 WXL_GETTER_FIELD(corpse_flags, Corpse, Flags)
 WXL_GETTER_FIELD(corpse_dynamic_flags, Corpse, DynamicFlags)
 
+// From abi 0.1.18: the typed reads that answer a field as it is.
+WXL_GETTER_FIELD(unit_target_guid, Unit, Target)
+WXL_GETTER_FIELD(player_money, Player, Coinage)
+WXL_GETTER_FIELD(player_xp, Player, Xp)
+WXL_GETTER_FIELD(player_next_level_xp, Player, NextLevelXp)
+WXL_GETTER_FIELD(player_rested_xp, Player, RestStateExperience)
+WXL_GETTER_FIELD(player_honor_points, Player, HonorCurrency)
+WXL_GETTER_FIELD(player_arena_points, Player, ArenaCurrency)
+
 WXL_METHOD_FIELD(Guid, Object, Guid)
 WXL_METHOD_FIELD(Type, Object, Type)
 WXL_METHOD_FIELD(Target, Unit, Target)

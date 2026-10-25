@@ -1,0 +1,15 @@
+{
+  "$schema": "../../../schema/mod.json",
+  "id": "wxl.test-throw",
+  "name": "Test throw",
+  "version": "1.0.0",
+  "abi": "0.1.8",
+  "description": "Throws a C++ exception from an event handler and from a script function: each throw costs that call only.",
+  "binaries": {
+    "win-x64": "bin/x64/test-throw.dll",
+    "win-x86": "bin/x86/test-throw.dll"
+  },
+  "optional": [
+    { "service": "wxl.script", "version": 1 }
+  ]
+}

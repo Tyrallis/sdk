@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
+//
+// wxl.m2file as data: one row per member of wxl_m2file_api, in member order. The shapes and their
+// columns are described in wxl/services/rows.hpp.
+//
+// Every member writes the client's memory as it lies: no script reaches them.
+
+#ifndef WXL_API
+#error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including m2file.def"
+#endif
+
+WXL_API_SERVICE(m2file, WXL_M2FILE_SERVICE, WXL_M2FILE_SERVICE_VERSION, (0, 1, 20), raw,
+                "What a mod needs to reshape a model file the client has parsed: arrays read and pointed the runtime's way, memory in their reach, the shadow pass's bones.")
+
+WXL_API(m2file, alloc_near, AllocNear, ptr, (cptr anchor, u32 size), native, generated, "")
+WXL_API(m2file, animate_bones, AnimateBones, none, (ptr file), native, generated, "")
+WXL_API(m2file, array_data, ArrayData, ptr, (cptr array), native, generated, "")
+WXL_API(m2file, set_array, SetArray, result, (ptr array, cptr data, u32 count), native, generated, "")

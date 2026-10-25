@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
+//
+// wxl.point as data: one row per member of wxl_point_api, in member order. The shapes and their
+// columns are described in wxl/services/rows.hpp.
+//
+// A script reads the list; attaching a handler stays native for now.
+
+#ifndef WXL_API
+#error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including point.def"
+#endif
+
+WXL_API_SERVICE(point, WXL_POINT_SERVICE, WXL_POINT_SERVICE_VERSION, (0, 1, 16), open,
+                "Functions of the engine a mod runs code before, instead of or after.")
+
+WXL_API_FIELD(wxl_point_info, point, u32)
+WXL_API_FIELD(wxl_point_info, name, str)
+WXL_API_FIELD(wxl_point_info, signature, str)
+WXL_API_FIELD(wxl_point_info, thread, u32)
+WXL_API_FIELD(wxl_point_info, flags, u32)
+WXL_API_FIELD(wxl_point_info, layout_hash, u32)
+WXL_API_FIELD(wxl_point_info, arg_count, u32)
+WXL_API_FIELD(wxl_point_info, absent, str)
+
+WXL_API(point, list, Points, list<wxl_point_info>, (), generated, by_hand,
+        "Every point of the table, with its signature, thread, flags and, when this runtime does not have it, why.")
+WXL_API(point, find, Find, out<u32>, (cstr name), generated, generated,
+        "The id of a point this runtime has, by name.")
+WXL_API(point, attach, Attach, u32, (u32 point, u32 side, point_fn handler, ptr user, i32 priority, u32 layout_hash), native, by_hand, "")
+WXL_API(point, detach, Detach, result, (u32 attachment), native, by_hand, "")
+WXL_API(point, call_original, CallOriginal, none, (point_call call), native, by_hand, "")

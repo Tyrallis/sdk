@@ -1,0 +1,12 @@
+{
+  "$schema": "../../../schema/mod.json",
+  "id": "wxl.test-reload",
+  "name": "Test reload",
+  "version": "1.0.0",
+  "abi": "0.1.5",
+  "description": "Reloads when a file of its own changes, stays unloaded while its mod.json is broken and loads again once it is repaired; wxl.selftest drives it through the functions it registers.",
+  "lua": "init.lua",
+  "optional": [
+    { "service": "wxl.script", "version": 1 }
+  ]
+}

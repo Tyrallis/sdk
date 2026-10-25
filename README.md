@@ -5,7 +5,7 @@
 **The contract a WarcraftXL mod is written against**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![ABI](https://img.shields.io/badge/ABI-0.1.15-blue.svg)](include/wxl/abi.h)
+[![ABI](https://img.shields.io/badge/ABI-0.1.20-blue.svg)](include/wxl/abi.h)
 [![C++](https://img.shields.io/badge/C%2B%2B-17%20and%20up-blue.svg)](#-getting-started)
 [![Header only](https://img.shields.io/badge/header--only-yes-lightgrey.svg)](include/wxl)
 
@@ -88,6 +88,9 @@ cmake -S . -B build
 cmake --build build --config Debug
 ctest --test-dir build -C Debug
 ```
+
+The same build assembles the in-game test suite, `build/ingame/Mods/`, to copy into a client:
+see [`tests/ingame/README.md`](tests/ingame/README.md).
 
 ### Run the tests from Linux
 
@@ -191,9 +194,9 @@ serves the client's own Lua and watches the server traffic -- and
 
 ## 🔌 What a runtime offers
 
-Events are grouped into ten script families: `WorldScript`, `RenderScript`, `ObjectScript`,
-`AssetScript`, `NetScript`, `LuaScript`, `CombatScript`, `PlayerScript`, `GlueScript` and
-`ChatScript`. Override the hooks you want; the rest cost nothing. A hook takes its event's
+Events are grouped into fifteen script families: `WorldScript`, `RenderScript`, `ObjectScript`,
+`AssetScript`, `NetScript`, `LuaScript`, `CombatScript`, `PlayerScript`, `GlueScript`,
+`ChatScript`, `LootScript`, `ItemScript`, `QuestScript`, `GroupScript` and `SocialScript`. Override the hooks you want; the rest cost nothing. A hook takes its event's
 arguments as parameters, `OnMessageReceived(uint32_t opcode, wxl::Bytes data, wxl::Answer
 suppressed)`, in C++ and in Lua alike.
 
@@ -207,15 +210,20 @@ Beyond events, a runtime publishes services, and a mod asks for the ones it need
 | `wxl.data` | the client's databases, served from a mod's files | yes |
 | `wxl.net` | messages to and from the server | yes; no runtime publishes it yet |
 | `wxl.ui` | frames and the interface | yes; no runtime publishes it yet |
+| `wxl.point` | functions of the engine: run code before, instead of or after them | yes; a few exist on one runtime, and say so |
+| `wxl.m2file` | a parsed model file's arrays, read and pointed the runtime's way, for a mod that teaches the client a model format | yes |
+| `wxl.m2` | the models objects draw with, and models a mod makes and hangs on them | yes |
+| `wxl.gx` | the client's D3D9 device, to draw a model batch again (`ModelBatchDrawn`) | yes |
 | `wxl.hook` | hook points a runtime names and keeps working | yes |
 | `wxl.hook.raw` | a detour at a raw address | no: runtimes that load into a shipped binary |
 | `wxl.patch` | bytes written into the image | no: runtimes that load into a shipped binary |
 
 Each service has a typed facade with its name and version sealed in -- `wxl::ObjectService`,
 `wxl::ScriptService`, `wxl::StorageService`, `wxl::DataService`, `wxl::NetService`,
-`wxl::UiService`, `wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService` -- taking and
+`wxl::UiService`, `wxl::PointService`, `wxl::M2FileService`, `wxl::M2Service`, `wxl::GxService`,
+`wxl::HookService`, `wxl::RawHookService`, `wxl::PatchService` -- taking and
 returning C++ types. `wxl::Service<T>` is still there for the raw table. Lua mods reach the same
-services as `wxl.storage`, `wxl.data`, `wxl.script`, `wxl.hook` and `wxl.patch`, built from the
+services as `wxl.storage`, `wxl.data`, `wxl.script`, `wxl.hook`, `wxl.patch` and `wxl.m2`, built from the
 same tables.
 
 **Portable means a runtime may serve it, not that yours does.** A facade tests false and every
@@ -266,8 +274,14 @@ examples/lua-hello/ the same in Lua: a folder, no build
 examples/lua-services/ a Lua mod using the services: files, a search path, databases, the
                    client's own script
 examples/memory-report/ a Lua mod that writes where the client's memory goes into a report
+examples/model-swap/ a C++ mod changing the engine through a point: the model cache
+examples/asset-provider/ a C++ mod serving an add-on from memory through an asset provider, and
+                   converting it through a transform
+examples/lua-assets/ a Lua mod serving a file and watching what the engine loads
 examples/probe/    a Lua test tool: every event the runtime raises, and /mark, into the log
 tests/             the contract, the mod host, the shared runtime and wxl.lua, each against fakes
+tests/ingame/      the same against a real client: test mods and wxl.selftest, which drives them
+                   from the game and logs PASS or FAIL per check
 ```
 
 A mod links `wxl::sdk` and nothing else. A runtime links `wxl::host` and `wxl::runtime` too, and
@@ -275,7 +289,7 @@ supplies only the bindings that reach its own client.
 
 ## 🔢 Versioning
 
-`major.minor.feature`, in [`abi.h`](include/wxl/abi.h): today `0.1.15`.
+`major.minor.feature`, in [`abi.h`](include/wxl/abi.h): today `0.1.20`.
 
 - **Major** changes when an existing field, signature or id changes meaning. A runtime refuses a
   mod built against a different major.
@@ -300,6 +314,8 @@ Event ids and stage numbers are appended, never renumbered, never removed.
 - [`schema/mod.json`](schema/mod.json) -- the manifest schema, for your editor
 - [`template/`](template/) -- a working mod to copy
 - [`examples/scout/`](examples/scout/) -- the worked example the tutorial builds
+- [`examples/model-swap/`](examples/model-swap/) -- the engine changed through a point ("Changing the engine: points" in Building a mod)
+- [`examples/asset-provider/`](examples/asset-provider/) and [`examples/lua-assets/`](examples/lua-assets/) -- files served and converted ("Serving and converting assets" in both guides)
 
 ## 💬 Support
 
@@ -313,6 +329,10 @@ Event ids and stage numbers are appended, never renumbered, never removed.
 3. Append ids, never renumber them.
 4. Add the conformance check with the feature -- a contract without a test is a suggestion.
 5. Open a pull request.
+
+**Contributors.** Tyrallis brought the model services (`wxl.m2file`, `wxl.m2`, `wxl.gx`), the
+character appearance seams behind `AppearanceChanged`, and the recompiled client's skins over 65535
+indices and textures over 4 MB (sdk, core and client pull requests #1).
 
 ## 📄 License
 

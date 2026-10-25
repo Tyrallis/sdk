@@ -2,7 +2,8 @@
 # client is reached. A runtime links this and supplies the bindings.
 add_library(wxl-runtime STATIC
     src/handles.cpp
-    src/object_service.cpp)
+    src/object_service.cpp
+    src/object_reads.cpp)
 add_library(wxl::runtime ALIAS wxl-runtime)
 
 target_include_directories(wxl-runtime PUBLIC

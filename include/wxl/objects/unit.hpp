@@ -38,10 +38,7 @@ namespace wxl
         /// kind (`Accepts(type)`). As<T>() is the checked way.
         explicit constexpr Unit(const Object& object) : Object(object.Handle()) {}
 
-        /// 0 or less is a dead unit, as the client reads it; a missing value is a gone one.
-        Expected<int32_t> Health() const { return Read(&wxl_object_api::unit_health); }
-        Expected<uint32_t> MaxHealth() const { return Read(&wxl_object_api::unit_max_health); }
-        Expected<uint32_t> Level() const { return Read(&wxl_object_api::unit_level); }
+#include "wxl/objects/generated/unit.inc"
 
         /// Health as a fraction in 0..1; 0 when the unit has no maximum to compare against.
         Expected<float> HealthFraction() const
@@ -61,23 +58,6 @@ namespace wxl
             return Unit(*target);
         }
 
-        Expected<uint32_t> PowerValue(Power power) const
-        {
-            return ReadAt(&wxl_object_api::unit_power, static_cast<uint32_t>(power));
-        }
-        Expected<uint32_t> MaxPowerValue(Power power) const
-        {
-            return ReadAt(&wxl_object_api::unit_max_power, static_cast<uint32_t>(power));
-        }
-
-        /// The power the unit runs on.
-        Expected<Power> PowerType() const
-        {
-            const Expected<uint32_t> type = Read(&wxl_object_api::unit_power_type);
-            if (!type) return Unexpected{type.Error()};
-            return static_cast<Power>(*type);
-        }
-
         /// The unit's own power and its maximum, by PowerType().
         Expected<uint32_t> PowerValue() const
         {
@@ -92,31 +72,34 @@ namespace wxl
             return MaxPowerValue(*type);
         }
 
-        Expected<uint32_t> Race() const { return Read(&wxl_object_api::unit_race); }
-        Expected<uint32_t> Class() const { return Read(&wxl_object_api::unit_class); }
-        /// 0 male, 1 female, 2 none.
-        Expected<uint32_t> Sex() const { return Read(&wxl_object_api::unit_sex); }
+        /// Every aura the client holds on it, in slot order (AuraCount and Aura in one call).
+        Expected<std::vector<wxl_aura>> Auras() const
+        {
+            const Expected<uint32_t> count = AuraCount();
+            if (!count) return Unexpected{count.Error()};
+            std::vector<wxl_aura> auras;
+            auras.reserve(*count);
+            for (uint32_t slot = 0; slot < *count; ++slot)
+                if (Expected<wxl_aura> aura = Aura(slot)) auras.push_back(*aura);
+            return auras;
+        }
 
-        Expected<uint32_t> DisplayId() const { return Read(&wxl_object_api::unit_display_id); }
-        Expected<uint32_t> NativeDisplayId() const { return Read(&wxl_object_api::unit_native_display_id); }
-        /// 0 while not mounted.
-        Expected<uint32_t> MountDisplayId() const { return Read(&wxl_object_api::unit_mount_display_id); }
+        // --- what the player can do with it (wxl.action) ------------------------------------
 
-        Expected<uint32_t> FactionTemplate() const { return Read(&wxl_object_api::unit_faction_template); }
-        Expected<uint32_t> Flags() const { return Read(&wxl_object_api::unit_flags); }
-        Expected<uint32_t> Flags2() const { return Read(&wxl_object_api::unit_flags2); }
-        Expected<uint32_t> DynamicFlags() const { return Read(&wxl_object_api::unit_dynamic_flags); }
-        Expected<uint32_t> NpcFlags() const { return Read(&wxl_object_api::unit_npc_flags); }
+        /// Casts a spell the player knows at this unit, as CastSpellByID does.
+        wxl_result CastAt(uint32_t spell_id) const
+        {
+            const wxl_action_api* api = detail::ActionTable::Raw();
+            if (!detail::Carries(api, &wxl_action_api::cast_spell)) return WXL_E_UNSUPPORTED;
+            if (!HasHandle()) return WXL_E_NOT_FOUND;
+            return api->cast_spell(spell_id, handle_);
+        }
 
-        Expected<float> BoundingRadius() const { return Read(&wxl_object_api::unit_bounding_radius); }
-        Expected<float> CombatReach() const { return Read(&wxl_object_api::unit_combat_reach); }
+        /// Follows it, as /follow does.
+        wxl_result Follow() const { return Act(&wxl_action_api::follow); }
 
-        /// Who it charms, summons, is charmed by, was summoned by, was created by; none as 0.
-        Expected<wxl_guid> CharmGuid() const { return Read(&wxl_object_api::unit_charm); }
-        Expected<wxl_guid> SummonGuid() const { return Read(&wxl_object_api::unit_summon); }
-        Expected<wxl_guid> CharmedByGuid() const { return Read(&wxl_object_api::unit_charmed_by); }
-        Expected<wxl_guid> SummonedByGuid() const { return Read(&wxl_object_api::unit_summoned_by); }
-        Expected<wxl_guid> CreatedByGuid() const { return Read(&wxl_object_api::unit_created_by); }
+        /// Targets what it targets, as /assist does.
+        wxl_result Assist() const { return Act(&wxl_action_api::assist); }
     };
 } // namespace wxl
 
