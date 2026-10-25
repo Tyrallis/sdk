@@ -43,8 +43,9 @@ A launch reads in this order:
    original `Wow.exe`, `x64` for the recompiled client), the contract version it serves (`abi`),
    the commits it was built from, the executable with its size and, on the original client,
    whether its code is the unmodified 3.3.5a one, then Windows (and Wine or Proton, when the game
-   runs on Linux), the processor, the memory and the address space, the command line, and the
-   settings it read.
+   runs on Linux), the processor, the memory and the address space, the command line, the
+   settings it read, and whether the profiler is on (`profiler: off`, or its port and who can
+   connect: see [Profiling](profiling.md)).
 2. **The mods**: one line per folder of `Mods/`, loaded or not, and if not, why. Lua mods are
    reported a second time by `wxl.lua`, which is what runs them.
 3. **The stages**: `stage early`, `stage storage`, `stage graphics`, `stage script`,
@@ -110,8 +111,24 @@ Two more settings:
 - The environment variable `WXL_LOG_LEVEL` (`WXL_LOG_LEVEL=debug`), when it is set, wins over the
   file's `level`.
 
+The same file turns the profiler on, in a section of its own, `[profile]`:
+
+```ini
+[profile]
+; 0 or 1: off without this line
+enabled = 1
+; the TCP port the viewer connects to
+port = 8086
+; localhost: this computer only; any: other computers too
+listen = localhost
+```
+
+[Profiling](profiling.md) explains each line. The environment variable `WXL_PROFILE` (`0` or `1`),
+when it is set, wins over `enabled`, as `WXL_LOG_LEVEL` does over `level`.
+
 A line of the file the runtime does not understand is named in a warning near the top of the log,
-with its line number, and otherwise ignored.
+with its line number, and otherwise ignored: a misspelt key, a level that is not one, a port that
+is not a number from 1 to 65535.
 
 ## 4. Marking the moments of a test
 

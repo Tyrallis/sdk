@@ -6,13 +6,13 @@ raised, or the handlers of one mod. The runtime carries a profiler that answers 
 guide shows you how to read it and how to add your own measurements to it.
 
 The profiler is [Tracy](https://github.com/wolfpld/tracy). It has two halves: a small client
-inside the game, which WarcraftXL.dll already contains, and a viewer, a program you run on any
-computer that can reach the game over the network. The viewer connects to the game, and from
-then on draws every frame on a timeline, with what ran inside it.
+inside the game, which WarcraftXL.dll already contains, and a viewer, a program you run on the
+game's computer or on another one. The viewer connects to the game, and from then on draws every
+frame on a timeline, with what ran inside it.
 
-While no viewer is connected, the client records nothing. Every measurement point costs a single
-check, a few nanoseconds, so the profiler stays in the builds players run, and your own
-measurements can stay in the mod you ship.
+The client is off until you turn it on (section 2): a player who never asks for it has no port
+open. Once on, it records nothing while no viewer is connected, and every measurement point costs
+a single check, a few nanoseconds, so your own measurements can stay in the mod you ship.
 
 ## 1. Get the viewer
 
@@ -28,36 +28,78 @@ saying the protocol is incompatible. This runtime carries **Tracy 0.14.1**.
 
 ## 2. Connect it to the game
 
-Start the game as usual, x86 or x64. In `Logs/WarcraftXL.log` you should find:
+### Turn the profiler on
+
+Create a file named `WarcraftXL.ini` next to the game's executable (beside `Wow.exe` or
+`WowClient64.exe`), or open it if it is there already, and add:
+
+```ini
+[profile]
+enabled = 1
+```
+
+Start the game, x86 or x64. The header at the top of `Logs/WarcraftXL.log` says what the profiler
+does, and a moment later it is ready:
 
 ```
-[INFO ] [profile] profiler up (Tracy 0.14.1, on demand): a viewer connects on port 8086
+[INFO ] [session] profiler: on ([profile] enabled in WarcraftXL.ini), Tracy 0.14.1 on demand, port 8086, listen localhost: 127.0.0.1 only
+[INFO ] [profile] profiler up (Tracy 0.14.1, on demand): a viewer connects to 127.0.0.1 port 8086
 ```
 
-The client listens on TCP port **8086**. In the viewer's window:
+Without the line, or with `enabled = 0`, the header says `profiler: off` and nothing listens.
 
-- **Same computer, or the same local network:** the game appears in the list under the address
-  field within a second or two, named after its executable (`Wow.exe` or `WowClient64.exe`).
-  Click it.
-- **Anywhere else:** type the game computer's address in the field, `192.168.1.20` say, and press
-  **Connect**. Add `:port` if you changed it (below).
+The section takes two more lines, both optional:
+
+| Line | What it does |
+|---|---|
+| `port = 8086` | the TCP port the viewer connects to, from 1 to 65535; 8086 when the line is missing |
+| `listen = localhost` | who can connect: `localhost`, only programs on the game's own computer (the address `127.0.0.1`), or `any`, other computers too. `localhost` when the line is missing |
+
+The environment variable `WXL_PROFILE` overrides `enabled` when it is set: `WXL_PROFILE=1` turns
+the profiler on for one launch without touching the file, `WXL_PROFILE=0` keeps it off whatever
+the file says. In Steam's launch options that is `WXL_PROFILE=1 %command%`.
+
+### The viewer on the same computer
+
+This is the case `listen = localhost` is made for. In the viewer's window, type `127.0.0.1` in
+the address field and press **Connect** (`127.0.0.1:8090` if you set another port).
+
+Under Proton or Wine the game runs on Linux, and it listens on the Linux machine itself: a viewer
+started on that Linux machine connects to `127.0.0.1` the same way.
+
+### The viewer on another computer
+
+When the game runs on one computer and you watch it from another (a game streamed to your
+desktop, say), the viewer runs where you are, and the game must accept a connection from the
+network:
+
+1. Set `listen = any` under `[profile]`, and start the game again. The header now says
+   `listen any: every interface, other computers can connect`.
+2. Let the port in through the firewall of the game's computer:
+   - **On Windows,** the first time the game listens, Windows may ask whether to allow it on the
+     network: allow it on private networks. If it does not ask and the viewer cannot connect,
+     add an inbound rule for TCP port 8086 in *Windows Defender Firewall*.
+   - **Under Proton or Wine,** the game listens on the Linux machine's network, and Windows'
+     firewall plays no part: open TCP port 8086 in the Linux machine's firewall, if it has one.
+3. In the viewer, type the address of the game's computer, `192.168.1.20` say, and press
+   **Connect**.
+
+Anyone who can reach that port can watch what the game does while it runs, so keep `any` for
+your own network and set `localhost` back when you are done.
+
+The game does not announce itself on the network, so it never appears in the list under the
+address field: type the address.
+
+### Once connected
 
 The timeline starts filling at once. Press **Pause** in the viewer to stop scrolling and look at
 a frame; disconnecting leaves the game as it was.
 
-Some things to know:
-
-- **Under Proton or Wine,** the game listens on the Linux machine's own network, so connect to
-  that machine's address. When the game runs in one place and you watch it from another (a game
-  streamed to your desktop, say), the viewer runs on your desktop and connects to the address of
-  the machine that runs the game. The list under the address field only shows games on the same
-  local network: type the address when it does not appear.
-- **A firewall** on the game's machine must let TCP 8086 in.
-- **Another port:** set the environment variable `TRACY_PORT` before the game starts, as
-  `TRACY_PORT=8090 %command%` in Steam's launch options. The log line names the port in use.
-- **No profiler at all:** `WXL_PROFILE=0` in the environment keeps the client from starting, so
-  nothing listens. A runtime built with the CMake option `WXL_PROFILE` set to `OFF` carries no
-  profiler; there, the calls of section 4 do nothing.
+- **The port is taken:** two games started on the same computer cannot both listen on 8086. The
+  second one's log says `port 8086 is taken`; give it another `port`.
+- **A build without the profiler:** a runtime built with the CMake option `WXL_PROFILE` set to
+  `OFF` carries no profiler. Its header says `profiler: not in this build`, it ignores
+  `[profile]`, and the calls of section 4 do nothing.
 
 ## 3. Read the timeline
 
@@ -155,7 +197,8 @@ end
 Your handler is already a zone of its own, `<your id>: OnUpdate`; these appear inside it. When a
 handler returns, or stops on an error, whatever it left open is closed with it, so a forgotten
 `End` cannot spill into the rest of the frame. `Plot`, `Message` and `FrameMark` are the C++
-ones. A mod that uses the module asks for `"abi": "0.1.12"` in its `mod.json`.
+ones. The module came with abi `0.1.12`: a mod that uses it asks for `"abi": "0.1.12"` in its
+`mod.json`, and one that asks for less is told so at its first use of `wxl.profile`.
 
 ## 5. What a zone costs
 

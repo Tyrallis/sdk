@@ -1074,6 +1074,18 @@ Observe: OnChatMessage of ChatScript came with abi 0.1.6, and this mod's mod.jso
 Asking for `0.1.6` then makes a `0.1.5` runtime refuse the mod at the start, saying why, rather
 than run it without the event. A folder without a manifest may use everything its runtime serves.
 
+The service modules follow the same rule (abi `0.1.14`). A module that came with a later feature
+than your manifest's `abi`, such as `wxl.profile` (`0.1.12`), raises an error the first time your
+code reaches into it, and so does a function added to a module after the module came, such as
+`wxl.storage.RemoveSearchPath` (`0.1.10`):
+
+```
+wxl.my-mod/init.lua:3: wxl.profile came with abi 0.1.12, and this mod's mod.json asks for 0.1.11; to use it, set "abi": "0.1.12" there
+```
+
+The modules `wxl.storage`, `wxl.data`, `wxl.script`, `wxl.hook` and `wxl.patch` were there from
+`0.1.5` on: any `abi` reaches them.
+
 ### When each part runs
 
 | What | When |
@@ -1348,7 +1360,9 @@ answer `nil, "unsupported"` on an older runtime, as any function the runtime lac
 `AssetScript`'s `OnArchiveMounted` and `OnArchiveUnmounted`, `WorldScript`'s `OnMemoryPressure`
 and the `wxl.footprint` module came with `0.1.11`; the `wxl.profile` module with `0.1.12`.
 `0.1.13` brought no event: `wxl.runtime.Raises` says whether the runtime raises an event at all,
-and answers `nil, "unsupported"` on an older runtime.
+and answers `nil, "unsupported"` on an older runtime. `0.1.14` brought no event either: from it on,
+a service module or function newer than the manifest's `abi` is refused as an event is, so a mod
+using `wxl.footprint` asks for `0.1.11` and one using `wxl.profile` for `0.1.12`.
 
 Not every runtime raises every event. Subscribing to one that yours does not raise logs a warning
 naming it, and the handler never runs.
@@ -1374,6 +1388,7 @@ your mod's id first.
 | `<Family>.<name> is not an event of <Family>; its events are ...` | a misspelt family method, or something other than a handler on a family table |
 | `refused <id>: needs abi ...` | the manifest's `abi` is newer than your `wxl.lua` or the runtime, or of another minor. The line gives both versions |
 | `On<Event> of <Family> came with abi ...` | the event is newer than your manifest's `abi`; the line says what to ask for |
+| `wxl.<module> came with abi ...`, `wxl.<module>.<Function> came with abi ...` | the module, or that function of it, is newer than your manifest's `abi`; the line says what to ask for |
 | `refused <id>: requires service ...` | a service under `requires` is missing from this runtime |
 | `folder '<name>' holds an init.lua but its name makes no mod id` | rename the folder, or give it a `mod.json` with an `id` |
 | `this runtime does not raise On<Event> of <Family>Script` | the handler is valid but will never run on this runtime |
