@@ -8,7 +8,7 @@
 #error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including action.def"
 #endif
 
-WXL_API_SERVICE(action, WXL_ACTION_SERVICE, WXL_ACTION_SERVICE_VERSION, (0, 1, 18), safe,
+WXL_API_SERVICE(action, WXL_ACTION_SERVICE, WXL_ACTION_SERVICE_VERSION, (0, 1, 18), open,
                 "What the player can do, through the client's own functions: target, interact, cast, use, follow, move. Main thread only.")
 
 WXL_API(action, target, Target, result, (object target), generated, generated,

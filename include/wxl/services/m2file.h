@@ -22,7 +22,7 @@
 // write an array the same way on both, and alloc_near gives memory a 64-bit client's array can
 // reach.
 //
-// Not safe: everything here is the client's own memory, written as it lies. Calls are made on
+// Raw: everything here is the client's own memory, written as it lies. Calls are made on
 // the client's main thread, from the handlers of those events.
 
 #ifndef WXL_SERVICE_M2FILE_H

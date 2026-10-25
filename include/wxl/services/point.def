@@ -10,7 +10,7 @@
 #error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including point.def"
 #endif
 
-WXL_API_SERVICE(point, WXL_POINT_SERVICE, WXL_POINT_SERVICE_VERSION, (0, 1, 16), safe,
+WXL_API_SERVICE(point, WXL_POINT_SERVICE, WXL_POINT_SERVICE_VERSION, (0, 1, 16), open,
                 "Functions of the engine a mod runs code before, instead of or after.")
 
 WXL_API_FIELD(wxl_point_info, point, u32)

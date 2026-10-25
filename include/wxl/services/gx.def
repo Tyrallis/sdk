@@ -10,7 +10,7 @@
 #error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including gx.def"
 #endif
 
-WXL_API_SERVICE(gx, WXL_GX_SERVICE, WXL_GX_SERVICE_VERSION, (0, 1, 20), unsafe,
+WXL_API_SERVICE(gx, WXL_GX_SERVICE, WXL_GX_SERVICE_VERSION, (0, 1, 20), raw,
                 "The client's Direct3D 9 device, for a mod that draws with it.")
 
 WXL_API(gx, d3d9_device, D3d9Device, ptr, (), native, generated, "")

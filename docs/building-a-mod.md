@@ -949,7 +949,7 @@ mod and a mod that teaches the client a later expansion's model format.
 | reshape a model file as the client loads it | `AssetScript::OnModelParsed` and the stages after it, `wxl::M2FileService` | every runtime |
 | draw a batch of a model again, with your own state | `RenderScript::OnModelBatchDrawn`, `wxl::GxService` | every runtime |
 
-The three services are **not safe**: they hand you the client's own models and memory, which no
+The three services are **raw**: they hand you the client's own models and memory, which no
 check stands between. A native mod names each one it uses in its manifest, as any service.
 
 **What characters wear.** A character's appearance is what the client dresses: every player, every

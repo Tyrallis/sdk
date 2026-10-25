@@ -8,7 +8,7 @@
 // draw issued again redraws the batch, into another render target or with another pixel shader
 // (an outline, a glow).
 //
-// Not safe: the device and its state are the client's own, and what a mod changes on it the
+// Raw: the device and its state are the client's own, and what a mod changes on it the
 // client does not know about until the mod says so through invalidate_state. Calls are made on
 // the client's main thread, from inside a frame.
 

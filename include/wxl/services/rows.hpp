@@ -13,8 +13,8 @@
 //
 //   WXL_API_SERVICE(svc, name, version, since, access, doc)
 //       opens the table of wxl_<svc>_api: the macros of its name and version, the version of
-//       the contract it came with as `(major, minor, feature)`, and `safe` or `unsafe`. A script
-//       mod whose mod.json asks for an older abi cannot use it; an unsafe service reaches a
+//       the contract it came with as `(major, minor, feature)`, and `open` or `raw`. A script
+//       mod whose mod.json asks for an older abi cannot use it; a raw service reaches a
 //       script mod only when its mod.json declares it. The services there before the contract
 //       dated what it brought say (0, 1, 5), the oldest abi a mod can ask for.
 //   WXL_API_SINCE(svc, member, (major, minor, feature))
@@ -335,8 +335,8 @@ namespace wxl::api
     template <class Api>
     struct ServiceOf;
 
-#define WXL_API_UNSAFE_safe   false
-#define WXL_API_UNSAFE_unsafe true
+#define WXL_API_RAW_open false
+#define WXL_API_RAW_raw  true
 #define WXL_API_SERVICE(svc, name, version, since, access, doc)                     \
     template <>                                                         \
     struct ServiceOf<wxl_##svc##_api>                                   \
@@ -344,7 +344,7 @@ namespace wxl::api
         static constexpr const char* kId      = #svc;                   \
         static constexpr const char* kName    = name;                   \
         static constexpr uint32_t    kVersion = version;                \
-        static constexpr bool        kUnsafe  = WXL_API_UNSAFE_##access; \
+        static constexpr bool        kRaw     = WXL_API_RAW_##access;    \
     };
 #define WXL_API(svc, member, Name, answer, params, lua, cxx, doc)
 #define WXL_API_RESOURCE(svc, Name, ctype, none_value)
@@ -425,7 +425,7 @@ namespace wxl::api
         const char* name;     ///< what the runtime publishes it as, "wxl.storage"
         uint32_t    version;
         Version     since;    ///< the version of the contract the table came with
-        bool        unsafe;   ///< reached by a script mod only when its mod.json declares it
+        bool        raw;      ///< reached by a script mod only when its mod.json declares it
         uint32_t    api_size; ///< sizeof the table's struct
         const char* doc;      ///< what it is, in a line
     };
@@ -481,7 +481,7 @@ namespace wxl::api
     {
 #define WXL_API_VERSION_(major, minor, feature) Version{major, minor, feature}
 #define WXL_API_SERVICE(svc, name, version, since, access, doc)                                 \
-    ServiceRow{#svc, name, version, WXL_API_VERSION_ since, WXL_API_UNSAFE_##access,             \
+    ServiceRow{#svc, name, version, WXL_API_VERSION_ since, WXL_API_RAW_##access,                \
                uint32_t(sizeof(wxl_##svc##_api)), doc},
 #define WXL_API(svc, member, Name, answer, params, lua, cxx, doc)
 #define WXL_API_RESOURCE(svc, Name, ctype, none_value)
@@ -895,7 +895,7 @@ namespace wxl::api
     static constexpr ::wxl::api::Method<&wxl_##svc##_api::member, answer params> Name{};
 #define WXL_API_CXX_by_hand(svc, member, Name, answer, params)
 
-#undef WXL_API_UNSAFE_unsafe
-#undef WXL_API_UNSAFE_safe
+#undef WXL_API_RAW_raw
+#undef WXL_API_RAW_open
 
 #endif // WXL_SERVICE_ROWS_HPP

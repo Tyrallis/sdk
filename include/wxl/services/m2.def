@@ -11,7 +11,7 @@
 #error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including m2.def"
 #endif
 
-WXL_API_SERVICE(m2, WXL_M2_SERVICE, WXL_M2_SERVICE_VERSION, (0, 1, 20), unsafe,
+WXL_API_SERVICE(m2, WXL_M2_SERVICE, WXL_M2_SERVICE_VERSION, (0, 1, 20), raw,
                 "The models objects draw with, what a character wears, and models a mod makes and hangs on them. Main thread only.")
 
 WXL_API_RESOURCE(m2, Model, void*, nullptr)

@@ -478,9 +478,9 @@ namespace
             if (!any) continue;
             out << "---" << services[s].name << ". " << services[s].doc
                 << (CameWith(services[s].since).empty() ? "" : "\n---" + CameWith(services[s].since))
-                << (services[s].unsafe ? "\n---Unsafe: present only when the mod's mod.json declares it, in "
-                                         "\"requires\" or \"optional\"."
-                                       : "")
+                << (services[s].raw ? "\n---Raw: present only when the mod's mod.json declares it, in "
+                                     "\"requires\" or \"optional\"."
+                                   : "")
                 << "\n---@class wxl." << services[s].id << "\nlocal " << services[s].id << " = {}\n\n";
             for (uint32_t i = 0; i < rowCount; ++i)
             {

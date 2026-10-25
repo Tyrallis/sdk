@@ -1149,7 +1149,7 @@ namespace wxl::lua
                 lua_setfield(L, -2, service.id);
                 continue;
             }
-            if (service.unsafe && !Declares(mod.Manifest(), service.name))
+            if (service.raw && !Declares(mod.Manifest(), service.name))
             {
                 PushUndeclared(L, mod, service);
                 lua_setfield(L, -2, service.id);

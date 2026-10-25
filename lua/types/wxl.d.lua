@@ -2742,7 +2742,7 @@ function hook.Points() end
 function hook.HasPoint(name) end
 
 ---wxl.patch. Bytes written into the client's image over the bytes expected there, journaled.
----Unsafe: present only when the mod's mod.json declares it, in "requires" or "optional".
+---Raw: present only when the mod's mod.json declares it, in "requires" or "optional".
 ---@class wxl.patch
 local patch = {}
 
@@ -2948,7 +2948,7 @@ function point.Find(name) end
 
 ---wxl.m2. The models objects draw with, what a character wears, and models a mod makes and hangs on them. Main thread only.
 ---Came with abi 0.1.20: a mod whose mod.json asks for an older abi cannot use it.
----Unsafe: present only when the mod's mod.json declares it, in "requires" or "optional".
+---Raw: present only when the mod's mod.json declares it, in "requires" or "optional".
 ---@class wxl.m2
 local m2 = {}
 

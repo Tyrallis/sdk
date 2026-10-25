@@ -1309,9 +1309,9 @@ int main(int argc, char** argv)
         Check(sink.Has("[wxl.undeclared] undeclared false ") &&
                   sink.Has("wxl.patch reaches the client's memory, so a mod uses it only when its mod.json declares it: "
                            "add { \"service\": \"wxl.patch\", \"version\": 1 } to \"requires\""),
-              "an unsafe module the manifest does not declare refuses every use, saying how to declare it");
+              "a raw module the manifest does not declare refuses every use, saying how to declare it");
         Check(sink.Has("[wxl.undeclared] modules table table table table nil"),
-              "the safe modules are there for every mod; a native-only table has no module");
+              "the open modules are there for every mod; a native-only table has no module");
 
         // The example: what the guide quotes.
         Check(sink.Has(("[wxl.lua-services] Interface\\FrameXML\\FrameXML.toc: " + std::to_string(toc.size()) +

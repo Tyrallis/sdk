@@ -15,7 +15,7 @@
 // appearance's points that the client strips from its interface copies (the character panel,
 // portraits, character select) is hung back on the copy after the strip.
 //
-// Not safe: a model pointer the client freed is not detected. Calls are made on the client's
+// Raw: a model pointer the client freed is not detected. Calls are made on the client's
 // main thread.
 
 #ifndef WXL_SERVICE_M2_H

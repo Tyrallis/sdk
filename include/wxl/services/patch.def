@@ -4,13 +4,13 @@
 // wxl.patch as data: one row per member of wxl_patch_api, in member order. The shapes and their
 // columns are described in wxl/services/rows.hpp.
 //
-// Unsafe: a Lua mod reaches it only when its mod.json declares the service.
+// Raw: a Lua mod reaches it only when its mod.json declares the service.
 
 #ifndef WXL_API
 #error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including patch.def"
 #endif
 
-WXL_API_SERVICE(patch, WXL_PATCH_SERVICE, WXL_PATCH_SERVICE_VERSION, (0, 1, 5), unsafe,
+WXL_API_SERVICE(patch, WXL_PATCH_SERVICE, WXL_PATCH_SERVICE_VERSION, (0, 1, 5), raw,
                 "Bytes written into the client's image over the bytes expected there, journaled.")
 
 // An applied write, from apply, undone by restore; a Lua mod's are restored, newest first, when

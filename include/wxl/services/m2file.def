@@ -10,7 +10,7 @@
 #error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including m2file.def"
 #endif
 
-WXL_API_SERVICE(m2file, WXL_M2FILE_SERVICE, WXL_M2FILE_SERVICE_VERSION, (0, 1, 20), unsafe,
+WXL_API_SERVICE(m2file, WXL_M2FILE_SERVICE, WXL_M2FILE_SERVICE_VERSION, (0, 1, 20), raw,
                 "What a mod needs to reshape a model file the client has parsed: arrays read and pointed the runtime's way, memory in their reach, the shadow pass's bones.")
 
 WXL_API(m2file, alloc_near, AllocNear, ptr, (cptr anchor, u32 size), native, generated, "")
