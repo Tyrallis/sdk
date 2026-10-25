@@ -1282,6 +1282,8 @@ them in `include/wxl/services/<service>.def`.
 | `wxl.footprint.Categories()`, `.Sources()`, `.Archives()`, `.Tables()`, `.Regions()` | the lists of the last picture, as arrays of tables |
 | `wxl.footprint.Report(name, bytes, count)` | `true`: a consumer of the mod's own joins the picture as `<id>/<name>`; 0 and 0 take it out |
 | `wxl.footprint.WatchPressure(bytes)` | `true`: `OnMemoryPressure` when the largest free block falls under it; 0 stops |
+| `wxl.profile.Begin(name)`, `.End()`, `.Text(text)` | a zone on the profiler's timeline inside the running handler, closed by `End` or when the handler returns; a line of text on it (abi `0.1.12`, see [Profiling](profiling.md)) |
+| `wxl.profile.Plot(name, value)`, `.Message(text)`, `.FrameMark(name)`, `.Connected()` | a point on a graph; a line on the timeline; a frame of your own frame set; whether a viewer is connected |
 
 ### Object methods
 
@@ -1341,7 +1343,7 @@ and `OnChatMessage`'s last two parameters, came with `0.1.7`: a mod that uses th
 `0.1.9`. `0.1.10` brought no event: its `wxl.object.Unwatch` and `wxl.storage.RemoveSearchPath`
 answer `nil, "unsupported"` on an older runtime, as any function the runtime lacks does.
 `AssetScript`'s `OnArchiveMounted` and `OnArchiveUnmounted`, `WorldScript`'s `OnMemoryPressure`
-and the `wxl.footprint` module came with `0.1.11`.
+and the `wxl.footprint` module came with `0.1.11`; the `wxl.profile` module with `0.1.12`.
 
 Not every runtime raises every event. Subscribing to one that yours does not raise logs a warning
 naming it, and the handler never runs.
@@ -1386,6 +1388,7 @@ your mod's id first.
   search path, the databases, the client's own Lua.
 - [`examples/memory-report/`](../examples/memory-report/), a mod to keep: where the client's
   memory goes, written into a report every few minutes.
+- [Profiling](profiling.md): where your mod's time goes, in the Tracy viewer.
 - [`lua/types/wxl.d.lua`](../lua/types/wxl.d.lua), for every event, object method and service
   function.
 - [Your first mod](your-first-mod.md), the same platform from C++, for what only native code

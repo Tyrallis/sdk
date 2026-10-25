@@ -479,6 +479,13 @@ categories overlap (the client's Lua, its databases and its archives' tables are
 allocations too); `include/wxl/services/footprint.h` says what each one counts. The Lua example
 `examples/memory-report/` turns all of it into a report you can read.
 
+### Profiling time
+
+The runtime carries the Tracy profiler: connect its viewer and every event, every mod's handler
+and every frame shows on a timeline. `wxl/services/profile.hpp` (abi `0.1.12`) adds your own
+zones, `WXL_PROFILE_ZONE("Journal::Flush");` for the rest of a block, and graphs, messages and
+frame sets through `wxl::ProfileService`. [Profiling](profiling.md) walks through it.
+
 ### Resources
 
 Whatever the C boundary hands back as a token comes back as a move-only object that releases in
