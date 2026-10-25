@@ -146,8 +146,8 @@ state what it needs.
   "id": "wxl.lua-hello",
   "name": "Lua hello",
   "version": "1.0.0",
-  "abi": "0.1.5",
-  "description": "A Lua mod: it counts deaths, reports targets, answers two events and reloads when edited.",
+  "abi": "0.1.15",
+  "description": "A Lua mod: it counts deaths, reports targets, hides a message, swaps an icon and reloads when edited.",
   "lua": "init.lua",
   "optional": [
     { "service": "wxl.object", "version": 1 }
@@ -158,9 +158,9 @@ state what it needs.
 - `lua` names the entry file, and is what makes this a Lua mod. A C++ mod lists `binaries`
   instead; this manifest has none.
 - `abi` is the lowest version of the contract the mod needs, `major.minor.feature`. The contract
-  grows by features: each adds events, and a mod asks for the feature that brought the newest
-  event it uses. Everything lua-hello uses was there at `0.1.5`, so it asks for `0.1.5` and runs
-  on every runtime since. A runtime older than what a mod asks for, or of another major or minor,
+  grows by features: each adds events or functions, and a mod asks for the feature that brought
+  the newest one it uses. lua-hello swaps a file with `wxl.storage.Redirect`, which came with
+  `0.1.15`, so it asks for `0.1.15` and runs on every runtime since. A runtime older than what a mod asks for, or of another major or minor,
   refuses it and says why, instead of loading it and failing at the first unknown event.
 - `optional` lists **services** the mod uses when they are there. A service is a set of
   functions a runtime offers; `wxl.object` is the one that reads world objects. Listing a service
@@ -179,6 +179,7 @@ local Tally = require("lib.tally")
 -- State lives in the file's locals: it lasts from one event to the next, and starts over when
 -- the mod reloads.
 local deaths = Tally.new()
+local icons = 0
 ```
 
 `require("lib.tally")` loads `lib/tally.lua` from the mod's own folder and returns what that
@@ -203,9 +204,10 @@ function Tally:add(name)
 end
 ```
 
-`deaths` is a local of `init.lua`. Every handler defined in the file sees it, and it keeps its
-value from one event to the next for as long as the mod is loaded. That is how a mod remembers
-anything. When the mod reloads, the file runs again in a new Lua state and `deaths` starts empty.
+`deaths` and `icons` are locals of `init.lua`. Every handler defined in the file sees them, and
+they keep their values from one event to the next for as long as the mod is loaded. That is how a
+mod remembers anything. When the mod reloads, the file runs again in a new Lua state and both
+start over.
 
 ### Callbacks: the mod's own life
 
@@ -219,7 +221,7 @@ end)
 
 -- onShutdown runs when the client closes, and before a reload drops this state.
 registerForEvent("onShutdown", function()
-    print("deaths " .. deaths:summary())
+    print("deaths " .. deaths:summary() .. ", " .. icons .. " icon(s) opened")
 end)
 ```
 
@@ -232,7 +234,7 @@ but anything that needs the client up -- the player, the interface -- belongs in
 `onShutdown` is the last chance to report or save; here it prints the tally:
 
 ```
-[wxl.lua-hello] deaths 3 seen: Thorgrim x2, Boar x1
+[wxl.lua-hello] deaths 3 seen: Thorgrim x2, Boar x1, 41 icon(s) opened
 ```
 
 `wxl` is a table every mod has: `wxl.mod` describes this mod (from its manifest), `wxl.runtime`
@@ -327,9 +329,8 @@ parameter: a table with `x`, `y` and `z`.
 ### `Override`: changing what the client does
 
 Some events can be **answered**: the handler decides something, and the client acts on it.
-`OnMessageReceived` lets a handler hide a message from the client; `OnFileOpen` lets it name
-another file to open instead. For these, a handler's return value is its answer, and
-`Override(family, event, function)` subscribes it:
+`OnMessageReceived` lets a handler hide a message from the client. For these, a handler's return
+value is its answer, and `Override(family, event, function)` subscribes it:
 
 **`examples/lua-hello/init.lua`**
 
@@ -350,21 +351,47 @@ handler ran: `true` if another handler already hid the message. Returning `true`
 returning nothing leaves it alone.
 
 A family method on an event that can be answered is an override already, and answers the same
-way:
+way.
+
+### Swapping a file, on any thread
+
+The last part of the example shows a coin wherever the client opens the question-mark icon. The
+client opens most of its files on its loading threads, not on the main thread, and a Lua handler
+only runs on the main thread: an event raised on another thread reaches your handler as a copy,
+a moment later, when the client has already opened the file ([Events from other
+threads](#events-from-other-threads)). So the swap is not an answer to an event but something you
+tell the runtime once, which it applies to every open, on every thread:
 
 **`examples/lua-hello/init.lua`**
 
 ```lua
-function AssetScript:OnFileOpen(path, redirect)
-    if redirect == "" and path:lower() == "interface\\icons\\inv_misc_questionmark.blp" then
-        return "Interface\\Icons\\INV_Misc_Coin_01.blp"
-    end
+local redirected, why = wxl.storage.Redirect("Interface\\Icons\\INV_Misc_QuestionMark.blp",
+                                             "Interface\\Icons\\INV_Misc_Coin_01.blp")
+if not redirected then
+    print("the question mark icon is not redirected: " .. why)
 end
 ```
 
-`redirect` is the path to open instead, `""` while no handler has written one. Returning a
-string writes it. The comparison is made in lowercase because the client's paths do not keep one
-case. Doubled backslashes are how a Lua string holds one backslash.
+From this line on, whatever opens the first name opens the second. The names are compared the
+way the client compares them: in any case, with either slash. Doubled backslashes are how a Lua
+string holds one backslash. The redirect lasts until your mod takes it back with
+`wxl.storage.Unredirect(name)`, reloads or goes. Redirecting needs abi `0.1.15`, which is why the
+example's `mod.json` asks for it.
+
+The event is still there to watch. An `Observe` of `OnFileOpen` sees every file the client opens,
+from whatever thread, as a copy delivered at the next update; here it counts the icons:
+
+**`examples/lua-hello/init.lua`**
+
+```lua
+Observe("AssetScript", "OnFileOpen", function(path)
+    if path:lower():find("^interface\\icons\\") then
+        icons = icons + 1
+    end
+end)
+```
+
+`icons` is declared at the top of the file, next to `deaths`, so that `onShutdown` can print it.
 
 That is the whole example. The sections below take each mechanism further.
 
@@ -449,7 +476,7 @@ The events that can be answered, as the SDK stands:
 |---|---|---|
 | `WorldScript:OnInput` | `handled` | the client never sees the input |
 | `WorldScript:OnSoundPlay` | `suppressed` | the sound does not play |
-| `AssetScript:OnFileOpen` | `redirect` | the client opens the path you return instead |
+| `AssetScript:OnFileOpen` | `redirect` | the client opens the path you return instead, for an open on the main thread; on any thread, use `wxl.storage.Redirect` |
 | `NetScript:OnMessageReceived` | `suppressed` | the client never sees the server's message |
 | `NetScript:OnMessageSent` | `suppressed` | the message does not go to the server |
 | `ObjectScript:OnSpellCastRequest` | `refused` | the player's cast does not go ahead |
@@ -510,11 +537,19 @@ connection's thread), and
 `OnGlueRealmList` and `OnGlueRealm` (the logon connection's thread).
 When one of them happens on another thread, `wxl.lua` copies it and delivers the copy at the
 start of the next `OnUpdate`. Your handler sees the same values, a moment later. It can no longer
-answer: the client has already gone on. The log says so the first time, once per mod and event:
+answer: the client has already gone on. The log says so the first time an `Override` gets such a
+copy, once per mod and event:
 
 ```
-[wxl.lua] mod wxl.lua-hello: OnFileOpen was raised off the main thread; its Override handler ran on a copy at the next Update and its answer is not taken
+[wxl.lua] mod wxl.my-mod: OnFileOpen was raised off the main thread; its Override handler ran on a copy at the next Update and its answer is not taken
 ```
+
+The rule that follows: **an `Override` of an event raised off the main thread cannot answer it.**
+`Observe` such an event to know what happened; to change what happens, give the runtime the
+answer as data beforehand, which it applies on whatever thread the event comes. For files that is
+`wxl.storage.Redirect` ([Swapping a file, on any thread](#swapping-a-file-on-any-thread)). An
+`Override` of `OnFileOpen` still answers the files the client opens on its main thread, and the
+opens your own mod makes with `wxl.storage`.
 
 ---
 
@@ -776,14 +811,26 @@ ask for, or what is left:
 **`examples/lua-services/init.lua`**
 
 ```lua
-    local file = wxl.storage.Open(TOC)
+    local file, reason = wxl.storage.Open(TOC)
     if file then
-        print("it starts with " .. string.format("%q", file:ReadAt(0, 12)))
+        local start, failed = file:ReadAt(0, 12)
+        if start then
+            print("it starts with " .. string.format("%q", start))
+        else
+            print("its first bytes were not read: " .. failed)
+        end
         file:Close()
+    else
+        print(TOC .. " was not opened: " .. reason)
     end
 ```
 
-`file:Close()` gives the file back to the client. A file you forget to close is closed for you
+```
+[wxl.lua-services] it starts with "## Interface"
+```
+
+`ReadAt` answers like every other function: the bytes, or `nil` and why. `file:Close()` gives the
+file back to the client. A file you forget to close is closed for you
 when nothing refers to it any more, and when your mod reloads, but closing it yourself frees it
 at once. `Exists(name)` and `Size(name)` answer without reading.
 
@@ -841,6 +888,23 @@ Your mod's folders also leave the search on their own when the mod is disabled, 
 remove from `Mods/` leaves nothing behind in the next session. Another mod cannot remove your
 folder: for a folder it did not add, `RemoveSearchPath` answers `nil, "not_found"`.
 `RemoveSearchPath` needs abi `0.1.10`.
+
+### One file in place of another: `Redirect`
+
+A folder of your own adds files under the client's names. When the file you want the client to
+open already has a name of its own, in the game's archives or in your folder, redirect instead:
+`wxl.storage.Redirect(name, other)` makes every open of `name` open `other`, which is then found
+the way any name is, in a folder of the search path first. [`lua-hello`](#swapping-a-file-on-any-thread)
+swaps an icon this way. The runtime answers it on every thread the client opens files on, which
+an `OnFileOpen` handler cannot do ([Events from other threads](#events-from-other-threads)).
+
+The redirect is your mod's, like its folders: redirecting the same name again changes where it
+leads, `wxl.storage.Unredirect(name)` takes it back (`nil, "not_found"` for a name your mod did not
+redirect), and it goes on its own when the mod is disabled, reloads or the client closes. When
+two mods redirect one name, the one that did it last wins, and when it takes its redirect back
+the other's answers again. An `OnFileOpen` handler that writes `redirect` still has the last
+word, and sees the redirect's answer in `redirect` before it does. `Redirect` and `Unredirect`
+need abi `0.1.15`.
 
 ### The client's databases: `wxl.data`
 
@@ -910,7 +974,8 @@ end
 An addon's frame that called `frame:RegisterEvent("LUA_SERVICES_WORLD")` now receives it each
 time you enter the world. `Run(text, name)` runs Lua text in the client's state, as `/run` would;
 `name` is what its errors are labelled with. `wxl.script.Context()` says which state is live,
-`"glue"` or `"game"`.
+`"glue"` or `"game"`, and `wxl.script.Live()` whether one is: the client has none while it starts
+and for a moment between two.
 
 ### Hook points: `wxl.hook`
 
@@ -1077,7 +1142,7 @@ than run it without the event. A folder without a manifest may use everything it
 The service modules follow the same rule (abi `0.1.14`). A module that came with a later feature
 than your manifest's `abi`, such as `wxl.profile` (`0.1.12`), raises an error the first time your
 code reaches into it, and so does a function added to a module after the module came, such as
-`wxl.storage.RemoveSearchPath` (`0.1.10`):
+`wxl.storage.RemoveSearchPath` (`0.1.10`) or `wxl.storage.Redirect` (`0.1.15`):
 
 ```
 wxl.my-mod/init.lua:3: wxl.profile came with abi 0.1.12, and this mod's mod.json asks for 0.1.11; to use it, set "abi": "0.1.12" there
@@ -1284,11 +1349,14 @@ them in `include/wxl/services/<service>.def`.
 | `wxl.storage.AddSearchPath(folder, priority)` | `true`: the folder's files are the client's, above 0 over its own, until the mod removes it or goes |
 | `wxl.storage.RemoveSearchPath(folder)` | `true`: a folder the mod added leaves the search; `nil, "not_found"` for one it did not add (abi `0.1.10`) |
 | `wxl.storage.MountArchive(path, priority)` | `true`: an archive joins the client's |
+| `wxl.storage.Redirect(name, other)` | `true`: every open of `name`, on any thread, opens `other`, until the mod takes it back or goes; the latest of two mods' wins (abi `0.1.15`) |
+| `wxl.storage.Unredirect(name)` | `true`: the mod's redirect of `name` is taken back; `nil, "not_found"` for one it did not make (abi `0.1.15`) |
 | `wxl.data.ServeTable(table, path)`, `.RestoreTable(table)` | `true`: the client reads the table from `path`, or its own again |
 | `wxl.data.ServedFrom(table)`, `.IsLoaded(table)` | where a table comes from, `""` for the client's own; whether the client read it already |
 | `wxl.script.RegisterFunction(name, fn, context)` | `true`: `name` calls `fn` from the client's Lua, in every context or in `"glue"` or `"game"` |
 | `wxl.script.RegisterEvent(name, context)`, `.FireEvent(name, ...)` | `true`: an event the client's frames can listen to; raised with values |
 | `wxl.script.Run(text, name)`, `.Context()` | `true` once the text ran; `"glue"` or `"game"` |
+| `wxl.script.Live()` | whether a context is live: `false` before the first and between two (abi `0.1.15`) |
 | `wxl.hook.Points()`, `.HasPoint(name)` | the points as `{ name, signature }`; whether one is named |
 | `wxl.patch.Apply(name, address, expected, bytes)` | a `Patch`, `patch:Restore()` to undo; the module needs `wxl.patch` in `mod.json` |
 | `wxl.patch.Matches(address, expected)`, `.Find(bytes, after)` | whether the bytes are there; where they are, after `after` or, left out, from the start |
@@ -1339,7 +1407,7 @@ A few to start from:
 | | `OnSpellCastRequest` | `caster`, `spell_id`, `item`, `target_guid`, `confirmed`, `refused` | you ask to cast a spell; answer to refuse it |
 | `CombatScript` | `OnCombatDamage` | `source`, `source_guid`, `target`, `target_guid`, `spell_id`, ... `amount`, ... | damage landed, as the server reports it |
 | `NetScript` | `OnMessageReceived` | `opcode`, `data`, `suppressed` | a message arrived from the server; answer to hide it |
-| `AssetScript` | `OnFileOpen` | `path`, `redirect` | a file is about to be opened; answer with another path |
+| `AssetScript` | `OnFileOpen` | `path`, `redirect` | a file is about to be opened, on any thread; answer with another path (an open on the main thread only) |
 | `LuaScript` | `OnUiEvent` | `index`, `name`, `format`, `values`, `value_count` | the client fires an event to its interface (`PLAYER_TARGET_CHANGED`...) |
 | `PlayerScript` | `OnPlayerMoneyChanged` | `player`, `previous`, `current` | your money changed, in copper (abi `0.1.6`) |
 | `ChatScript` | `OnChatMessage` | `type`, `language`, `sender`, `sender_guid`, `sender_name`, ... `text`, ... | a chat message of the server became a line the chat shows (abi `0.1.6`; `line_id`, `shown_text` `0.1.7`) |
@@ -1362,7 +1430,8 @@ and the `wxl.footprint` module came with `0.1.11`; the `wxl.profile` module with
 `0.1.13` brought no event: `wxl.runtime.Raises` says whether the runtime raises an event at all,
 and answers `nil, "unsupported"` on an older runtime. `0.1.14` brought no event either: from it on,
 a service module or function newer than the manifest's `abi` is refused as an event is, so a mod
-using `wxl.footprint` asks for `0.1.11` and one using `wxl.profile` for `0.1.12`.
+using `wxl.footprint` asks for `0.1.11` and one using `wxl.profile` for `0.1.12`. `0.1.15` brought
+no event: `wxl.storage.Redirect`, `wxl.storage.Unredirect` and `wxl.script.Live` came with it.
 
 Not every runtime raises every event. Subscribing to one that yours does not raise logs a warning
 naming it, and the handler never runs.

@@ -445,6 +445,15 @@ A folder added to the search is your mod's. `storage.RemoveSearchPath("Mods\\mym
 search when the mod is disabled or unloaded: a mod that goes leaves no folder behind for the
 others to trip on. A folder another mod added is its own; removing it answers `WXL_E_NOT_FOUND`.
 
+To have the client open one file in place of another, redirect the name rather than answer
+`OnFileOpen`: the client opens most files on its loading threads, and a redirect is answered by the
+runtime on every thread, before any handler runs. `storage.Redirect(name, other)` (abi `0.1.15`)
+makes every open of `name` open `other`, found as any name is; `storage.Unredirect(name)` takes it
+back, and the runtime takes back what your mod still holds when it is disabled or unloaded. Names
+are compared as the client compares them, in any case and with either slash; when two mods
+redirect one name, the later wins and taking it back uncovers the earlier. An `OnFileOpen` handler
+sees the redirect's answer in `redirect` and may still write its own.
+
 What C++ does better than the raw table stays written by hand in the header: `Read` into a
 vector, `Open` as a `wxl::File` that closes itself, `Find` as a vector of strings, the templates
 of `RegisterFunction`. The same rows build the Lua modules of `wxl.lua`, so a member reaches C++

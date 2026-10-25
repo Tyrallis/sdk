@@ -939,8 +939,8 @@ registered in a context survives it.** A mod that registered its functions once,
 lose them at the first change of screen.
 
 Two events of the `LuaScript` family mark these moments: `ScriptVmReady` when a context is ready
-to be registered on, with `WXL_SCRIPT_CONTEXT_GLUE` or `WXL_SCRIPT_CONTEXT_GAME`, and
-`ScriptVmClosing` before it goes. So Scout registers from scratch in every `OnScriptVmReady`, in
+to be registered on, with `WXL_SCRIPT_CONTEXT_GLUE` or `WXL_SCRIPT_CONTEXT_GAME`, once per
+interface that comes up, and `ScriptVmClosing` before it goes. So Scout registers from scratch in every `OnScriptVmReady`, in
 both contexts.
 
 ### The script API
