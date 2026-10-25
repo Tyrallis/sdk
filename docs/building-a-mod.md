@@ -240,6 +240,9 @@ For one event outside a family, `wxl::Subscribe<WXL_EV_TargetChanged>(&handler)`
 handler with the same parameters and returns a `wxl::Subscription` that unsubscribes in its
 destructor. `wxl::EventArgsOf<WXL_EV_...>` names the args struct of any event: what a C handler
 receives, and what `wxl::Emit` raises.
+`wxl::Raises(WXL_EV_...)` (abi `0.1.13`) says whether the runtime raises an event at all, for a
+mod that offers what the runtime has rather than asking for one event; it is false on an older
+runtime, which cannot say.
 
 ### Loading and updates
 

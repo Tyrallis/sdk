@@ -1127,7 +1127,9 @@ file and save: the change reloads it.
 
 `print` writes a line to the log at the `info` level, tagged with the mod's id, its arguments
 separated by tabs. `wxl.log(level, ...)` picks the level: `"trace"`, `"debug"`, `"info"`,
-`"warn"` or `"error"`.
+`"warn"` or `"error"`. Which levels reach the file is set in `WarcraftXL.ini`, for every mod or
+for yours alone; [Reading the log](the-log.md) shows how, and how to mark the steps of a test
+with `/mark`.
 
 ### The sandbox
 
@@ -1243,6 +1245,7 @@ Writes its arguments to the log, through `tostring`, separated by tabs, at the `
 | `wxl.runtime.id`, `.name`, `.version` | the runtime that loaded `wxl.lua` |
 | `wxl.runtime.abi` | the contract this mod is served, as text, such as `"0.1.6"` |
 | `wxl.runtime.abi_major`, `.abi_minor`, `.abi_feature` | the same, as numbers |
+| `wxl.runtime.Raises(family, event)` | whether the runtime raises that event at all: `wxl.runtime.Raises("WorldScript", "OnSoundPlay")`; a handler for one it does not raise never runs (abi `0.1.13`) |
 | `wxl.object.LocalPlayer()` | the player you control, or `nil` |
 | `wxl.object.FromGuid(guid)` | the object with that guid (`"0x"` and up to sixteen hex digits, or a whole number), or `nil` when it is not in view |
 | `wxl.object.InView(type)` | a list of the objects of a type in view; every object without a type |
@@ -1344,6 +1347,8 @@ and `OnChatMessage`'s last two parameters, came with `0.1.7`: a mod that uses th
 answer `nil, "unsupported"` on an older runtime, as any function the runtime lacks does.
 `AssetScript`'s `OnArchiveMounted` and `OnArchiveUnmounted`, `WorldScript`'s `OnMemoryPressure`
 and the `wxl.footprint` module came with `0.1.11`; the `wxl.profile` module with `0.1.12`.
+`0.1.13` brought no event: `wxl.runtime.Raises` says whether the runtime raises an event at all,
+and answers `nil, "unsupported"` on an older runtime.
 
 Not every runtime raises every event. Subscribing to one that yours does not raise logs a warning
 naming it, and the handler never runs.
@@ -1389,6 +1394,8 @@ your mod's id first.
 - [`examples/memory-report/`](../examples/memory-report/), a mod to keep: where the client's
   memory goes, written into a report every few minutes.
 - [Profiling](profiling.md): where your mod's time goes, in the Tracy viewer.
+- [Reading the log](the-log.md): the launch's header, the level setting, and `/mark` with
+  [`examples/probe/`](../examples/probe/), a test tool that logs every event the runtime raises.
 - [`lua/types/wxl.d.lua`](../lua/types/wxl.d.lua), for every event, object method and service
   function.
 - [Your first mod](your-first-mod.md), the same platform from C++, for what only native code

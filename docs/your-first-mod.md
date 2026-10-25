@@ -293,7 +293,9 @@ here):
 The first is yours. The second is the runtime's mod loader, which logs under the tag `host`; it
 comes after yours because the loader reports a mod once its `OnLoad` has returned `WXL_OK`. On the
 recompiled client the path reads `bin/x64/scout.dll`. If neither line is there, see
-[When something goes wrong](#when-something-goes-wrong).
+[When something goes wrong](#when-something-goes-wrong). [Reading the log](the-log.md) explains
+the rest of the file: the launch's header, the earlier launches kept beside it, and how to make it
+say more.
 
 That is a mod. The steps that follow make it do something.
 
