@@ -1820,6 +1820,12 @@ function script.FireEvent(name, ...) end
 ---@return string|nil reason
 function script.Run(chunk, name) end
 
+---Came with abi 0.1.15: a mod whose mod.json asks for an older abi cannot use it.
+---Whether a script context is live: false before the first one and between two.
+---@return boolean|nil
+---@return string|nil reason
+function script.Live() end
+
 ---wxl.storage. The client's files, whatever they are packed in: named as the client names them.
 ---@class wxl.storage
 local storage = {}
@@ -1877,6 +1883,24 @@ function storage.Find(pattern) end
 ---@return true|nil ok
 ---@return string|nil reason
 function storage.RemoveSearchPath(directory) end
+
+---Came with abi 0.1.15: a mod whose mod.json asks for an older abi cannot use it.
+---Makes every open of `from` open `to` instead, on whichever thread the client opens it, for
+---this mod: names compared in any case, with either slash; `to` is found as any name is. It
+---stays until Unredirect, or until the mod is disabled, reloads or unloads; when two mods
+---redirect one name, the later wins. An OnFileOpen handler that answers still has the last word.
+---@param from string
+---@param to string
+---@return true|nil ok
+---@return string|nil reason
+function storage.Redirect(from, to) end
+
+---Came with abi 0.1.15: a mod whose mod.json asks for an older abi cannot use it.
+---Takes this mod's redirect of a name back; nil, "not_found" for one it did not redirect.
+---@param from string
+---@return true|nil ok
+---@return string|nil reason
+function storage.Unredirect(from) end
 
 ---wxl.data. The client's databases, served from a mod's own files before the client reads them.
 ---@class wxl.data

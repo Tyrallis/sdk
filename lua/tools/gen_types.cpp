@@ -26,6 +26,7 @@ namespace
 {
     /// What the object methods' names leave ambiguous; the generator refuses to write then.
     std::string g_clash;
+    std::string g_unknownShims; ///< shim rows ShimDefinition has no text for
 
     using wxl::reflect::Event;
     using wxl::reflect::Field;
@@ -310,6 +311,18 @@ namespace
                    "---it did not add.\n"
                    "---@param directory string\n---@return true|nil ok\n---@return string|nil reason\n"
                    "function " + owner + ".RemoveSearchPath(directory) end\n\n";
+        if (name == "Redirect")
+            return "---Makes every open of `from` open `to` instead, on whichever thread the client opens it, for\n"
+                   "---this mod: names compared in any case, with either slash; `to` is found as any name is. It\n"
+                   "---stays until Unredirect, or until the mod is disabled, reloads or unloads; when two mods\n"
+                   "---redirect one name, the later wins. An OnFileOpen handler that answers still has the last word.\n"
+                   "---@param from string\n---@param to string\n"
+                   "---@return true|nil ok\n---@return string|nil reason\n"
+                   "function " + owner + ".Redirect(from, to) end\n\n";
+        if (name == "Unredirect")
+            return "---Takes this mod's redirect of a name back; nil, \"not_found\" for one it did not redirect.\n"
+                   "---@param from string\n---@return true|nil ok\n---@return string|nil reason\n"
+                   "function " + owner + ".Unredirect(from) end\n\n";
         if (name == "Snapshot")
             return "---Takes the picture the lists read: Storm's counts, the client's consumers, the address space,\n"
                    "---and the heap of every Lua mod, each shown as its own category. On the main thread.\n"
@@ -447,7 +460,11 @@ namespace
                 if (wxl::api::AtLeast(since, services[s].since) && !wxl::api::AtLeast(services[s].since, since))
                     out << "---" << CameWith(since) << "\n";
                 if (row.lua == wxl::api::Lua::shim)
-                    out << ShimDefinition(row, services[s].id);
+                {
+                    const std::string shim = ShimDefinition(row, services[s].id);
+                    if (shim.empty()) g_unknownShims += std::string(g_unknownShims.empty() ? "" : ", ") + row.name;
+                    out << shim;
+                }
                 else
                     writeRow(row, services[s].id, ".");
             }
@@ -733,6 +750,11 @@ int main(int argc, char** argv)
     if (!g_clash.empty())
     {
         std::printf("the object methods' names are ambiguous: %s\n", g_clash.c_str());
+        return 1;
+    }
+    if (!g_unknownShims.empty())
+    {
+        std::printf("shim rows with no definition in ShimDefinition: %s\n", g_unknownShims.c_str());
         return 1;
     }
 

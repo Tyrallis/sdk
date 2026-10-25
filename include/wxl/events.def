@@ -187,9 +187,12 @@ WXL_EVENT(Net, Disconnected,    26, wxl_connection_args)
 //
 // The client runs two script contexts in turn: the login glue and the game. Each is created and
 // destroyed more than once in a session, so anything registered on one is registered again on the
-// next -- these events are where that happens.
+// next -- these events are where that happens. A context is announced when its interface comes
+// up, after the client's own functions are registered and before its frames load; the client
+// also makes contexts it destroys before loading any interface into them (while it starts, and
+// between the game and the glue), and those raise neither event.
 
-/** A script context exists and can be registered on. */
+/** A script context with an interface coming up exists and can be registered on. */
 WXL_EVENT(Lua, ScriptVmReady,   27, wxl_script_vm_args)
 /** A script context is about to be destroyed. Anything held on it dies with it. */
 WXL_EVENT(Lua, ScriptVmClosing, 28, wxl_script_vm_args)

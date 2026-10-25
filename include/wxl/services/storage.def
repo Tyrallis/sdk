@@ -36,3 +36,9 @@ WXL_API(storage, find, Find, list<wxl_str>, (str pattern), generated, by_hand,
 WXL_API_SINCE(storage, remove_search_path, (0, 1, 10))
 WXL_API(storage, remove_search_path, RemoveSearchPath, result, (str directory), shim, generated,
         "Takes a folder the mod added back out of the files searched; not_found for one it did not add.")
+WXL_API_SINCE(storage, redirect, (0, 1, 15))
+WXL_API(storage, redirect, Redirect, result, (str from, str to), shim, generated,
+        "Opens one name in place of another, on every thread, until the mod takes it back or goes: "
+        "the latest of two mods' wins.")
+WXL_API(storage, unredirect, Unredirect, result, (str from), shim, generated,
+        "Takes the mod's redirect of a name back; not_found for one it did not redirect.")

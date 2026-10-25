@@ -70,7 +70,8 @@ typedef struct wxl_footprint_category
 typedef struct wxl_footprint_source
 {
     uint32_t struct_size;
-    wxl_str  file;        ///< as the client spells it: ".\\Client.cpp", "new", a full build path
+    wxl_str  file;        ///< as the client spells it: ".\\Client.cpp", "new", a full build path; for
+                          ///< an array, its element type as C++ spells it ("const TaxiPathRec*")
     uint64_t bytes;       ///< live now, requested sizes rounded up to 8 as Storm does
     uint64_t count;       ///< live blocks
     uint64_t peak;        ///< the most bytes live at once since start()
@@ -81,7 +82,7 @@ typedef struct wxl_footprint_source
 typedef struct wxl_footprint_archive
 {
     uint32_t struct_size;
-    wxl_str  path;           ///< the path it was opened by
+    wxl_str  path;           ///< the path it was opened by; a folder opened as an archive ends in '\\'
     int32_t  priority;
     uint32_t hash_entries;   ///< its hash table's entries, as its header says
     uint32_t block_entries;  ///< its block table's entries

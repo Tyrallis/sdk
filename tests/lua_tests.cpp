@@ -227,8 +227,11 @@ end)
 Override("WorldScript", "OnSoundPlay", function() return "loud", 1 end)
 
 -- the off-thread events, and a string too long for the buffer
+Override("AssetScript", "OnFileOpen", function(path, redirect)
+    if path == "long" then return string.rep("x", 100) end
+    if redirect == "" and path:lower() == "interface\\icons\\probe.blp" then return "Interface\\Icons\\Answer.blp" end
+end)
 Observe("AssetScript", "OnFileOpen", function(path, redirect) print("file open " .. path .. " redirect " .. redirect) end)
-Override("AssetScript", "OnFileOpen", function(path) if path == "long" then return string.rep("x", 100) end end)
 Override("NetScript", "OnMessageSent", function(opcode, data)
     print("message sent " .. opcode .. " " .. #data)
     return true
@@ -640,8 +643,14 @@ int main(int argc, char** argv)
         WriteFile(mods / "!!" / "init.lua", "print('never')\n");
 
         CaptureSink sink;
-        ModHost     host(Config(mods, sink));
+        HostConfig  config = Config(mods, sink);
+        config.services.push_back(
+            PublishedService{WXL_STORAGE_SERVICE, WXL_STORAGE_SERVICE_VERSION, wxltest::FakeStorage::Table()});
+        ModHost host(std::move(config));
         host.LoadAll();
+        Check(wxltest::FakeStorage::Redirects()["interface\\icons\\inv_misc_questionmark.blp"] ==
+                  "Interface\\Icons\\INV_Misc_Coin_01.blp",
+              "the example redirects its icon through wxl.storage, which the runtime answers on any thread");
 
         Check(host.Loaded().size() == 1 && host.Loaded()[0].id == "wxl.lua", "wxl.lua loads natively");
         const RefusedMod* hello = FindRefused(host, "wxl.lua-hello");
@@ -758,21 +767,21 @@ int main(int argc, char** argv)
         host.Raise(WXL_EV_MessageReceived, &message);
         Check(kept == WXL_FALSE, "returning nothing leaves the flag alone");
 
-        // The example's Override returning a string.
+        // An Override returning a string.
         char               redirect[64] = {};
-        const char*        asked        = "Interface\\Icons\\INV_Misc_QuestionMark.blp";
+        const char*        asked        = "Interface\\Icons\\Probe.blp";
         wxl_file_open_args open{wxl_str{asked, static_cast<uint32_t>(std::strlen(asked))}, redirect, sizeof redirect};
         host.Raise(WXL_EV_FileOpen, &open);
-        Check(std::strcmp(redirect, "Interface\\Icons\\INV_Misc_Coin_01.blp") == 0,
+        Check(std::strcmp(redirect, "Interface\\Icons\\Answer.blp") == 0,
               "returning a string from an Override fills the buffer");
-        Check(sink.Has("[wxl.probe] file open Interface\\Icons\\INV_Misc_QuestionMark.blp redirect Interface\\Icons\\INV_Misc_Coin_01.blp"),
+        Check(sink.Has("[wxl.probe] file open Interface\\Icons\\Probe.blp redirect Interface\\Icons\\Answer.blp"),
               "an Observe of the same event sees the buffer an earlier Override filled");
-        const char*        lower = "interface\\icons\\inv_misc_questionmark.blp";
+        const char*        lower = "interface\\icons\\probe.blp";
         wxl_file_open_args openLower{wxl_str{lower, static_cast<uint32_t>(std::strlen(lower))}, redirect, sizeof redirect};
         redirect[0] = '\0';
         host.Raise(WXL_EV_FileOpen, &openLower);
-        Check(std::strcmp(redirect, "Interface\\Icons\\INV_Misc_Coin_01.blp") == 0,
-              "the example compares the path without regard to case");
+        Check(std::strcmp(redirect, "Interface\\Icons\\Answer.blp") == 0,
+              "the handler compares the path without regard to case");
         std::strcpy(redirect, "Interface\\Icons\\Other.blp");
         host.Raise(WXL_EV_FileOpen, &open);
         Check(std::strcmp(redirect, "Interface\\Icons\\Other.blp") == 0,
@@ -794,11 +803,13 @@ int main(int argc, char** argv)
         host.Raise(WXL_EV_Update, &tick);
         Check(sink.Count("[wxl.probe] file open") == before + 1, "it is delivered at the next Update");
         Check(redirect[0] == '\0', "and the Override's string is not taken");
-        Check(sink.Count("[WARN ] [wxl.lua] mod wxl.lua-hello: OnFileOpen was raised off the main thread") == 1,
+        Check(sink.Count("[WARN ] [wxl.lua] mod wxl.probe: OnFileOpen was raised off the main thread") == 1,
               "which is warned about");
+        Check(sink.Count("OnFileOpen was raised off the main thread") == 1,
+              "only to a mod with an Override: the example's Observe takes its copy without a word");
         std::thread([&host, &open] { host.Raise(WXL_EV_FileOpen, &open); }).join();
         host.Raise(WXL_EV_Update, &tick);
-        Check(sink.Count("[WARN ] [wxl.lua] mod wxl.lua-hello: OnFileOpen was raised off the main thread") == 1,
+        Check(sink.Count("[WARN ] [wxl.lua] mod wxl.probe: OnFileOpen was raised off the main thread") == 1,
               "once per mod and event");
 
         wxl_bool         sentKept = WXL_FALSE;
@@ -886,7 +897,7 @@ int main(int argc, char** argv)
         Check(sink.Count("[wxl.broken] broken still updates") == 25, "a disabled mod reloaded runs again");
 
         host.Shutdown();
-        Check(sink.Has("[wxl.lua-hello] deaths 3 seen: Thorgrim x2, Boar x1"),
+        Check(sink.Has("[wxl.lua-hello] deaths 3 seen: Thorgrim x2, Boar x1, 5 icon(s) opened"),
               "onShutdown runs at WXL_STAGE_SHUTDOWN, with the state the handlers built");
         Check(sink.Has("[host] unloaded wxl.lua") && host.Loaded().empty(), "and wxl.lua unloads");
 
@@ -1245,6 +1256,74 @@ int main(int argc, char** argv)
         FakeScript::Functions().clear();
         FakeStorage::Files().erase("Interface\\FrameXML\\FrameXML.toc");
         FakeStorage::SearchPaths().clear();
+        if (g_failures) sink.Dump();
+    }
+
+    Section("registering before any script context, and redirects");
+    {
+        using wxltest::FakeScript;
+        using wxltest::FakeStorage;
+
+        const fs::path mods = MakeTree(scratch, "early", binary, fs::path());
+        WriteFile(mods / "early" / "mod.json", LuaManifest("wxl.early"));
+        WriteFile(mods / "early" / "init.lua", R"lua(
+print("early " .. tostring(wxl.script.Live()) .. " " .. tostring(wxl.script.RegisterFunction("EarlyGreet", function() return "hi" end)) ..
+      " " .. tostring(wxl.script.RegisterEvent("EARLY_EVENT")))
+local s = wxl.storage
+print("redirect " .. tostring(s.Redirect("Interface\\Nope.txt", "Interface\\hello.txt")) .. " " .. tostring(s.Read("interface/NOPE.txt")))
+print("redirect missing " .. tostring(select(2, pcall(s.Redirect, "x"))))
+s.Redirect("Interface\\Icon.blp", "Interface\\A.blp")
+)lua");
+        WriteFile(mods / "later" / "mod.json", LuaManifest("wxl.later", "\"loadAfter\": [ \"wxl.early\" ]"));
+        const char* kLater = R"lua(
+local s = wxl.storage
+s.Redirect("interface/icon.BLP", "Interface\\B.blp")
+print("later " .. tostring(s.Unredirect("Interface\\Nope.txt")) .. " " .. tostring(select(2, s.Unredirect("Interface\\Nope.txt"))))
+)lua";
+        WriteFile(mods / "later" / "init.lua", kLater);
+
+        // No context yet, as at a real load: the mods load before the client makes one.
+        FakeScript::Live() = FakeScript::kNone;
+        FakeScript::Functions().clear();
+        FakeScript::Declared().clear();
+        FakeScript::Refused() = 0;
+        FakeStorage::Redirects().clear();
+
+        CaptureSink sink;
+        HostConfig  config = Config(mods, sink);
+        config.services.push_back(PublishedService{WXL_SCRIPT_SERVICE, WXL_SCRIPT_SERVICE_VERSION, FakeScript::Table()});
+        config.services.push_back(PublishedService{WXL_STORAGE_SERVICE, WXL_STORAGE_SERVICE_VERSION, FakeStorage::Table()});
+        ModHost host(std::move(config));
+        host.LoadAll();
+        const auto raise = [&](wxl_event event, const void* args) { host.Raise(event, args); };
+        const wxl_lua_api* api =
+            static_cast<const wxl_lua_api*>(host.Table()->get_service(WXL_LUA_SERVICE, WXL_LUA_SERVICE_VERSION));
+
+        Check(sink.Has("[wxl.early] early false true true") && FakeScript::Refused() == 0 &&
+                  FakeScript::Functions().empty(),
+              "a function and an event registered before any context are kept, and the service is not called");
+        FakeScript::Open(WXL_SCRIPT_CONTEXT_GLUE, raise);
+        Check(FakeScript::Functions().count("EarlyGreet") && FakeScript::Declared().count("EARLY_EVENT") &&
+                  FakeScript::Refused() == 0,
+              "they are registered when the first context comes");
+
+        Check(sink.Has("[wxl.early] redirect true hello"),
+              "Redirect opens one name in place of another, in any case and with either slash");
+        Check(sink.Has("wxl.storage.Redirect: 'to' (argument 2) is missing; it takes a string"),
+              "a name left out is an error naming it");
+        Check(sink.Has("[wxl.later] later nil not_found"),
+              "a mod takes back only its own redirects");
+        Check(FakeStorage::Redirects()["interface\\icon.blp"] == "Interface\\B.blp",
+              "two mods redirect one name: the runtime holds the later one");
+        WriteFile(mods / "later" / "init.lua", "-- redirects nothing now\n");
+        Check(api && api->reload("wxl.later") == WXL_OK &&
+                  FakeStorage::Redirects()["interface\\icon.blp"] == "Interface\\A.blp",
+              "the later mod's redirect goes with its state, and the earlier one answers again");
+
+        host.Shutdown();
+        Check(FakeStorage::Redirects().empty(), "every redirect goes when its mod does");
+        FakeScript::Functions().clear();
+        FakeScript::Live() = WXL_SCRIPT_CONTEXT_GAME;
         if (g_failures) sink.Dump();
     }
 

@@ -9,6 +9,7 @@ local Tally = require("lib.tally")
 -- State lives in the file's locals: it lasts from one event to the next, and starts over when
 -- the mod reloads.
 local deaths = Tally.new()
+local icons = 0
 
 -- onInit runs once the client is fully up, and right after a reload.
 registerForEvent("onInit", function()
@@ -17,7 +18,7 @@ end)
 
 -- onShutdown runs when the client closes, and before a reload drops this state.
 registerForEvent("onShutdown", function()
-    print("deaths " .. deaths:summary())
+    print("deaths " .. deaths:summary() .. ", " .. icons .. " icon(s) opened")
 end)
 
 -- A function named after an event, on its family's table, handles that event. It is called as
@@ -67,11 +68,21 @@ Override("NetScript", "OnMessageReceived", function(opcode, data, suppressed)
     end
 end)
 
--- A family method on such an event answers the same way. OnFileOpen answers through
--- `redirect`, the path to open instead: a string fills it, nothing leaves the file as asked.
--- `redirect` holds what an earlier handler wrote, "" when none did.
-function AssetScript:OnFileOpen(path, redirect)
-    if redirect == "" and path:lower() == "interface\\icons\\inv_misc_questionmark.blp" then
-        return "Interface\\Icons\\INV_Misc_Coin_01.blp"
-    end
+-- A file is a different case. The client opens most of its files on its loading threads, and a
+-- Lua handler only ever runs on the main thread: an event raised elsewhere reaches it as a copy,
+-- at the next update, too late to answer. So swapping a file is data the runtime holds and
+-- answers with on any thread: wxl.storage.Redirect. Every open of the first name, from here on,
+-- opens the second; it lasts until the mod takes it back with Unredirect, or goes.
+local redirected, why = wxl.storage.Redirect("Interface\\Icons\\INV_Misc_QuestionMark.blp",
+                                             "Interface\\Icons\\INV_Misc_Coin_01.blp")
+if not redirected then
+    print("the question mark icon is not redirected: " .. why)
 end
+
+-- OnFileOpen still tells which files the client opens, from whatever thread: an Observe sees
+-- each one, a moment later. Here it counts the icons, reported when the client closes.
+Observe("AssetScript", "OnFileOpen", function(path)
+    if path:lower():find("^interface\\icons\\") then
+        icons = icons + 1
+    end
+end)

@@ -28,10 +28,17 @@ registerForEvent("onInit", function()
     print("from the assets folder: " .. (hello and hello:gsub("\n", "") or "nothing"))
 
     -- A file read a piece at a time: Open, then ReadAt as often as needed, then Close.
-    local file = wxl.storage.Open(TOC)
+    local file, reason = wxl.storage.Open(TOC)
     if file then
-        print("it starts with " .. string.format("%q", file:ReadAt(0, 12)))
+        local start, failed = file:ReadAt(0, 12)
+        if start then
+            print("it starts with " .. string.format("%q", start))
+        else
+            print("its first bytes were not read: " .. failed)
+        end
         file:Close()
+    else
+        print(TOC .. " was not opened: " .. reason)
     end
 
     -- The names that match a pattern, * standing for any run of characters.

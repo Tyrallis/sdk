@@ -62,10 +62,15 @@ mod loaded.
 **Storm by source file.** Each file the client named when it allocated, with what it holds now,
 in how many blocks, its peak, and how many allocations it made in all. Names are the client's own:
 `.\Client.cpp`, a build path of the engine, or `new` for everything the client's C++ allocated
-with `new`, which is a large share and names no file.
+with `new`, which is a large share and names no file. The client's growable arrays name the type
+of what they hold instead of a file, and the report spells it as C++ does: `unsigned char` for a
+byte buffer, `const TaxiPathRec*` for an array of pointers, `CSimpleTexture` for objects of
+that class. A few other names are labels the client chose, such as `CM2Model` or `FMod`.
 
 **Archives.** Each archive the client mounted, its priority, the entries of its hash and block
-tables, and what its tables hold in memory.
+tables, and what its tables hold in memory. A folder named like an archive (`Data\Patch-4.MPQ\`,
+a directory the client mounts as one) ends in a backslash and has no tables: its files are read
+from the disk.
 
 **Client databases.** The largest loaded tables: records, bytes per record, and what records,
 strings and index hold together.

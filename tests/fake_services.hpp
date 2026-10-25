@@ -9,6 +9,7 @@
 #ifndef WXL_TEST_FAKE_SERVICES_HPP
 #define WXL_TEST_FAKE_SERVICES_HPP
 
+#include <cctype>
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
@@ -385,15 +386,25 @@ namespace wxltest
             return chunks;
         }
 
-        /// The live context; the glue's between two, which a mod cannot tell from a live one.
+        /// The live context; the glue's between two, where live() tells it from a live one.
         static uint32_t WXL_CALL Context()
         {
             return Live() == kNone ? WXL_SCRIPT_CONTEXT_GLUE : static_cast<uint32_t>(Live());
         }
 
+        /// Every call that needs a context and came while none was live, which a well-behaved
+        /// caller never makes.
+        static int& Refused()
+        {
+            static int refused = 0;
+            return refused;
+        }
+
+        static wxl_bool WXL_CALL IsLive() { return Live() == kNone ? WXL_FALSE : WXL_TRUE; }
+
         static wxl_result WXL_CALL RegisterFunction(const char* name, wxl_script_fn fn, void* user)
         {
-            if (Live() == kNone) return WXL_E_FAILED;
+            if (Live() == kNone) return ++Refused(), WXL_E_FAILED;
             if (!name || !fn) return WXL_E_INVALID;
             if (Functions().count(name)) return WXL_E_INVALID;
             Functions()[name] = Registered{fn, user};
@@ -402,7 +413,7 @@ namespace wxltest
 
         static wxl_result WXL_CALL RegisterEvent(const char* name)
         {
-            if (Live() == kNone) return WXL_E_FAILED;
+            if (Live() == kNone) return ++Refused(), WXL_E_FAILED;
             Declared().insert(name);
             Events().push_back(name);
             return WXL_OK;
@@ -535,6 +546,7 @@ namespace wxltest
                 t.push_bool         = &PushBool;
                 t.push_nil          = &PushNil;
                 t.fail              = &Fail;
+                t.live              = &IsLive;
                 return t;
             }();
             return &api;
@@ -593,9 +605,30 @@ namespace wxltest
             return best && Slurp(std::filesystem::path(best->first) / relative, out);
         }
 
-        /// What a name reads as: a winning folder's file, the client's, or a folder's.
-        static bool Contents(const std::string& name, std::string& out)
+        /// The names redirected, as the runtime holds them: one target per name, by its key.
+        static std::map<std::string, std::string>& Redirects()
         {
+            static std::map<std::string, std::string> redirects;
+            return redirects;
+        }
+
+        static std::string NameKey(std::string name)
+        {
+            for (char& c : name) c = c == '/' ? '\\' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            return name;
+        }
+
+        /// The name an open of @p name reaches: its redirect, or itself.
+        static std::string Redirected(const std::string& name)
+        {
+            const auto found = Redirects().find(NameKey(name));
+            return found != Redirects().end() ? found->second : name;
+        }
+
+        /// What a name reads as: a winning folder's file, the client's, or a folder's.
+        static bool Contents(const std::string& asked, std::string& out)
+        {
+            const std::string name = Redirected(asked);
             if (FromFolder(name, true, out)) return true;
             const auto found = Files().find(name);
             if (found != Files().end())
@@ -653,9 +686,11 @@ namespace wxltest
             return WXL_OK;
         }
 
-        static wxl_handle WXL_CALL Open(wxl_str path)
+        static wxl_handle WXL_CALL Open(wxl_str asked)
         {
-            std::string data;
+            const std::string redirected = Redirected(Key(asked));
+            const wxl_str     path{redirected.c_str(), static_cast<uint32_t>(redirected.size())};
+            std::string       data;
             if (FromFolder(Key(path), true, data) ||
                 (!Files().count(Key(path)) && FromFolder(Key(path), false, data)))
             {
@@ -735,6 +770,18 @@ namespace wxltest
 
         static wxl_result WXL_CALL MountArchive(wxl_str, int32_t) { return WXL_OK; }
 
+        static wxl_result WXL_CALL Redirect(wxl_str from, wxl_str to)
+        {
+            if (!from.size || !to.size) return WXL_E_INVALID;
+            Redirects()[NameKey(Key(from))] = Key(to);
+            return WXL_OK;
+        }
+
+        static wxl_result WXL_CALL Unredirect(wxl_str from)
+        {
+            return Redirects().erase(NameKey(Key(from))) ? WXL_OK : WXL_E_NOT_FOUND;
+        }
+
         static uint32_t WXL_CALL Find(wxl_str pattern, wxl_str* out, uint32_t capacity)
         {
             const std::string prefix = Key(pattern).substr(0, Key(pattern).find('*'));
@@ -764,6 +811,8 @@ namespace wxltest
                 t.mount_archive   = &MountArchive;
                 t.remove_search_path = &RemoveSearchPath;
                 t.find            = &Find;
+                t.redirect        = &Redirect;
+                t.unredirect      = &Unredirect;
                 return t;
             }();
             return &api;

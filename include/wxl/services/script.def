@@ -34,3 +34,6 @@ WXL_API(script, push_string, PushString, none, (call invocation, str value), nat
 WXL_API(script, push_bool, PushBool, none, (call invocation, boolean value), native, by_hand, "")
 WXL_API(script, push_nil, PushNil, none, (call invocation), native, by_hand, "")
 WXL_API(script, fail, Fail, none, (call invocation, str message), native, by_hand, "")
+WXL_API_SINCE(script, live, (0, 1, 15))
+WXL_API(script, live, Live, boolean, (), generated, generated,
+        "Whether a script context is live: false before the first one and between two.")

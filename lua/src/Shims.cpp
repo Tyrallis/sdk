@@ -215,8 +215,17 @@ namespace wxl::lua::shims
             return api->register_event(event.name.c_str());
         }
 
+        /// Whether a context is live to register on now. A runtime older than live() is asked
+        /// anyway, as it always was.
+        bool Live()
+        {
+            const wxl_script_api* api = Api();
+            if (!api) return false;
+            return !wxl::detail::Carries(api, &wxl_script_api::live) || api->live() == WXL_TRUE;
+        }
+
         /// The live context, or kEveryContext when the service cannot say.
-        uint32_t Live()
+        uint32_t Context()
         {
             const wxl_script_api* api = Api();
             return api && wxl::detail::Carries(api, &wxl_script_api::context) ? api->context() : kEveryContext;
@@ -287,8 +296,9 @@ namespace wxl::lua::shims
             function->warned   = false;
             function->zone     = profile::Location(mod, function->name);
 
-            // Bound now when a context it belongs to is live; otherwise at the next one.
-            const wxl_result result = Bind(*function, Live());
+            // Bound now when a context it belongs to is live; otherwise at the next one, by the
+            // ScriptVmReady replay, without asking the service now.
+            const wxl_result result = Live() ? Bind(*function, Context()) : WXL_OK;
             if (result != WXL_OK && result != WXL_E_FAILED)
             {
                 luaL_unref(L, LUA_REGISTRYINDEX, function->ref);
@@ -320,8 +330,7 @@ namespace wxl::lua::shims
                 if (event.mod == &mod && event.name == name) known = true;
             if (!known) g_events.push_back(Event{name, &mod, contexts});
 
-            const uint32_t   live   = Live();
-            const wxl_result result = (contexts & Bit(live)) ? api->register_event(name) : WXL_OK;
+            const wxl_result result = Live() && (contexts & Bit(Context())) ? api->register_event(name) : WXL_OK;
             if (result != WXL_OK && result != WXL_E_FAILED) return PushResultFailure(L, result);
             lua_pushboolean(L, 1);
             return 1;
@@ -422,6 +431,110 @@ namespace wxl::lua::shims
                     std::find(folder.holders.begin(), folder.holders.end(), &mod) == folder.holders.end())
                     continue;
                 LetGo(i, mod);
+                lua_pushboolean(L, 1);
+                return 1;
+            }
+            return PushResultFailure(L, WXL_E_NOT_FOUND);
+        }
+
+        // --- wxl.storage: the names each mod redirects ----------------------------------------
+        //
+        // The host sees every redirect of a Lua mod as wxl.lua's, one per name. Each mod's are kept
+        // here in the order they were made, so that the runtime holds the latest, taking one back
+        // uncovers the mod's before it, and a mod's go when it does.
+
+        struct Redirected
+        {
+            std::string key;  ///< the name, lower case, backslashes
+            std::string from; ///< as the first mod gave it
+            std::vector<std::pair<ScriptMod*, std::string>> holders; ///< oldest first
+        };
+
+        std::vector<Redirected> g_redirects;
+
+        std::string NameKey(const std::string& name)
+        {
+            std::string key = name;
+            for (char& c : key) c = c == '/' ? '\\' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            return key;
+        }
+
+        /// A string argument the script may not leave out.
+        std::string CheckName(lua_State* L, int index, const char* function, const char* parameter)
+        {
+            if (lua_isnoneornil(L, index))
+                luaL_error(L, "wxl.storage.%s: '%s' (argument %d) is missing; it takes a string", function, parameter,
+                           index);
+            size_t      size = 0;
+            const char* text = luaL_checklstring(L, index, &size);
+            return std::string(text, size);
+        }
+
+        /// Hands the runtime what a name leads to now: the latest holder's, or nothing.
+        wxl_result Settle(const Redirected& entry)
+        {
+            const wxl_storage_api* api = Storage();
+            if (!api || !wxl::detail::Carries(api, &wxl_storage_api::unredirect)) return WXL_E_UNSUPPORTED;
+            if (entry.holders.empty()) return api->unredirect(Str(entry.from));
+            return api->redirect(Str(entry.from), Str(entry.holders.back().second));
+        }
+
+        /// Takes a mod off a redirected name; the runtime follows the holder left on top.
+        void LetGoName(size_t index, ScriptMod& mod)
+        {
+            Redirected& entry  = g_redirects[index];
+            const bool  latest = !entry.holders.empty() && entry.holders.back().first == &mod;
+            entry.holders.erase(std::remove_if(entry.holders.begin(), entry.holders.end(),
+                                               [&](const auto& holder) { return holder.first == &mod; }),
+                                entry.holders.end());
+            if (latest) Settle(entry);
+            if (entry.holders.empty()) g_redirects.erase(g_redirects.begin() + static_cast<std::ptrdiff_t>(index));
+        }
+
+        int L_Redirect(lua_State* L)
+        {
+            ScriptMod&        mod  = Self(L);
+            const std::string from = CheckName(L, 1, "Redirect", "from");
+            const std::string to   = CheckName(L, 2, "Redirect", "to");
+            const wxl_storage_api* api = Storage();
+            if (!api || !wxl::detail::Carries(api, &wxl_storage_api::redirect))
+                return PushResultFailure(L, WXL_E_UNSUPPORTED);
+            const wxl_result result = api->redirect(Str(from), Str(to));
+            if (result != WXL_OK) return PushResultFailure(L, result);
+
+            const std::string key   = NameKey(from);
+            auto              known = std::find_if(g_redirects.begin(), g_redirects.end(),
+                                                   [&](const Redirected& entry) { return entry.key == key; });
+            if (known == g_redirects.end())
+            {
+                g_redirects.push_back(Redirected{key, from, {}});
+                known = g_redirects.end() - 1;
+            }
+            known->holders.erase(std::remove_if(known->holders.begin(), known->holders.end(),
+                                                [&](const auto& holder) { return holder.first == &mod; }),
+                                 known->holders.end());
+            known->holders.emplace_back(&mod, to);
+            lua_pushboolean(L, 1);
+            return 1;
+        }
+
+        int L_Unredirect(lua_State* L)
+        {
+            ScriptMod&        mod  = Self(L);
+            const std::string from = CheckName(L, 1, "Unredirect", "from");
+            const wxl_storage_api* api = Storage();
+            if (!api || !wxl::detail::Carries(api, &wxl_storage_api::unredirect))
+                return PushResultFailure(L, WXL_E_UNSUPPORTED);
+
+            const std::string key = NameKey(from);
+            for (size_t i = 0; i < g_redirects.size(); ++i)
+            {
+                const Redirected& entry = g_redirects[i];
+                if (entry.key != key ||
+                    std::none_of(entry.holders.begin(), entry.holders.end(),
+                                 [&](const auto& holder) { return holder.first == &mod; }))
+                    continue;
+                LetGoName(i, mod);
                 lua_pushboolean(L, 1);
                 return 1;
             }
@@ -565,6 +678,8 @@ namespace wxl::lua::shims
         if (service == "script" && name == "RegisterEvent") return &L_RegisterEvent;
         if (service == "storage" && name == "AddSearchPath") return &L_AddSearchPath;
         if (service == "storage" && name == "RemoveSearchPath") return &L_RemoveSearchPath;
+        if (service == "storage" && name == "Redirect") return &L_Redirect;
+        if (service == "storage" && name == "Unredirect") return &L_Unredirect;
         if (service == "footprint" && name == "Snapshot") return &L_Snapshot;
         if (service == "footprint" && name == "Report") return &L_Report;
         if (service == "footprint" && name == "WatchPressure") return &L_WatchPressure;
@@ -580,6 +695,10 @@ namespace wxl::lua::shims
         for (size_t i = g_folders.size(); i-- > 0;)
             if (std::find(g_folders[i].holders.begin(), g_folders[i].holders.end(), &mod) != g_folders[i].holders.end())
                 LetGo(i, mod);
+        for (size_t i = g_redirects.size(); i-- > 0;)
+            if (std::any_of(g_redirects[i].holders.begin(), g_redirects[i].holders.end(),
+                            [&](const auto& holder) { return holder.first == &mod; }))
+                LetGoName(i, mod);
     }
 
     void Start()

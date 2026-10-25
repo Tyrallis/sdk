@@ -841,7 +841,7 @@ WXL_ARGS_END(wxl_object_field_args)
  * event is raised: for a mount the tables just read, for an unmount all it held.
  */
 WXL_ARGS(wxl_archive_args)
-WXL_ARGS_FIELD(wxl_archive_args, path, str)
+WXL_ARGS_FIELD(wxl_archive_args, path, str)            ///< as it was opened; a folder opened as an archive ends in a backslash
 WXL_ARGS_FIELD(wxl_archive_args, priority, i32)        ///< higher wins a name
 WXL_ARGS_FIELD(wxl_archive_args, hash_entries, u32)
 WXL_ARGS_FIELD(wxl_archive_args, block_entries, u32)
