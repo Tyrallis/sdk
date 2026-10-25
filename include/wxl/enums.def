@@ -316,6 +316,13 @@ WXL_ENUM_VALUE(wxl_item_quality, WXL_QUALITY_ARTIFACT,  6, artifact)
 WXL_ENUM_VALUE(wxl_item_quality, WXL_QUALITY_HEIRLOOM,  7, heirloom)
 WXL_ENUM_END(wxl_item_quality)
 
+/// What happened to a character appearance, in an AppearanceChanged event.
+WXL_ENUM(wxl_appearance_change)
+WXL_ENUM_VALUE(wxl_appearance_change, WXL_APPEARANCE_WORN,    1, worn)    ///< an item display was put on a slot, the client's own models already hung
+WXL_ENUM_VALUE(wxl_appearance_change, WXL_APPEARANCE_REMOVED, 2, removed) ///< an item display is about to come off a slot
+WXL_ENUM_VALUE(wxl_appearance_change, WXL_APPEARANCE_FREED,   3, freed)   ///< the appearance is about to be freed: forget what was kept for it
+WXL_ENUM_END(wxl_appearance_change)
+
 #ifdef WXL_ENUM_DEFAULTED
     #undef WXL_ENUM
     #undef WXL_ENUM_DEFAULTED

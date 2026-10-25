@@ -240,6 +240,52 @@ namespace
         }
     };
 
+    /// The model events of three families: the loader's stages, an appearance, a drawn batch.
+    struct ModelStages final : wxl::AssetScript
+    {
+        std::string parsed, skinned, sequenced;
+        void*       file = nullptr;
+        uint32_t    index = 0, bytes = 0;
+        void OnModelParsed(std::string_view path, void* f, void* header, uint32_t size) override
+        {
+            parsed = std::string(path), file = f, bytes = header ? size : 0;
+        }
+        void OnSkinProfileParsed(std::string_view path, void*, void*, void* skin) override
+        {
+            if (skin) skinned = std::string(path);
+        }
+        void OnModelSequenceLoad(std::string_view path, void*, uint32_t sequence, wxl::Bytes data) override
+        {
+            sequenced = std::string(path) + ":" + std::string(data.View());
+            index     = sequence;
+        }
+    };
+
+    struct Wardrobe final : wxl::ObjectScript
+    {
+        wxl_appearance_change change = WXL_APPEARANCE_FREED;
+        void*                 model  = nullptr;
+        uint32_t              slot = 0, display = 0;
+        bool                  npc = true;
+        void OnAppearanceChanged(wxl_appearance_change c, void*, void* m, uint32_t, uint32_t, uint32_t s, uint32_t d,
+                                 bool n) override
+        {
+            change = c, model = m, slot = s, display = d, npc = n;
+        }
+    };
+
+    struct Outline final : wxl::RenderScript
+    {
+        uint32_t primitives = 0;
+        int32_t  base       = 0;
+        float    depth      = 0.0f;
+        void OnModelBatchDrawn(void*, void*, uint32_t, int32_t base_vertex, uint32_t, uint32_t, uint32_t, uint32_t count,
+                               uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, float, float max_z) override
+        {
+            primitives = count, base = base_vertex, depth = max_z;
+        }
+    };
+
     /// The gameplay families: direct parameters, enums as their C types, answers through wxl::Answer.
     struct GameplayLoot final : wxl::LootScript
     {
@@ -753,6 +799,41 @@ int main()
         wxl::ScriptMgr::Clear();
     }
 
+    Section("the model events: the loader's stages, appearances, drawn batches");
+    {
+        ModelStages stages;
+        Wardrobe    wardrobe;
+        Outline     outline;
+        wxl::ScriptMgr::Add(&stages);
+        wxl::ScriptMgr::Add(&wardrobe);
+        wxl::ScriptMgr::Add(&outline);
+
+        int                         shared = 0, header = 0, skin = 0;
+        const wxl_model_parsed_args parsed{wxl::Str("Creature\\Boar\\Boar.m2"), &shared, &header, 4096};
+        host.Raise(WXL_EV_ModelParsed, &parsed);
+        const wxl_skin_profile_parsed_args skinned{wxl::Str("Creature\\Boar\\Boar.m2"), &shared, &header, &skin};
+        host.Raise(WXL_EV_SkinProfileParsed, &skinned);
+        const wxl_model_sequence_args sequence{wxl::Str("Boar.m2"), &shared, 7, "anim", 4};
+        host.Raise(WXL_EV_ModelSequenceLoad, &sequence);
+        Check(stages.parsed == "Creature\\Boar\\Boar.m2" && stages.file == &shared && stages.bytes == 4096 &&
+                  stages.skinned == stages.parsed && stages.sequenced == "Boar.m2:anim" && stages.index == 7,
+              "AssetScript: the model's file and header as addresses, a sequence's bytes as wxl::Bytes");
+
+        int                       wearer = 0, body = 0;
+        const wxl_appearance_args worn{WXL_APPEARANCE_WORN, &wearer, &body, 1, 1, 4, 416036, WXL_FALSE};
+        host.Raise(WXL_EV_AppearanceChanged, &worn);
+        Check(wardrobe.change == WXL_APPEARANCE_WORN && wardrobe.model == &body && wardrobe.slot == 4 &&
+                  wardrobe.display == 416036 && !wardrobe.npc,
+              "ObjectScript: the change as wxl_appearance_change, the npc flag as bool");
+
+        wxl_model_batch_args batch{};
+        batch.base_vertex = -12, batch.primitive_count = 40, batch.viewport_max_z = 1.0f;
+        host.Raise(WXL_EV_ModelBatchDrawn, &batch);
+        Check(outline.primitives == 40 && outline.base == -12 && outline.depth == 1.0f,
+              "RenderScript: a drawn batch with the numbers of its draw");
+        wxl::ScriptMgr::Clear();
+    }
+
     Section("what a script handles");
     {
         wxl::ScriptMgr::Clear();
@@ -955,6 +1036,9 @@ int main()
         host.Table()->publish_service(WXL_PATCH_SERVICE, WXL_PATCH_SERVICE_VERSION, wxltest::FakePatch::Table());
         host.Table()->publish_service(WXL_DATA_SERVICE, WXL_DATA_SERVICE_VERSION, wxltest::FakeData::Table());
         host.Table()->publish_service(WXL_ACTION_SERVICE, WXL_ACTION_SERVICE_VERSION, wxltest::FakeActions::Table());
+        host.Table()->publish_service(WXL_M2_SERVICE, WXL_M2_SERVICE_VERSION, wxltest::FakeModels::Table());
+        host.Table()->publish_service(WXL_M2FILE_SERVICE, WXL_M2FILE_SERVICE_VERSION, wxltest::FakeModels::FileTable());
+        host.Table()->publish_service(WXL_GX_SERVICE, WXL_GX_SERVICE_VERSION, wxltest::FakeModels::GxTable());
     }
 
     Section("reads that can fail");
@@ -1221,6 +1305,65 @@ int main()
         Check(party && party->size() == 4, "PartyMembers keeps the slots that hold someone");
         Check(!Unit(FakeObjects::kStale).IsDead() && Unit(FakeObjects::kStale).IsDead().Error() == WXL_E_NOT_FOUND,
               "a stale object is gone");
+    }
+
+    Section("wxl.m2, wxl.m2file and wxl.gx: methods generated from their tables");
+    {
+        using wxltest::FakeModels;
+        using wxltest::FakeObjects;
+        void* const body = wxl::M2Service::ObjectModel(wxl::Unit(FakeObjects::kBoar));
+        Check(body == FakeModels::UnitModel() && !wxl::M2Service::ObjectModel(wxl::Object(FakeObjects::kItem)),
+              "ObjectModel: a unit's model, none for an item");
+        const auto row = wxl::M2Service::ItemDisplay(416036);
+        Check(row && std::strcmp(row->model[0], "Buckle.mdx") == 0 && row->struct_size == sizeof(wxl_m2_item_display) &&
+                  wxl::M2Service::ItemDisplay(1).Error() == WXL_E_NOT_FOUND,
+              "ItemDisplay: a row, its struct_size set by the facade; not found for none");
+        Check(wxl::M2Service::RacePrefix(1).ValueOr("") == "Hu" && !wxl::M2Service::RacePrefix(9),
+              "RacePrefix answers a string");
+
+        const int released = FakeModels::Released();
+        {
+            wxl::M2Model buckle(body, "Item\\Buckle.m2");
+            Check(static_cast<bool>(buckle) && buckle.Attach(body, 99) == WXL_E_NOT_FOUND &&
+                      buckle.Attach(body, 99, WXL_M2_ATTACH_ROOT | WXL_M2_ATTACH_FOLLOW_BONES) == WXL_OK &&
+                      buckle.Parent() == body,
+                  "M2Model: made, hung on the root where the point is missing");
+            buckle.SetGeosets(1, 3, false);
+            const auto* made = FakeModels::Known(buckle.Get());
+            Check(made && made->first == 1 && made->last == 3 && !made->visible &&
+                      buckle.ReplaceTexture(2, "missing.blp") == WXL_E_NOT_FOUND,
+                  "geosets and textures reach the model");
+            Check(buckle.AttachToBone(body, 53, 5, wxl_vec3{0.2f, 0.0f, 1.1f}) == WXL_OK && made->key_bone == 5 &&
+                      made->offset.x == 0.2f,
+                  "AttachToBone takes the offset by value");
+            buckle.Detach();
+            Check(!buckle.Parent(), "Detach takes it off");
+            wxl::M2Model moved = std::move(buckle);
+            Check(!buckle && static_cast<bool>(moved), "moving one leaves the other empty");
+        }
+        Check(FakeModels::Released() == released + 1, "and the one left gives the model back when it goes");
+        const auto point = wxl::M2Service::AttachmentPoint(body, 32);
+        Check(point && point->z == 1.5f && wxl::M2Service::AttachmentPoint(body, 1).Error() == WXL_E_NOT_FOUND,
+              "AttachmentPoint answers a point");
+
+        uint32_t array[2]  = {0, 0};
+        void*    elements  = wxl::M2FileService::AllocNear(array, 3 * sizeof(uint32_t));
+        auto*    values    = static_cast<uint32_t*>(elements);
+        values[0] = 10, values[1] = 20, values[2] = 30;
+        Check(elements && wxl::M2FileService::SetArray(array, elements, 3) == WXL_OK &&
+                  wxl::M2FileService::ArrayData(array) == elements,
+              "SetArray and ArrayData agree, the runtime's way");
+        uint32_t sum = 0;
+        for (uint32_t value : wxl::M2FileService::Elements<uint32_t>(array)) sum += value;
+        Check(sum == 60, "Elements walks a parsed array");
+        const int animated = FakeModels::Animated();
+        wxl::M2FileService::AnimateBones(array);
+        Check(FakeModels::Animated() == animated + 1, "AnimateBones reaches the file");
+
+        const int invalidated = FakeModels::Invalidated();
+        Check(wxl::GxService::D3d9Device() == FakeModels::Device(), "D3d9Device answers the device");
+        wxl::GxService::InvalidateState();
+        Check(FakeModels::Invalidated() == invalidated + 1, "InvalidateState reaches the runtime");
     }
 
     Section("wxl.action, and the objects' own actions");

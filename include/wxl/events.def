@@ -497,6 +497,21 @@ WXL_EVENT(Asset, ShaderLoad,         133, wxl_shader_load_args)
 /** The sound engine is opening a sound file to play it. */
 WXL_EVENT(Asset, SoundFileLoad,      134, wxl_sound_file_args)
 
+// --- Models: the loader's stages, appearances and drawn batches ------------------------------
+
+WXL_EVENTS_SINCE(0, 1, 20, 135)
+
+/** A model file was parsed, before the client chooses its skin profile and makes its textures. */
+WXL_EVENT(Asset, ModelParsed,       135, wxl_model_parsed_args)
+/** A model's skin profile was parsed, before the client sizes its draw state from it. */
+WXL_EVENT(Asset, SkinProfileParsed, 136, wxl_skin_profile_parsed_args)
+/** An external sequence file of a model was read, before it is parsed against the model. */
+WXL_EVENT(Asset, ModelSequenceLoad, 137, wxl_model_sequence_args)
+/** A character appearance put an item display on, is taking one off, or is going away. */
+WXL_EVENT(Object, AppearanceChanged, 138, wxl_appearance_args)
+/** The client's Direct3D 9 device has just drawn one batch of a model. */
+WXL_EVENT(Render, ModelBatchDrawn,  139, wxl_model_batch_args)
+
 // Give back whatever was defaulted above, so the file can be included again right after with a
 // different selector. What the consumer defined itself is left alone: undefining it here would
 // break the consumer that includes the table twice on purpose.

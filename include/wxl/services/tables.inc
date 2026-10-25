@@ -15,3 +15,6 @@
 #include "wxl/services/profile.def"
 #include "wxl/services/action.def"
 #include "wxl/services/point.def"
+#include "wxl/services/m2file.def"
+#include "wxl/services/m2.def"
+#include "wxl/services/gx.def"

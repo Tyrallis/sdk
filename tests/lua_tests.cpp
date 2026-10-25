@@ -2158,6 +2158,86 @@ end
         if (g_failures) sink.Dump();
     }
 
+    Section("the model events and wxl.m2 in Lua");
+    {
+        const fs::path mods = MakeTree(scratch, "models", binary, fs::path());
+        WriteFile(mods / "tailor" / "mod.json",
+                  LuaManifest("wxl.tailor", "\"requires\": [ { \"service\": \"wxl.m2\", \"version\": 1 } ]"));
+        WriteFile(mods / "tailor" / "init.lua", R"(
+local kept = {}
+Observe("ObjectScript", "OnAppearanceChanged", function(change, wearer, model, race, sex, slot, display, npc)
+    print("appearance " .. change .. " slot " .. slot .. " display " .. display .. " " .. type(model) .. " npc " .. tostring(npc))
+    if change ~= "worn" then return end
+    local buckle = wxl.m2.CreateModel(model, "Item\\Buckle.m2")
+    print("made " .. tostring(buckle ~= nil) .. " " .. tostring(buckle):sub(1, 9))
+    print("attach " .. tostring(buckle:Attach(model, 53, 1)))
+    print("parent " .. tostring(buckle:Parent() == model))
+    print("missing " .. tostring(select(2, buckle:Attach(model, 99, 0))))
+    local point = wxl.m2.AttachmentPoint(model, 32)
+    print("point " .. tostring(point))
+    print("onbone " .. tostring(buckle:AttachToBone(model, 53, 5, { x = 0.5, y = 0, z = 1 })))
+    print("prefix " .. wxl.m2.RacePrefix(race))
+    kept[#kept + 1] = buckle
+    local spare = wxl.m2.CreateModel(model, "Item\\Spare.m2")
+    spare:Release()
+    print("released " .. tostring(pcall(function() return spare:Parent() end)))
+end)
+Observe("AssetScript", "OnModelParsed", function(path, file, header, size)
+    print("parsed " .. path .. " " .. type(file) .. " " .. size)
+end)
+Observe("AssetScript", "OnModelSequenceLoad", function(path, file, index, data)
+    print("sequence " .. path .. " #" .. index .. " " .. data)
+end)
+Observe("RenderScript", "OnModelBatchDrawn", function(model, root, kind, base, min, count, start, primitives)
+    print("batch " .. primitives .. " base " .. base)
+end)
+)");
+        WriteFile(mods / "plain" / "mod.json", LuaManifest("wxl.plain"));
+        WriteFile(mods / "plain" / "init.lua",
+                  "print('undeclared ' .. tostring(select(2, pcall(function() return wxl.m2.RacePrefix(1) end))))\n");
+
+        CaptureSink sink;
+        HostConfig  config = Config(mods, sink);
+        config.services.push_back(PublishedService{WXL_M2_SERVICE, WXL_M2_SERVICE_VERSION, wxltest::FakeModels::Table()});
+        const int released = wxltest::FakeModels::Released();
+        ModHost   host(std::move(config));
+        host.LoadAll();
+        host.Stage(WXL_STAGE_READY);
+
+        int                       wearer = 0;
+        const wxl_appearance_args worn{WXL_APPEARANCE_WORN, &wearer, wxltest::FakeModels::UnitModel(), 1, 0, 4, 416036,
+                                       WXL_FALSE};
+        host.Raise(WXL_EV_AppearanceChanged, &worn);
+        Check(sink.Has("[wxl.tailor] appearance worn slot 4 display 416036 userdata npc false"),
+              "AppearanceChanged reaches Lua: the change by name, the model as an address");
+        Check(sink.Has("[wxl.tailor] made true Model(0x") && sink.Has("[wxl.tailor] attach true") &&
+                  sink.Has("[wxl.tailor] parent true") && sink.Has("[wxl.tailor] missing not_found"),
+              "a wxl.Model is made on the event's model and hangs on it; a missing point is not_found");
+        Check(sink.Has("[wxl.tailor] point table") && sink.Has("[wxl.tailor] onbone true") &&
+                  sink.Has("[wxl.tailor] prefix Hu"),
+              "AttachmentPoint answers {x, y, z}, AttachToBone takes one, RacePrefix a string");
+        Check(sink.Has("[wxl.tailor] released false") && wxltest::FakeModels::Released() == released + 1,
+              "a model given back is given back once, and refuses its methods after");
+        Check(sink.Has("[wxl.plain] undeclared") && sink.Has("reaches the client's memory"),
+              "a mod that does not declare wxl.m2 is told how to");
+
+        int                         file = 0;
+        const wxl_model_parsed_args parsed{wxl::Str("Boar.m2"), &file, &file, 2048};
+        host.Raise(WXL_EV_ModelParsed, &parsed);
+        const wxl_model_sequence_args sequence{wxl::Str("Boar.m2"), &file, 3, "keys", 4};
+        host.Raise(WXL_EV_ModelSequenceLoad, &sequence);
+        wxl_model_batch_args batch{};
+        batch.primitive_count = 12, batch.base_vertex = -4;
+        host.Raise(WXL_EV_ModelBatchDrawn, &batch);
+        Check(sink.Has("[wxl.tailor] parsed Boar.m2 userdata 2048") && sink.Has("[wxl.tailor] sequence Boar.m2 #3 keys") &&
+                  sink.Has("[wxl.tailor] batch 12 base -4"),
+              "the loader's stages and a drawn batch reach Lua");
+
+        host.Shutdown();
+        Check(wxltest::FakeModels::Released() == released + 2, "the mod's models are given back when it unloads");
+        if (g_failures) sink.Dump();
+    }
+
     Section("what a mod's abi lets it use");
     {
         const wxl::reflect::Version since = wxl::reflect::SinceOf(WXL_EV_ChatMessage);

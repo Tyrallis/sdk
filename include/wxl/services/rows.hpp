@@ -47,7 +47,9 @@
 //
 // Parameters, and the C parameters each one is:
 //   str wxl_str  cstr const char*  i32  u32  u64  uptr uintptr_t  f64 double  boolean wxl_bool
-//   ptr void*  ptr_out void**  call wxl_script_call*  script_fn wxl_script_fn
+//   ptr void*  cptr const void*: an address of the client's (a model); a script passes what an
+//       event or a call handed it, or one of its own resources
+//   ptr_out void**  call wxl_script_call*  script_fn wxl_script_fn
 //   point_fn wxl_point_fn  point_call wxl_point_call*
 //   values (const wxl_value*, uint32_t count)  bytes const void*
 //   bytes_size uint32_t: the length of the bytes before it, which must all be as long
@@ -63,8 +65,11 @@
 // Answers: the C return, and the C parameters the answer appends after the row's own:
 //   none void  result wxl_result  boolean wxl_bool  u32  uptr  str wxl_str
 //   address uintptr_t, 0 meaning none
+//   ptr void*, null meaning none: an address of the client's, which a script holds as it is
 //   enumeration<E> uint32_t holding a value of E, an enumeration of enums.def
-//   out<K> wxl_result, K*            found<K> wxl_bool, K*
+//   out<K> wxl_result, K*            found<K> wxl_bool, K*: K a value kind (u64 u32 i32 f64 str
+//       boolean vec3) or a struct kind (m2_item_display: wxl_m2_item_display, written no longer
+//       than its struct_size)
 //   whole_bytes wxl_result, (void* buffer, uint64_t capacity, uint64_t* out_read): a buffer
 //       too small is WXL_E_INVALID with out_read set to what it needs
 //   read_bytes wxl_result, (void* buffer, uint64_t size, uint64_t* out_read): the caller says
@@ -91,6 +96,9 @@
 #include "wxl/services/footprint.h"
 #include "wxl/services/profile.h"
 #include "wxl/services/action.h"
+#include "wxl/services/gx.h"
+#include "wxl/services/m2.h"
+#include "wxl/services/m2file.h"
 #include "wxl/objects/object.hpp"
 #include "wxl/services/script.h"
 #include "wxl/services/storage.h"
@@ -115,6 +123,7 @@ namespace wxl::api
         struct f64 {};
         struct boolean {};
         struct ptr {};
+        struct cptr {};
         struct ptr_out {};
         struct call {};
         struct script_fn {};
@@ -127,6 +136,7 @@ namespace wxl::api
         struct vec3 {};
         struct provider {};
         struct transform {};
+        struct m2_item_display {};
         template <class K>
         struct opt {};
 
@@ -190,6 +200,8 @@ namespace wxl::api
     template <> struct Value<kind::f64> { using type = double; };
     template <> struct Value<kind::str> { using type = wxl_str; };
     template <> struct Value<kind::boolean> { using type = wxl_bool; };
+    template <> struct Value<kind::vec3> { using type = wxl_vec3; };
+    template <> struct Value<kind::m2_item_display> { using type = wxl_m2_item_display; };
 
     /// The C parameters a parameter kind stands for.
     template <class K, class = void>
@@ -203,6 +215,7 @@ namespace wxl::api
     template <> struct Param<kind::f64> { using C = List<double>; };
     template <> struct Param<kind::boolean> { using C = List<wxl_bool>; };
     template <> struct Param<kind::ptr> { using C = List<void*>; };
+    template <> struct Param<kind::cptr> { using C = List<const void*>; };
     template <> struct Param<kind::ptr_out> { using C = List<void**>; };
     template <> struct Param<kind::call> { using C = List<wxl_script_call*>; };
     template <> struct Param<kind::script_fn> { using C = List<wxl_script_fn>; };
@@ -236,6 +249,7 @@ namespace wxl::api
     template <> struct Answer<kind::uptr> { using Return = uintptr_t; using Tail = List<>; };
     template <> struct Answer<kind::str> { using Return = wxl_str; using Tail = List<>; };
     template <> struct Answer<kind::address> { using Return = uintptr_t; using Tail = List<>; };
+    template <> struct Answer<kind::ptr> { using Return = void*; using Tail = List<>; };
     template <class E>
     struct Answer<kind::enumeration<E>>
     {
@@ -630,7 +644,7 @@ namespace wxl::api
     // WXL_E_UNSUPPORTED when it does not.
 
     /// The C++ parameter of a kind, and how it crosses.
-    template <class K>
+    template <class K, class = void>
     struct CxxParam;
     template <>
     struct CxxParam<kind::str>
@@ -686,6 +700,25 @@ namespace wxl::api
         using type = wxl_vec3;
         static wxl_vec3 ToC(wxl_vec3 value) { return value; }
     };
+    template <>
+    struct CxxParam<kind::ptr>
+    {
+        using type = void*;
+        static void* ToC(void* value) { return value; }
+    };
+    template <>
+    struct CxxParam<kind::cptr>
+    {
+        using type = const void*;
+        static const void* ToC(const void* value) { return value; }
+    };
+    /// A resource is its C value in C++: what the row that handed it out answered.
+    template <class R>
+    struct CxxParam<R, std::enable_if_t<IsResource<R>::value>>
+    {
+        using type = typename R::type;
+        static type ToC(type value) { return value; }
+    };
     /// A parameter a script may leave out is an ordinary one in C++.
     template <class K>
     struct CxxParam<kind::opt<K>> : CxxParam<K>
@@ -693,7 +726,7 @@ namespace wxl::api
     };
 
     /// The C++ answer of a kind: what a missing member answers, and what a call does.
-    template <class K>
+    template <class K, class = void>
     struct CxxAnswer;
     template <>
     struct CxxAnswer<kind::none>
@@ -761,6 +794,28 @@ namespace wxl::api
             return f();
         }
     };
+    template <>
+    struct CxxAnswer<kind::ptr>
+    {
+        using type = void*;
+        static void* Missing() { return nullptr; }
+        template <class F>
+        static void* Call(F&& f)
+        {
+            return f();
+        }
+    };
+    template <class R>
+    struct CxxAnswer<R, std::enable_if_t<IsResource<R>::value>>
+    {
+        using type = typename R::type;
+        static type Missing() { return R::kNone; }
+        template <class F>
+        static type Call(F&& f)
+        {
+            return f();
+        }
+    };
     template <class E>
     struct CxxAnswer<kind::enumeration<E>>
     {
@@ -785,6 +840,23 @@ namespace wxl::api
             const wxl_result result = f(&out);
             if (result != WXL_OK) return Unexpected{result};
             return out;
+        }
+    };
+
+    /// A string answered through an out parameter is a view: the runtime's text, which the row
+    /// says how long it lives.
+    template <>
+    struct CxxAnswer<kind::out<kind::str>>
+    {
+        using type = Expected<std::string_view>;
+        static type Missing() { return Unexpected{WXL_E_UNSUPPORTED}; }
+        template <class F>
+        static type Call(F&& f)
+        {
+            wxl_str          out{};
+            const wxl_result result = f(&out);
+            if (result != WXL_OK) return Unexpected{result};
+            return View(out);
         }
     };
 

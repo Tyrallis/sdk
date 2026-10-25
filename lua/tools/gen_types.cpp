@@ -266,6 +266,8 @@ namespace
         if (k == "object")
             return "---@param " + name + " wxl.Object" + (optional.empty() ? "" : " none when left out") + "\n";
         if (k == "vec3") return "---@param " + name + " wxl.Vec3\n";
+        if (k == "ptr" || k == "cptr")
+            return "---@param " + name + " lightuserdata|wxl.Model an address an event or a call handed you\n";
         if (IsResourceKind(k)) return "---@param " + name + " wxl." + k + "\n";
         return "---@param " + name + " any\n";
     }
@@ -285,13 +287,14 @@ namespace
         if (k == "boolean") return "boolean|nil";
         if (k == "u32" || k == "uptr") return "integer|nil";
         if (k == "address") return "integer|nil address";
+        if (k == "ptr") return "lightuserdata|nil address";
         if (k == "str") return "string|nil";
         if (k == "whole_bytes" || k == "read_bytes") return "string|nil bytes";
         if (IsResourceKind(k)) return "wxl." + k + "|nil";
         const std::string listed = Inside(k, "list");
         if (!listed.empty()) return (listed == "wxl_str" ? std::string("string") : ClassOf(listed.c_str())) + "[]|nil";
         const std::string out = Inside(k, "out");
-        if (!out.empty()) return out == "str" ? "string|nil" : "integer|nil";
+        if (!out.empty()) return out == "str" ? "string|nil" : out == "vec3" ? "wxl.Vec3|nil" : "integer|nil";
         const std::string named = Inside(k, "enumeration");
         if (!named.empty())
             if (const wxl::reflect::Enum* e = wxl::reflect::FindEnum(named.c_str())) return AliasOf(*e) + "|integer|nil";

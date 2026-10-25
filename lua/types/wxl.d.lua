@@ -1272,6 +1272,10 @@
 ---arrives as its number.
 ---@alias wxl.ItemQuality "poor"|"common"|"uncommon"|"rare"|"epic"|"legendary"|"artifact"|"heirloom"
 
+---A wxl_appearance_change value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.AppearanceChange "worn"|"removed"|"freed"
+
 -- The script families. A function defined on one of these tables as On<Event> is
 -- subscribed when the entry file has run and called with the event's parameters;
 -- on an event that can be answered its return values are taken, as Override
@@ -1298,6 +1302,7 @@ WorldScript = {}
 ---@field OnUiRenderEnd fun(self: RenderScript, index: integer, delta: number)
 ---@field OnSwapchainLost fun(self: RenderScript, width: integer, height: integer)
 ---@field OnSwapchainRestored fun(self: RenderScript, width: integer, height: integer)
+---@field OnModelBatchDrawn fun(self: RenderScript, model: lightuserdata|nil, root_model: lightuserdata|nil, primitive_type: integer, base_vertex: integer, min_index: integer, vertex_count: integer, start_index: integer, primitive_count: integer, blend_mode: integer, viewport_x: integer, viewport_y: integer, viewport_width: integer, viewport_height: integer, viewport_min_z: number, viewport_max_z: number)
 RenderScript = {}
 
 ---@class ObjectScript
@@ -1328,6 +1333,7 @@ RenderScript = {}
 ---@field OnUnitAuraRemoved fun(self: ObjectScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, slot: integer, spell_id: integer, caster: wxl.Object|nil, caster_guid: wxl.Guid, stacks: integer, previous_stacks: integer, level: integer, flags: integer, harmful: boolean, duration: integer, remaining: integer)
 ---@field OnUnitAuraRefreshed fun(self: ObjectScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, slot: integer, spell_id: integer, caster: wxl.Object|nil, caster_guid: wxl.Guid, stacks: integer, previous_stacks: integer, level: integer, flags: integer, harmful: boolean, duration: integer, remaining: integer)
 ---@field OnUnitMountChanged fun(self: ObjectScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, previous_display_id: integer, display_id: integer)
+---@field OnAppearanceChanged fun(self: ObjectScript, change: wxl.AppearanceChange|integer, wearer: lightuserdata|nil, model: lightuserdata|nil, race_id: integer, sex_id: integer, item_slot: integer, display_id: integer, npc: boolean)
 ObjectScript = {}
 
 ---@class AssetScript
@@ -1346,6 +1352,9 @@ ObjectScript = {}
 ---@field OnTextureDecode fun(self: AssetScript, path: string, width: integer, height: integer, encoding: wxl.TextureEncoding|integer, alpha_bits: integer, alpha_kind: integer, mip_levels: integer)
 ---@field OnShaderLoad fun(self: AssetScript, stage: wxl.ShaderStage|integer, path: string, name: string, permutations: integer)
 ---@field OnSoundFileLoad fun(self: AssetScript, path: string, streaming: boolean, priority: integer)
+---@field OnModelParsed fun(self: AssetScript, path: string, file: lightuserdata|nil, header: lightuserdata|nil, size: integer)
+---@field OnSkinProfileParsed fun(self: AssetScript, path: string, file: lightuserdata|nil, header: lightuserdata|nil, skin: lightuserdata|nil)
+---@field OnModelSequenceLoad fun(self: AssetScript, path: string, file: lightuserdata|nil, sequence_index: integer, data: wxl.Bytes)
 AssetScript = {}
 
 ---@class NetScript
@@ -1596,6 +1605,11 @@ SocialScript = {}
 ---@overload fun(family: "AssetScript", method: "OnTextureDecode", handler: fun(path: string, width: integer, height: integer, encoding: wxl.TextureEncoding|integer, alpha_bits: integer, alpha_kind: integer, mip_levels: integer)): integer
 ---@overload fun(family: "AssetScript", method: "OnShaderLoad", handler: fun(stage: wxl.ShaderStage|integer, path: string, name: string, permutations: integer)): integer
 ---@overload fun(family: "AssetScript", method: "OnSoundFileLoad", handler: fun(path: string, streaming: boolean, priority: integer)): integer
+---@overload fun(family: "AssetScript", method: "OnModelParsed", handler: fun(path: string, file: lightuserdata|nil, header: lightuserdata|nil, size: integer)): integer
+---@overload fun(family: "AssetScript", method: "OnSkinProfileParsed", handler: fun(path: string, file: lightuserdata|nil, header: lightuserdata|nil, skin: lightuserdata|nil)): integer
+---@overload fun(family: "AssetScript", method: "OnModelSequenceLoad", handler: fun(path: string, file: lightuserdata|nil, sequence_index: integer, data: wxl.Bytes)): integer
+---@overload fun(family: "ObjectScript", method: "OnAppearanceChanged", handler: fun(change: wxl.AppearanceChange|integer, wearer: lightuserdata|nil, model: lightuserdata|nil, race_id: integer, sex_id: integer, item_slot: integer, display_id: integer, npc: boolean)): integer
+---@overload fun(family: "RenderScript", method: "OnModelBatchDrawn", handler: fun(model: lightuserdata|nil, root_model: lightuserdata|nil, primitive_type: integer, base_vertex: integer, min_index: integer, vertex_count: integer, start_index: integer, primitive_count: integer, blend_mode: integer, viewport_x: integer, viewport_y: integer, viewport_width: integer, viewport_height: integer, viewport_min_z: number, viewport_max_z: number)): integer
 ---@param family wxl.Family
 ---@param method string
 ---@param handler function
@@ -2495,6 +2509,51 @@ local Patch = {}
 ---@return string|nil reason
 function Patch:Restore() end
 
+---A Model of wxl.m2.
+---@class wxl.Model
+local Model = {}
+
+---Takes the model off what it hangs on and gives it back; the mod's models go when it unloads too.
+function Model:Release() end
+
+---Hangs the model on a model at an attachment point; flags 1 attaches to the root where the point is missing, 2 makes it follow the parent's bones.
+---@param parent lightuserdata|wxl.Model an address an event or a call handed you
+---@param attachment integer
+---@param flags integer
+---@return true|nil ok
+---@return string|nil reason
+function Model:Attach(parent, attachment, flags) end
+
+---Takes the model off what it hangs on.
+function Model:Detach() end
+
+---What the model hangs on; nil, "not_found" for nothing, which is how a mod tells its model was let go.
+---@return lightuserdata|nil address
+---@return string|nil reason
+function Model:Parent() end
+
+---Shows or hides every geoset of the model whose id is in [first, last].
+---@param first integer
+---@param last integer
+---@param visible boolean
+function Model:SetGeosets(first, last, visible) end
+
+---Replaces the texture the model takes for a texture type (2 an item's skin, 11-13 a creature's) with a file.
+---@param type integer
+---@param path string
+---@return true|nil ok
+---@return string|nil reason
+function Model:ReplaceTexture(type, path) end
+
+---Hangs the model on one key bone of a model, moved by an offset: an attachment point the parent's file does not have.
+---@param parent lightuserdata|wxl.Model an address an event or a call handed you
+---@param attachment integer
+---@param key_bone integer
+---@param offset wxl.Vec3
+---@return true|nil ok
+---@return string|nil reason
+function Model:AttachToBone(parent, attachment, key_bone, offset) end
+
 ---wxl.script. The client's own script: functions and events added to it, text run in it.
 ---@class wxl.script
 local script = {}
@@ -2887,6 +2946,38 @@ function point.Points() end
 ---@return string|nil reason
 function point.Find(name) end
 
+---wxl.m2. The models objects draw with, what a character wears, and models a mod makes and hangs on them. Main thread only.
+---Came with abi 0.1.20: a mod whose mod.json asks for an older abi cannot use it.
+---Unsafe: present only when the mod's mod.json declares it, in "requires" or "optional".
+---@class wxl.m2
+local m2 = {}
+
+---The model an object draws with, followed up what it hangs on (a mounted player answers its mount); nil, "not_found" for none.
+---@param object wxl.Object
+---@return lightuserdata|nil address
+---@return string|nil reason
+function m2.ObjectModel(object) end
+
+---A race's prefix in model file names ("Hu", "Or", "Sc"), from ChrRaces.dbc.
+---@param race_id integer
+---@return string|nil
+---@return string|nil reason
+function m2.RacePrefix(race_id) end
+
+---Makes a model of a file in the scene of the model given, for this mod: hang it on something with Attach.
+---@param scene_model lightuserdata|wxl.Model an address an event or a call handed you
+---@param path string
+---@return wxl.Model|nil
+---@return string|nil reason
+function m2.CreateModel(scene_model, path) end
+
+---Where an attachment point of a loaded model sits in its bind pose, as {x, y, z}.
+---@param model lightuserdata|wxl.Model an address an event or a call handed you
+---@param attachment integer
+---@return wxl.Vec3|nil
+---@return string|nil reason
+function m2.AttachmentPoint(model, attachment) end
+
 ---@class wxl.ModInfo
 ---@field id string
 ---@field name string
@@ -2958,6 +3049,7 @@ function object.Unwatch(type, name) end
 ---@field profile wxl.profile
 ---@field action wxl.action
 ---@field point wxl.point
+---@field m2 wxl.m2
 ---@field events table<wxl.Family, string[]> every family's events, as On<Event>
 wxl = {}
 

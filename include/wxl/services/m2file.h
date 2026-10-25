@@ -1,16 +1,29 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 WarcraftXL
 //
-// The model-file service: an M2 file as the client reads it, at the points its loader passes
-// through, for a mod that teaches the client a model format it was not written for.
+// The model-file service: what a mod needs to reshape a model file the client has parsed, for a
+// mod that teaches the client a model format it was not written for.
 //
-// Not portable. It is published only by a runtime that sees the client's model loader from the
-// inside -- the recompiled client -- and a mod that needs it requires it in its manifest. Bytes
-// are raw: the model is the client's own M2Data, the skin profile its own M2SkinProfile, laid out
-// as the file is (an array is a 32-bit count and a 32-bit offset). What the offsets mean depends
-// on the stage, and is written beside each stage below.
+// The loader's stages reach a mod as events of the Asset family, each with the model's file (the
+// client's CM2Shared, opaque) and its parsed header:
 //
-// Calls are made on the client's main thread, from the client's file completion callbacks.
+//   ModelLoad          the file read whole, nothing parsed: its bytes can be replaced (an `m2`
+//                      transform of wxl.storage converts them, to any size)
+//   ModelParsed        the header parsed, nothing made from it yet: arrays can be pointed at
+//                      other memory, ahead of the skin profile's choice and the textures
+//   SkinProfileLoad    the skin profile read, before it is parsed
+//   SkinProfileParsed  the skin profile parsed, before the client sizes its draw state from it:
+//                      batches, submeshes and the model's lookups can still be replaced
+//   ModelSequenceLoad  an external sequence (.anim) read, before it is parsed against the model
+//
+// An array of a parsed model is two 32-bit words, a count and where its elements are. Where they
+// are depends on the runtime: the stock client keeps their address, the recompiled client (whose
+// addresses are 64-bit) their offset from the array itself. array_data and set_array read and
+// write an array the same way on both, and alloc_near gives memory a 64-bit client's array can
+// reach.
+//
+// Not safe: everything here is the client's own memory, written as it lies. Calls are made on
+// the client's main thread, from the handlers of those events.
 
 #ifndef WXL_SERVICE_M2FILE_H
 #define WXL_SERVICE_M2FILE_H
@@ -24,78 +37,17 @@
 extern "C" {
 #endif
 
-/// Where in the loader a wxl_m2file was taken.
-typedef enum wxl_m2file_stage
-{
-    /**
-     * The model file has been read and nothing has looked at it. `data` holds `size` bytes,
-     * offsets are from `data`. A watcher may rewrite the bytes in place and lower `size` (never
-     * raise it: the allocation is the client's); the client then parses what is left as a
-     * version 264 'MD20' model. Answering false refuses the file: the client reports it corrupt
-     * and the model never loads.
-     */
-    WXL_M2FILE_READ = 1,
-
-    /**
-     * The model has been parsed: every array of the header now holds its offset relative to the
-     * array itself (data = (uint8_t*)&array + (int32_t)array.offset), as the client's
-     * M2Array::Data reads it. Nothing has been made from it yet: no skin profile chosen, no
-     * texture created. An array pointed elsewhere must stay within reach of a 32-bit offset of
-     * the array: alloc_near is memory that is.
-     */
-    WXL_M2FILE_PARSED = 2,
-
-    /**
-     * The skin profile has been read and parsed (its arrays self-relative, as above) and the
-     * client is about to size its draw state from it: batches, submeshes and the model's lookups
-     * may still be replaced. `skin` is the profile's header.
-     */
-    WXL_M2FILE_SKIN = 3,
-
-    /**
-     * An external sequence file (.anim) of the model has been read and nothing has looked at it.
-     * `sequence` holds `sequence_size` bytes and is what the sequence's offsets are relative to;
-     * a watcher may rewrite them in place. The same buffer is handed once for every sequence that
-     * shares it.
-     */
-    WXL_M2FILE_SEQUENCE = 4,
-} wxl_m2file_stage;
-
-/// One model file at one stage of its load.
-typedef struct wxl_m2file
-{
-    uint32_t    struct_size;
-    uint32_t    stage;          ///< a wxl_m2file_stage
-    void*       file;           ///< the client's CM2Shared (opaque); what wxl.m2's models are made from
-    const char* name;           ///< the path the client opened it by, with its extension
-    void*       data;           ///< the model's bytes: its header
-    uint32_t    size;           ///< how many; WXL_M2FILE_READ may lower it
-    void*       skin;           ///< WXL_M2FILE_SKIN: the skin profile's header, else null
-    void*       sequence;       ///< WXL_M2FILE_SEQUENCE: the external sequence's bytes, else null
-    uint32_t    sequence_size;
-    uint32_t    sequence_index; ///< WXL_M2FILE_SEQUENCE: which of the model's sequences it is
-} wxl_m2file;
-
-/**
- * @brief Called for every model file at every stage, until unwatched. Answers whether the file
- *        may load: false is honoured at WXL_M2FILE_READ and ignored after it. A watcher returns
- *        true at once for a file it does not want.
- */
-typedef wxl_bool(WXL_CALL* wxl_m2file_fn)(wxl_m2file* file, void* user);
-
 typedef struct wxl_m2file_api
 {
     uint32_t struct_size;
 
-    /// Calls @p fn for every model file the client loads. Runs under the crash guard; a watcher
-    /// that faults disables its mod, and the file it faulted on is refused.
-    wxl_result(WXL_CALL* watch_files)(wxl_m2file_fn fn, void* user, uint32_t* out_token);
-    void(WXL_CALL* unwatch_files)(uint32_t token);
-
     /**
-     * @brief @p size zeroed bytes, 16-aligned, that an array lying at @p anchor can point at with
-     *        its 32-bit self-relative offset. They live for the session: a model's own arrays are
-     *        never freed one by one, and neither is this. Null when no memory is left in reach.
+     * @brief @p size zeroed bytes, 16-aligned, that an array lying at @p anchor can be pointed
+     *        at with set_array. They live for the session: the client never frees a model's
+     *        arrays one by one, and neither is this. Null when no memory is left in reach.
+     *
+     * On the recompiled client the bytes lie within 1 GB of the anchor, well inside a 32-bit
+     * offset; on the stock client any address is in reach.
      */
     void*(WXL_CALL* alloc_near)(const void* anchor, uint32_t size);
 
@@ -105,9 +57,22 @@ typedef struct wxl_m2file_api
      * The client skips the bone pass of a model none of whose bones carries one of the flags it
      * counts at load (billboards, a transform), and draws the shadow from the model's transform
      * alone. A file whose bones are animated but carry none of those flags then casts a shadow
-     * that does not move with it. From WXL_M2FILE_PARSED on.
+     * that does not move with it. From ModelParsed on.
      */
     void(WXL_CALL* animate_bones)(void* file);
+
+    /// Where the elements of the parsed array at @p array are, as this runtime keeps it; null
+    /// for an empty array.
+    void*(WXL_CALL* array_data)(const void* array);
+
+    /**
+     * @brief Points the parsed array at @p array at @p count elements at @p data, as this
+     *        runtime keeps it.
+     *
+     * WXL_E_INVALID when @p data lies out of a 32-bit offset's reach of the array, which only
+     * happens on the recompiled client: alloc_near(array, size) gives memory that is in reach.
+     */
+    wxl_result(WXL_CALL* set_array)(void* array, const void* data, uint32_t count);
 } wxl_m2file_api;
 
 #ifdef __cplusplus

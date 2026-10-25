@@ -32,6 +32,9 @@
 #include "wxl/services/object.h"
 #include "wxl/services/patch.h"
 #include "wxl/services/footprint.h"
+#include "wxl/services/gx.h"
+#include "wxl/services/m2.h"
+#include "wxl/services/m2file.h"
 #include "wxl/services/profile.h"
 #include "wxl/services/script.h"
 #include "wxl/services/storage.h"
@@ -1711,6 +1714,217 @@ namespace wxltest
             return &api;
         }
     };
+
+    // --- wxl.m2, wxl.m2file and wxl.gx ------------------------------------------------------
+    //
+    // Models are records the fake makes and frees, a parent by address; a model the fake did not
+    // make is refused, as the runtime refuses a model the mod did not make. The arrays are kept
+    // as the recompiled client keeps them: an offset from the array itself.
+
+    struct FakeModels
+    {
+        struct Model
+        {
+            std::string path;
+            void*       parent     = nullptr;
+            uint32_t    attachment = 0;
+            uint32_t    flags      = 0;
+            uint32_t    first = 0, last = 0;
+            bool        visible    = true;
+            std::string texture;
+            uint32_t    key_bone   = 0;
+            wxl_vec3    offset{};
+        };
+
+        static std::map<void*, Model*>& Made()
+        {
+            static std::map<void*, Model*> made;
+            return made;
+        }
+        static int& Released()
+        {
+            static int released = 0;
+            return released;
+        }
+        static int& Invalidated()
+        {
+            static int invalidated = 0;
+            return invalidated;
+        }
+        static int& Animated()
+        {
+            static int animated = 0;
+            return animated;
+        }
+
+        /// The model a world object draws with: the unit's, an address of the fake's own.
+        static void* UnitModel()
+        {
+            static char model = 0;
+            return &model;
+        }
+
+        static Model* Known(void* model)
+        {
+            const auto found = Made().find(model);
+            return found == Made().end() ? nullptr : found->second;
+        }
+
+        static void* WXL_CALL ObjectModel(wxl_handle object)
+        {
+            return FakeObjects::Live(object) && FakeObjects::IsUnit(object) ? UnitModel() : nullptr;
+        }
+        static wxl_result WXL_CALL ItemDisplay(uint32_t id, wxl_m2_item_display* out)
+        {
+            if (id != 416036) return WXL_E_NOT_FOUND;
+            out->id       = id;
+            out->model[0] = "Buckle.mdx";
+            out->model[1] = "";
+            return WXL_OK;
+        }
+        static wxl_result WXL_CALL RacePrefix(uint32_t race, wxl_str* out)
+        {
+            if (race != 1) return WXL_E_NOT_FOUND;
+            *out = wxl_str{"Hu", 2};
+            return WXL_OK;
+        }
+        static void* WXL_CALL CreateModel(void* scene, wxl_str path)
+        {
+            if (!scene || !path.size) return nullptr;
+            Model* model = new Model{};
+            model->path.assign(path.data, path.size);
+            Made()[model] = model;
+            return model;
+        }
+        static void WXL_CALL Release(void* model)
+        {
+            Model* known = Known(model);
+            if (!known) return;
+            Made().erase(model);
+            delete known;
+            ++Released();
+        }
+        static wxl_result WXL_CALL Attach(void* model, void* parent, uint32_t attachment, uint32_t flags)
+        {
+            Model* known = Known(model);
+            if (!known || !parent) return WXL_E_INVALID;
+            if (attachment == 99 && !(flags & WXL_M2_ATTACH_ROOT)) return WXL_E_NOT_FOUND;
+            known->parent = parent, known->attachment = attachment, known->flags = flags;
+            return WXL_OK;
+        }
+        static void WXL_CALL Detach(void* model)
+        {
+            if (Model* known = Known(model)) known->parent = nullptr;
+        }
+        static void* WXL_CALL Parent(void* model)
+        {
+            Model* known = Known(model);
+            return known ? known->parent : nullptr;
+        }
+        static void WXL_CALL SetGeosets(void* model, uint32_t first, uint32_t last, wxl_bool visible)
+        {
+            if (Model* known = Known(model)) known->first = first, known->last = last, known->visible = visible == WXL_TRUE;
+        }
+        static wxl_result WXL_CALL ReplaceTexture(void* model, uint32_t, wxl_str path)
+        {
+            Model* known = Known(model);
+            if (!known) return WXL_E_INVALID;
+            known->texture.assign(path.data, path.size);
+            return known->texture == "missing.blp" ? WXL_E_NOT_FOUND : WXL_OK;
+        }
+        static wxl_result WXL_CALL AttachmentPoint(const void* model, uint32_t attachment, wxl_vec3* out)
+        {
+            if (model != UnitModel() || attachment != 32) return WXL_E_NOT_FOUND;
+            *out = wxl_vec3{0.25f, 0.5f, 1.5f};
+            return WXL_OK;
+        }
+        static wxl_result WXL_CALL AttachToBone(void* model, void* parent, uint32_t attachment, uint32_t key_bone,
+                                                wxl_vec3 offset)
+        {
+            Model* known = Known(model);
+            if (!known || !parent) return WXL_E_INVALID;
+            if (key_bone == 99) return WXL_E_NOT_FOUND;
+            known->parent = parent, known->attachment = attachment, known->key_bone = key_bone, known->offset = offset;
+            return WXL_OK;
+        }
+
+        static void* WXL_CALL AllocNear(const void*, uint32_t size)
+        {
+            static std::vector<std::vector<uint8_t>> blocks;
+            blocks.emplace_back(size, uint8_t(0));
+            return blocks.back().data();
+        }
+        static void WXL_CALL AnimateBones(void* file) { if (file) ++Animated(); }
+        static void* WXL_CALL ArrayData(const void* array)
+        {
+            const uint32_t* words = static_cast<const uint32_t*>(array);
+            if (!words[0]) return nullptr;
+            return const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(array) + static_cast<int32_t>(words[1]));
+        }
+        static wxl_result WXL_CALL SetArray(void* array, const void* data, uint32_t count)
+        {
+            const int64_t offset = reinterpret_cast<const uint8_t*>(data) - static_cast<const uint8_t*>(array);
+            if (data && (offset < INT32_MIN || offset > INT32_MAX)) return WXL_E_INVALID;
+            uint32_t* words = static_cast<uint32_t*>(array);
+            words[0]        = count;
+            words[1]        = data ? static_cast<uint32_t>(static_cast<int32_t>(offset)) : 0;
+            return WXL_OK;
+        }
+
+        static void* WXL_CALL Device()
+        {
+            static char device = 0;
+            return &device;
+        }
+        static void WXL_CALL Invalidate() { ++Invalidated(); }
+
+        static const wxl_m2_api* Table()
+        {
+            static const wxl_m2_api api = [] {
+                wxl_m2_api t{};
+                t.struct_size      = sizeof t;
+                t.object_model     = &ObjectModel;
+                t.item_display     = &ItemDisplay;
+                t.race_prefix      = &RacePrefix;
+                t.create_model     = &CreateModel;
+                t.release_model    = &Release;
+                t.attach_model     = &Attach;
+                t.detach_model     = &Detach;
+                t.model_parent     = &Parent;
+                t.set_geosets      = &SetGeosets;
+                t.replace_texture  = &ReplaceTexture;
+                t.attachment_point = &AttachmentPoint;
+                t.attach_to_bone   = &AttachToBone;
+                return t;
+            }();
+            return &api;
+        }
+        static const wxl_m2file_api* FileTable()
+        {
+            static const wxl_m2file_api api = [] {
+                wxl_m2file_api t{};
+                t.struct_size   = sizeof t;
+                t.alloc_near    = &AllocNear;
+                t.animate_bones = &AnimateBones;
+                t.array_data    = &ArrayData;
+                t.set_array     = &SetArray;
+                return t;
+            }();
+            return &api;
+        }
+        static const wxl_gx_api* GxTable()
+        {
+            static const wxl_gx_api api = [] {
+                wxl_gx_api t{};
+                t.struct_size      = sizeof t;
+                t.d3d9_device      = &Device;
+                t.invalidate_state = &Invalidate;
+                return t;
+            }();
+            return &api;
+        }
+    };
+
 } // namespace wxltest
 
 #endif // WXL_TEST_FAKE_SERVICES_HPP

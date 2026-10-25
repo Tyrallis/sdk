@@ -1268,6 +1268,90 @@ WXL_ARGS_FIELD(wxl_sound_file_args, streaming, bool)  ///< read as it plays rath
 WXL_ARGS_FIELD(wxl_sound_file_args, priority, i32)    ///< the engine's priority for the channel
 WXL_ARGS_END(wxl_sound_file_args)
 
+/**
+ * @brief A model file parsed, before the client makes anything from it.
+ *
+ * The header's arrays are resolved: wxl.m2file reads them (ArrayData) and points them at other
+ * memory (SetArray, AllocNear) the way the runtime keeps them. Nothing has chosen a skin profile
+ * or made a texture yet.
+ */
+WXL_ARGS(wxl_model_parsed_args)
+WXL_ARGS_FIELD(wxl_model_parsed_args, path, str)          ///< the path the model was opened by
+WXL_ARGS_PTR(wxl_model_parsed_args, file, void*)          ///< the client's model file (opaque): what wxl.m2file takes
+WXL_ARGS_PTR(wxl_model_parsed_args, header, void*)        ///< the parsed header (M2Data, the file's own layout)
+WXL_ARGS_FIELD(wxl_model_parsed_args, size, u32)          ///< the bytes the header was parsed from
+WXL_ARGS_END(wxl_model_parsed_args)
+
+/**
+ * @brief A model's skin profile parsed, before the client sizes its draw state from it.
+ *
+ * Its batches and submeshes, and the model's lookups, can still be pointed elsewhere.
+ */
+WXL_ARGS(wxl_skin_profile_parsed_args)
+WXL_ARGS_FIELD(wxl_skin_profile_parsed_args, path, str)   ///< the model's path
+WXL_ARGS_PTR(wxl_skin_profile_parsed_args, file, void*)   ///< the client's model file (opaque)
+WXL_ARGS_PTR(wxl_skin_profile_parsed_args, header, void*) ///< the model's parsed header
+WXL_ARGS_PTR(wxl_skin_profile_parsed_args, skin, void*)   ///< the skin profile's parsed header (M2SkinProfile)
+WXL_ARGS_END(wxl_skin_profile_parsed_args)
+
+/**
+ * @brief An external sequence file of a model (.anim) read, before it is parsed against the model.
+ *
+ * The bytes are the client's buffer, as read; a sequence that shares its keys with others hands
+ * the same buffer for each. To change them, an `anim` transform of wxl.storage converts the file
+ * as it is read, to any size.
+ */
+WXL_ARGS(wxl_model_sequence_args)
+WXL_ARGS_FIELD(wxl_model_sequence_args, path, str)            ///< the model's path
+WXL_ARGS_PTR(wxl_model_sequence_args, file, void*)            ///< the client's model file (opaque)
+WXL_ARGS_FIELD(wxl_model_sequence_args, sequence_index, u32)  ///< which of the model's sequences
+WXL_ARGS_BYTES(wxl_model_sequence_args, data, size)           ///< the file's bytes; valid for the call only
+WXL_ARGS_FIELD(wxl_model_sequence_args, size, u32)
+WXL_ARGS_END(wxl_model_sequence_args)
+
+/**
+ * @brief A change to what a character appearance wears.
+ *
+ * An appearance is the client's CCharacterComponent: every player, every humanoid NPC dressed
+ * from CreatureDisplayInfoExtra, and every copy the interface makes of one (character select,
+ * the dressing room, portraits). `wearer` names it, the same until it is freed.
+ */
+WXL_ARGS(wxl_appearance_args)
+WXL_ARGS_ENUM(wxl_appearance_args, change, wxl_appearance_change)
+WXL_ARGS_PTR(wxl_appearance_args, wearer, void*)   ///< the appearance (opaque)
+WXL_ARGS_PTR(wxl_appearance_args, model, void*)    ///< its character model, what items hang on (wxl.m2); may be null
+WXL_ARGS_FIELD(wxl_appearance_args, race_id, u32)  ///< ChrRaces id
+WXL_ARGS_FIELD(wxl_appearance_args, sex_id, u32)   ///< 0 male, 1 female
+WXL_ARGS_FIELD(wxl_appearance_args, item_slot, u32)  ///< 0 head, 1 shoulder, 2 shirt, 3 chest, 4 belt, 5 legs, 6 feet, 7 wrists, 8 hands, 9 tabard, 10 cloak, 11 quiver; 0 when freed
+WXL_ARGS_FIELD(wxl_appearance_args, display_id, u32) ///< the ItemDisplayInfo id put on or taken off; 0 when freed
+WXL_ARGS_FIELD(wxl_appearance_args, npc, bool)       ///< an NPC's appearance: its body is one baked texture, items paint nothing
+WXL_ARGS_END(wxl_appearance_args)
+
+/**
+ * @brief One batch of a model, just drawn by the client's Direct3D 9 device.
+ *
+ * Everything it was drawn with -- vertex declaration, streams, indices, shaders and their
+ * constants, textures, render states -- is still bound: DrawIndexedPrimitive with these numbers
+ * draws the batch again (wxl.gx gives the device).
+ */
+WXL_ARGS(wxl_model_batch_args)
+WXL_ARGS_PTR(wxl_model_batch_args, model, void*)      ///< the model the batch belongs to (opaque)
+WXL_ARGS_PTR(wxl_model_batch_args, root_model, void*) ///< the top of what it hangs on: what wxl.m2's ObjectModel answers
+WXL_ARGS_FIELD(wxl_model_batch_args, primitive_type, u32) ///< a D3DPRIMITIVETYPE
+WXL_ARGS_FIELD(wxl_model_batch_args, base_vertex, i32)
+WXL_ARGS_FIELD(wxl_model_batch_args, min_index, u32)
+WXL_ARGS_FIELD(wxl_model_batch_args, vertex_count, u32)
+WXL_ARGS_FIELD(wxl_model_batch_args, start_index, u32)
+WXL_ARGS_FIELD(wxl_model_batch_args, primitive_count, u32)
+WXL_ARGS_FIELD(wxl_model_batch_args, blend_mode, u32)     ///< the material's blend: 0 opaque, 1 alpha key, 2 and up blended
+WXL_ARGS_FIELD(wxl_model_batch_args, viewport_x, u32)     ///< the viewport of the draw, as D3DVIEWPORT9 holds it: setting a
+WXL_ARGS_FIELD(wxl_model_batch_args, viewport_y, u32)     ///< render target resets it, and a pure device cannot be asked for it
+WXL_ARGS_FIELD(wxl_model_batch_args, viewport_width, u32)
+WXL_ARGS_FIELD(wxl_model_batch_args, viewport_height, u32)
+WXL_ARGS_FIELD(wxl_model_batch_args, viewport_min_z, f32)
+WXL_ARGS_FIELD(wxl_model_batch_args, viewport_max_z, f32)
+WXL_ARGS_END(wxl_model_batch_args)
+
 #ifdef WXL_ARGS_ENUM_DEFAULTED
     #undef WXL_ARGS_ENUM
     #undef WXL_ARGS_ENUM_DEFAULTED

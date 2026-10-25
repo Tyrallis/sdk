@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
+//
+// wxl.m2 as data: one row per member of wxl_m2_api, in member order. The shapes and their columns
+// are described in wxl/services/rows.hpp.
+//
+// A model a mod makes is a resource: a script holds it as a wxl.Model, whose methods are the rows
+// taking one first, and gives it back with Release or when the mod unloads.
+
+#ifndef WXL_API
+#error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including m2.def"
+#endif
+
+WXL_API_SERVICE(m2, WXL_M2_SERVICE, WXL_M2_SERVICE_VERSION, (0, 1, 20), unsafe,
+                "The models objects draw with, what a character wears, and models a mod makes and hangs on them. Main thread only.")
+
+WXL_API_RESOURCE(m2, Model, void*, nullptr)
+
+WXL_API(m2, object_model, ObjectModel, ptr, (object object), generated, generated,
+        "The model an object draws with, followed up what it hangs on (a mounted player answers its mount); nil, \"not_found\" for none.")
+WXL_API(m2, item_display, ItemDisplay, out<m2_item_display>, (u32 display_id), native, by_hand, "")
+WXL_API(m2, race_prefix, RacePrefix, out<str>, (u32 race_id), generated, generated,
+        "A race's prefix in model file names (\"Hu\", \"Or\", \"Sc\"), from ChrRaces.dbc.")
+WXL_API(m2, create_model, CreateModel, Model, (ptr scene_model, str path), generated, generated,
+        "Makes a model of a file in the scene of the model given, for this mod: hang it on something with Attach.")
+WXL_API_CLOSE(m2, release_model, Release, none, Model, unloaded,
+              "Takes the model off what it hangs on and gives it back; the mod's models go when it unloads too.")
+WXL_API(m2, attach_model, Attach, result, (Model model, ptr parent, u32 attachment, u32 flags), generated, generated,
+        "Hangs the model on a model at an attachment point; flags 1 attaches to the root where the point is missing, 2 makes it follow the parent's bones.")
+WXL_API(m2, detach_model, Detach, none, (Model model), generated, generated,
+        "Takes the model off what it hangs on.")
+WXL_API(m2, model_parent, Parent, ptr, (Model model), generated, generated,
+        "What the model hangs on; nil, \"not_found\" for nothing, which is how a mod tells its model was let go.")
+WXL_API(m2, set_geosets, SetGeosets, none, (Model model, u32 first, u32 last, boolean visible), generated, generated,
+        "Shows or hides every geoset of the model whose id is in [first, last].")
+WXL_API(m2, replace_texture, ReplaceTexture, result, (Model model, u32 type, str path), generated, generated,
+        "Replaces the texture the model takes for a texture type (2 an item's skin, 11-13 a creature's) with a file.")
+WXL_API(m2, attachment_point, AttachmentPoint, out<vec3>, (cptr model, u32 attachment), generated, generated,
+        "Where an attachment point of a loaded model sits in its bind pose, as {x, y, z}.")
+WXL_API(m2, attach_to_bone, AttachToBone, result, (Model model, ptr parent, u32 attachment, u32 key_bone, vec3 offset), generated, generated,
+        "Hangs the model on one key bone of a model, moved by an offset: an attachment point the parent's file does not have.")
