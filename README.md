@@ -5,7 +5,7 @@
 **The contract a WarcraftXL mod is written against**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![ABI](https://img.shields.io/badge/ABI-0.1.18-blue.svg)](include/wxl/abi.h)
+[![ABI](https://img.shields.io/badge/ABI-0.1.19-blue.svg)](include/wxl/abi.h)
 [![C++](https://img.shields.io/badge/C%2B%2B-17%20and%20up-blue.svg)](#-getting-started)
 [![Header only](https://img.shields.io/badge/header--only-yes-lightgrey.svg)](include/wxl)
 
@@ -272,6 +272,9 @@ examples/lua-services/ a Lua mod using the services: files, a search path, datab
                    client's own script
 examples/memory-report/ a Lua mod that writes where the client's memory goes into a report
 examples/model-swap/ a C++ mod changing the engine through a point: the model cache
+examples/asset-provider/ a C++ mod serving an add-on from memory through an asset provider, and
+                   converting it through a transform
+examples/lua-assets/ a Lua mod serving a file and watching what the engine loads
 examples/probe/    a Lua test tool: every event the runtime raises, and /mark, into the log
 tests/             the contract, the mod host, the shared runtime and wxl.lua, each against fakes
 tests/ingame/      the same against a real client: test mods and wxl.selftest, which drives them
@@ -283,7 +286,7 @@ supplies only the bindings that reach its own client.
 
 ## 🔢 Versioning
 
-`major.minor.feature`, in [`abi.h`](include/wxl/abi.h): today `0.1.18`.
+`major.minor.feature`, in [`abi.h`](include/wxl/abi.h): today `0.1.19`.
 
 - **Major** changes when an existing field, signature or id changes meaning. A runtime refuses a
   mod built against a different major.
@@ -309,6 +312,7 @@ Event ids and stage numbers are appended, never renumbered, never removed.
 - [`template/`](template/) -- a working mod to copy
 - [`examples/scout/`](examples/scout/) -- the worked example the tutorial builds
 - [`examples/model-swap/`](examples/model-swap/) -- the engine changed through a point ("Changing the engine: points" in Building a mod)
+- [`examples/asset-provider/`](examples/asset-provider/) and [`examples/lua-assets/`](examples/lua-assets/) -- files served and converted ("Serving and converting assets" in both guides)
 
 ## 💬 Support
 

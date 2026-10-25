@@ -1,0 +1,15 @@
+{
+  "$schema": "../../schema/mod.json",
+  "id": "wxl.lua-assets",
+  "name": "Lua assets",
+  "version": "1.0.0",
+  "abi": "0.1.19",
+  "description": "A Lua mod: it serves a file the client reads as its own, and tells what the engine loads -- terrain tiles, textures, sounds.",
+  "lua": "init.lua",
+  "requires": [
+    { "service": "wxl.storage", "version": 1 }
+  ],
+  "optional": [
+    { "service": "wxl.script", "version": 1 }
+  ]
+}

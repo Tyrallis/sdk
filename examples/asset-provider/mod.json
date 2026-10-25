@@ -1,0 +1,15 @@
+{
+  "$schema": "../../schema/mod.json",
+  "id": "wxl.asset-provider",
+  "name": "Asset provider",
+  "version": "1.2.0",
+  "abi": "0.1.19",
+  "description": "Serves an add-on that exists nowhere on the disk, HelloProvider, through an asset provider, and fills in its version as the client reads it, through an asset transform.",
+  "binaries": {
+    "win-x64": "bin/x64/asset-provider.dll",
+    "win-x86": "bin/x86/asset-provider.dll"
+  },
+  "requires": [
+    { "service": "wxl.storage", "version": 1 }
+  ]
+}

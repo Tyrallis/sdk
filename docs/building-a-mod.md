@@ -788,6 +788,154 @@ and Lua alike from its one row.
 
 `wxl::Service<T>(name, version)` still gives the raw table, for a service these do not cover.
 
+### Serving and converting assets
+
+The client reads every file it uses -- models, textures, terrain, sounds, the interface, its
+databases -- by name, from its archives. Your mod can stand among those archives in three ways,
+from the simplest to the most capable:
+
+| Way | What you give | Good for |
+|---|---|---|
+| a search folder (`AddSearchPath`) | a folder of files inside the client's folder | files you ship with the mod |
+| served bytes (`Serve`) | a name and its bytes, copied | a few files you make at run time |
+| a provider (`AddProvider`) | an object the client asks for files | files kept elsewhere: an archive format the client does not read, a cache, a generator |
+
+And one way to change what the client reads, whichever of those it comes from: a **transform**
+(`AddTransform`) receives a kind of file's bytes once they are read and before the client parses
+them, and may answer other bytes.
+
+Two rules hold for all of them. **Priority**: above 0, your file wins a name over the client's own
+data; 0 or below, it only fills a name the client does not have. **Threads**: the client opens
+most files on its loading threads, several at once, so a provider and a transform are called on
+any thread, concurrently, and must not touch anything the main thread changes without a lock.
+That is why they are C++ only; a Lua mod uses `Serve`, whose bytes the runtime holds.
+
+The example `examples/asset-provider` serves an add-on, HelloProvider, that exists in the mod's
+memory and nowhere on the disk.
+
+**`examples/asset-provider/src/AssetProvider.cpp`**
+
+```cpp
+    /// The add-on's files, by name.
+    class HelloAddOn final : public wxl::AssetProvider
+    {
+    public:
+        HelloAddOn()
+        {
+            files_[Key("Interface\\AddOns\\HelloProvider\\HelloProvider.toc")] =
+                "## Interface: 30300\n## Title: HelloProvider\nHelloProvider.lua\n";
+            files_[Key("Interface\\AddOns\\HelloProvider\\HelloProvider.lua")] =
+                "DEFAULT_CHAT_FRAME:AddMessage(\"Hello from a provider, version $VERSION\")\n";
+        }
+
+        // Asked at every open and existence check: a lookup, nothing more.
+        wxl::AssetState Lookup(std::string_view path) override
+        {
+            return files_.count(Key(path)) ? wxl::AssetState::Present : wxl::AssetState::Missing;
+        }
+
+        // The work: here, a copy of the text. A provider over an archive would read it here.
+        std::unique_ptr<wxl::AssetFile> Open(std::string_view path) override
+        {
+            const auto found = files_.find(Key(path));
+            if (found == files_.end()) return nullptr;
+            const std::string& text = found->second;
+            return std::make_unique<wxl::MemoryAssetFile>(std::vector<uint8_t>(text.begin(), text.end()));
+        }
+
+        // The client lists Interface\AddOns from the disk; what is told here joins that list.
+        void List(std::string_view folder, const std::function<void(std::string_view, bool)>& entry) override
+        {
+            if (Key(folder) == "interface\\addons") entry("HelloProvider", true);
+        }
+
+    private:
+        std::map<std::string, std::string> files_;
+    };
+```
+
+`Lookup` is asked at every open and every existence check the provider could win, often from
+several threads at once: keep it a lookup. It answers `wxl::AssetState::Present`, `Missing`, or
+`Pending` for a file the provider will have but has not yet -- one still being downloaded, say.
+A pending name is looked for further down meanwhile (the next provider, the client's own files);
+the client sees no such file if nobody has it, and a mod reading it through `wxl.storage` gets
+`WXL_E_PENDING`, not `WXL_E_NOT_FOUND`, so it can try again later.
+
+`Open` does the work and answers a `wxl::AssetFile`: its size, and `ReadAt(offset, buffer, size)`.
+`wxl::MemoryAssetFile` is one over a vector; a provider over a large archive writes its own, which
+reads a piece at a time: the client may read a sound or a movie a little at a time. The client
+closes the file when it is done, which destroys the object.
+
+`List` is optional. The client lists a few of its folders from the disk itself -- the add-ons, the
+macro icons -- and what `List` tells joins those listings: that is how the client finds
+HelloProvider among its add-ons, then reads its `.toc` and its `.lua` through the provider.
+`StorageService::Find` walks the providers' folders too.
+
+A transform is a function, or an object deriving from `wxl::AssetTransform`:
+
+**`examples/asset-provider/src/AssetProvider.cpp`**
+
+```cpp
+    /// Replaces $VERSION in the add-on's Lua; every other Lua file goes by untouched.
+    bool FillVersion(std::string_view path, const uint8_t* data, size_t size, const wxl::AssetOutput& out)
+    {
+        if (Key(path) != "interface\\addons\\helloprovider\\helloprovider.lua") return false;
+        std::string text(reinterpret_cast<const char*>(data), size);
+        const size_t at = text.find("$VERSION");
+        if (at == std::string::npos) return false;
+        text.replace(at, 8, kVersion);
+        return out.Replace(text.data(), text.size());
+    }
+```
+
+It is registered for a kind of file, the extension without its dot, and optionally the file's
+first four bytes (`wxl::Magic("MD20")`, 0 for any). Answering `true` after `out.Replace` gives the
+client other bytes; answering `false` leaves them as they came. Several transforms of one kind run
+in priority order, highest first, each given what the one before left, so their sizes may change
+freely. A transform sees every file of its kind the client reads, from any source: check the name
+first and leave the others alone, as `FillVersion` does.
+
+**`examples/asset-provider/src/AssetProvider.cpp`**
+
+```cpp
+        wxl_result OnLoad() override
+        {
+            const wxl::StorageService storage;
+            // Priority 1: above the client's own files, which are at 0.
+            auto provider = storage.AddProvider(addOn_, 1);
+            if (!provider)
+            {
+                wxl::Log(WXL_LOG_WARN, kTag, "no provider: {}", wxl::ResultName(provider.Error()));
+                return WXL_OK;
+            }
+            provider_ = std::move(*provider);
+
+            // Every .lua file the client reads passes through here, so the check is cheap.
+            auto transform = storage.AddTransform("lua", 0, 0, &FillVersion);
+            if (transform) transform_ = std::move(*transform);
+            wxl::Log(WXL_LOG_INFO, kTag, "HelloProvider served; look for it in the add-on list");
+            return WXL_OK;
+        }
+```
+
+`AddProvider` and `AddTransform` answer a `wxl::AssetRegistration`, which takes the registration
+back when it goes. The runtime takes back whatever your mod still holds when it is disabled or
+unloaded: it waits for the calls in progress, and the provider closes the files the client still
+has open from it (their next reads fail). The provider object must outlive its registration; here
+both are members of the mod.
+
+`StorageService().Serve(name, text, priority)` serves bytes without a provider: the runtime keeps a
+copy and answers every thread from it until `Unserve(name)` or the mod goes. When two mods serve
+one name, the higher priority wins, then the later one.
+
+What the client then does with what it read can be watched through `AssetScript`'s events:
+`OnTerrainTileLoad` (a map tile's file, with its place on the grid), `OnMapObjectGroupLoad` (a
+building's group file), `OnSkinProfileLoad` (a model's `.skin`), `OnTextureDecode` (a texture's
+size, encoding and alpha, from its header), `OnShaderLoad` and `OnSoundFileLoad` (abi `0.1.19`).
+They come on the main thread, and only while someone listens. The bytes they show are the ones
+transforms left; to change bytes, write a transform. `OnModelLoad` still lets a handler answer a
+model's bytes on the main thread, after the transforms of `m2` ran.
+
 ### Changing the engine: points
 
 Events tell your mod what happened. A **point** lets it change what happens: it is a function of

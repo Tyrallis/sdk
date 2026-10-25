@@ -835,7 +835,8 @@ Lua -- and `wxl.lua` gives each one a module in the `wxl` table:
 
 Every function of these modules answers the way an object's reads do: its value, or `nil` and a
 reason. The reason is a short word: `"unsupported"` when this runtime does not have the service or
-that function, `"not_found"`, `"invalid"` or `"failed"` when the client said so.
+that function, `"not_found"`, `"invalid"` or `"failed"` when the client said so, `"pending"` when
+what was asked for is not ready yet (a file a provider is still fetching: try again later).
 
 Leaving out an argument is a mistake in your code, not a question for the client, so it is an
 error that names the function and the argument:
@@ -980,6 +981,72 @@ two mods redirect one name, the one that did it last wins, and when it takes its
 the other's answers again. An `OnFileOpen` handler that writes `redirect` still has the last
 word, and sees the redirect's answer in `redirect` before it does. `Redirect` and `Unredirect`
 need abi `0.1.15`.
+
+### Serving and converting assets
+
+The search path and redirects work with files that exist. `wxl.storage.Serve` makes one from a
+string: the client then reads it as one of its own files, on whichever of its threads opens it.
+
+**`examples/lua-assets/init.lua`**
+
+```lua
+-- A file the client opens as one of its own, on any of its threads, until the mod goes. Priority
+-- 1 puts it above the client's archives; this name is in none of them anyway.
+local NOTE = "Interface\\lua-assets\\note.txt"
+local ok, why = wxl.storage.Serve(NOTE, "This file lives in a Lua mod's memory.", 1)
+print("served " .. NOTE .. ": " .. tostring(ok or why))
+
+-- Read back through the client's own file layer, as any of its files would be.
+local text = wxl.storage.Read(NOTE)
+print("read back: " .. tostring(text))
+```
+
+The bytes are copied: the runtime holds them and answers every thread itself, which is why a Lua
+mod can serve files the client opens off the main thread. The priority works as the search
+path's: above 0 the name wins over the client's own data, 0 or below it only fills a name the
+client lacks. Serving the name again replaces your bytes; `wxl.storage.Unserve(name)` takes them
+back, and they go when your mod is disabled, reloads or unloads. When two mods serve one name, the
+higher priority wins, then the later one.
+
+Two more ways to stand among the client's files are for C++ mods only: a **provider**, an object
+the client asks for files (a whole archive format, a download cache), and a **transform**, which
+converts a kind of file's bytes between the read and the client's parse. Both are called on the
+client's loading threads, where Lua cannot run; the C++ guide (`building-a-mod.md`, "Serving and
+converting assets") shows them. Their effects reach your Lua mod anyway: a file a provider has
+reads through `wxl.storage` like any other, and one a provider announced but has not fetched yet
+answers `nil, "pending"`: try again later.
+
+What the engine does with what it read comes as `AssetScript` events, on the main thread:
+
+**`examples/lua-assets/init.lua`**
+
+```lua
+-- The tile's bytes arrive as one string; # gives their count.
+function AssetScript:OnTerrainTileLoad(path, tile_x, tile_y, data)
+    count("terrain tile", string.format("%s (%d, %d), %d bytes", path, tile_x, tile_y, #data))
+end
+
+function AssetScript:OnTextureDecode(path, width, height, encoding, alpha_bits)
+    count("texture", string.format("%s, %dx%d, %s, %d-bit alpha", path, width, height, tostring(encoding), alpha_bits))
+end
+
+function AssetScript:OnSoundFileLoad(path, streaming)
+    count("sound", path .. (streaming and ", streamed" or ""))
+end
+```
+
+| Event | Parameters | Happens when |
+|---|---|---|
+| `OnTerrainTileLoad` | `path`, `tile_x`, `tile_y`, `data` | a map tile's `.adt` was read, before its chunks are walked |
+| `OnMapObjectGroupLoad` | `path`, `group`, `data` | a building's group file was read: `path` is the building's root file |
+| `OnSkinProfileLoad` | `model`, `data` | a model's `.skin` was read, before it is parsed |
+| `OnTextureDecode` | `path`, `width`, `height`, `encoding`, `alpha_bits`, `alpha_kind`, `mip_levels` | a texture file is about to be decoded: what its header says (`encoding`: `"palette"`, `"dxt"` or `"raw"`) |
+| `OnShaderLoad` | `stage`, `path`, `name`, `permutations` | the graphics device loads a shader program (`stage`: `"vertex"` or `"pixel"`) |
+| `OnSoundFileLoad` | `path`, `streaming`, `priority` | the sound engine opens a sound file to play it |
+
+`data` is the file's bytes as one string, valid in the handler; `#data` is their count. They are
+the bytes the client is about to parse, transforms applied. These events came with `0.1.19`: a mod
+using them, or `Serve`, asks for `"abi": "0.1.19"`.
 
 ### The client's databases: `wxl.data`
 
@@ -1427,6 +1494,8 @@ them in `include/wxl/services/<service>.def`.
 | `wxl.storage.MountArchive(path, priority)` | `true`: an archive joins the client's |
 | `wxl.storage.Redirect(name, other)` | `true`: every open of `name`, on any thread, opens `other`, until the mod takes it back or goes; the latest of two mods' wins (abi `0.1.15`) |
 | `wxl.storage.Unredirect(name)` | `true`: the mod's redirect of `name` is taken back; `nil, "not_found"` for one it did not make (abi `0.1.15`) |
+| `wxl.storage.Serve(name, data, priority)` | `true`: the client reads `data` as the file `name`, on every thread, until the mod takes it back or goes; the higher priority of two mods' wins, then the later (abi `0.1.19`) |
+| `wxl.storage.Unserve(name)` | `true`: what the mod serves under `name` is taken back; `nil, "not_found"` for a name it does not serve (abi `0.1.19`) |
 | `wxl.data.ServeTable(table, path)`, `.RestoreTable(table)` | `true`: the client reads the table from `path`, or its own again |
 | `wxl.data.ServedFrom(table)`, `.IsLoaded(table)` | where a table comes from, `""` for the client's own; whether the client read it already |
 | `wxl.script.RegisterFunction(name, fn, context)` | `true`: `name` calls `fn` from the client's Lua, in every context or in `"glue"` or `"game"` |
@@ -1674,6 +1743,7 @@ A few to start from:
 | `ObjectScript` | `OnObjectFieldChanged` | `object`, `type`, `field`, `count`, `old_value`, `new_value` | a descriptor field `wxl.object.Watch` asked for changed (abi `0.1.9`) |
 | `AssetScript` | `OnArchiveMounted`, `OnArchiveUnmounted` | `path`, `priority`, `hash_entries`, `block_entries`, `bytes` | the client mounted an archive, or is about to close one (abi `0.1.11`) |
 | `WorldScript` | `OnMemoryPressure` | `largest_free`, `free`, `committed`, `threshold` | the largest free block of the address space fell under the threshold `wxl.footprint.WatchPressure` set (abi `0.1.11`) |
+| `AssetScript` | `OnTerrainTileLoad`, `OnMapObjectGroupLoad`, `OnSkinProfileLoad`, `OnTextureDecode`, `OnShaderLoad`, `OnSoundFileLoad` | see [Serving and converting assets](#serving-and-converting-assets) | the engine read a tile, a building's group, a skin, a texture, a shader, a sound (abi `0.1.19`) |
 
 The families `PlayerScript`, `GlueScript` and `ChatScript`, and `WorldScript`'s `OnZoneChanged`,
 `OnMouseoverChanged` and `OnCVarChanged`, came with `0.1.6`: a mod that uses one asks for
@@ -1693,7 +1763,9 @@ no event: `wxl.storage.Redirect`, `wxl.storage.Unredirect` and `wxl.script.Live`
 The [gameplay events](#gameplay-events), with the families `LootScript`, `ItemScript`,
 `QuestScript`, `GroupScript` and `SocialScript`, came with `0.1.17`. The object reads and actions of
 [What a unit, a player, an item can tell you](#what-a-unit-a-player-an-item-can-tell-you) and the
-`wxl.action` module came with `0.1.18`.
+`wxl.action` module came with `0.1.18`. `AssetScript`'s `OnTerrainTileLoad`, `OnMapObjectGroupLoad`,
+`OnSkinProfileLoad`, `OnTextureDecode`, `OnShaderLoad` and `OnSoundFileLoad`,
+`wxl.storage.Serve` and `wxl.storage.Unserve`, and the reason `"pending"`, came with `0.1.19`.
 
 ### Gameplay events
 
