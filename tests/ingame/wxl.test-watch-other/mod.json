@@ -1,0 +1,12 @@
+{
+  "$schema": "../../../schema/mod.json",
+  "id": "wxl.test-watch-other",
+  "name": "Test watch other",
+  "version": "1.0.0",
+  "abi": "0.1.10",
+  "description": "Watches the player's experience only: it must never receive the fields wxl.test-fields watches.",
+  "lua": "init.lua",
+  "optional": [
+    { "service": "wxl.object", "version": 1 }
+  ]
+}

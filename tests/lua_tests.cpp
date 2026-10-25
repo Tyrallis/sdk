@@ -1671,6 +1671,86 @@ print("later " .. tostring(s.Unredirect("Interface\\Nope.txt")) .. " " .. tostri
         if (g_failures) sink.Dump();
     }
 
+    Section("the in-game suite's reload and order mods");
+    {
+        using wxltest::FakeScript;
+
+        // tests/ingame, next to the examples folder lua-hello sits in.
+        const fs::path ingame = fs::path(example).parent_path().parent_path() / "tests" / "ingame";
+        const fs::path mods   = MakeTree(scratch, "ingame", binary, fs::path());
+        for (const char* mod : {"wxl.selftest", "wxl.test-abi-old", "wxl.test-events", "wxl.test-fields",
+                                "wxl.test-order-a", "wxl.test-order-b", "wxl.test-reload", "wxl.test-search",
+                                "wxl.test-watch-other"})
+            fs::copy(ingame / mod, mods / mod, fs::copy_options::recursive);
+        FakeScript::Live() = WXL_SCRIPT_CONTEXT_GAME;
+        FakeScript::Functions().clear();
+
+        CaptureSink sink;
+        HostConfig  config = Config(mods, sink);
+        config.services.push_back(PublishedService{WXL_SCRIPT_SERVICE, WXL_SCRIPT_SERVICE_VERSION, FakeScript::Table()});
+        ModHost host(std::move(config));
+        host.LoadAll();
+        host.Stage(WXL_STAGE_READY);
+        const wxl_lua_api* api = static_cast<const wxl_lua_api*>(host.Table()->get_service(WXL_LUA_SERVICE, WXL_LUA_SERVICE_VERSION));
+
+        // Calls a registered function with one string argument, or none; answers its first
+        // value as text, or "error: <message>".
+        const auto ask = [](const char* name, const char* argument = nullptr) -> std::string {
+            wxl_value text{};
+            text.type      = WXL_VALUE_STRING;
+            text.as.string = wxl_str{argument, argument ? static_cast<uint32_t>(std::strlen(argument)) : 0u};
+            wxl_script_call call = argument ? ScriptCallOf({text}) : ScriptCallOf({});
+            if (!FakeScript::Invoke(name, call)) return "error: not registered";
+            if (!call.error.empty()) return "error: " + call.error;
+            if (call.results.empty()) return "nothing";
+            const wxl_value& first = call.results[0];
+            if (first.type == WXL_VALUE_STRING) return std::string(first.as.string.data, first.as.string.size);
+            if (first.type == WXL_VALUE_BOOL) return first.as.boolean ? "true" : "false";
+            return "other";
+        };
+        // The chat message wxl.selftest sends for the order check.
+        const auto send = [&](const char* text) {
+            wxl_bool                suppressed = WXL_FALSE;
+            const wxl_chat_send_args chat{wxl_str{text, static_cast<uint32_t>(std::strlen(text))}, wxl_str{"WHISPER", 7},
+                                          wxl_str{"", 0}, wxl_str{"Me", 2}, wxl_str{"", 0}, WXL_FALSE, &suppressed};
+            host.Raise(WXL_EV_ChatSend, &chat);
+            return suppressed == WXL_TRUE;
+        };
+        const auto seen = [&](const char* n) {
+            wxl_script_call call = ScriptCallOf({Number(std::atof(n))});
+            return FakeScript::Invoke("TestOrderSeen", call) && call.results.size() == 1 &&
+                   call.results[0].type == WXL_VALUE_BOOL && call.results[0].as.boolean;
+        };
+
+        Check(api && api->count() == 9 && !sink.Has("[ERROR]") && sink.Has("[wxl.selftest] ready: "),
+              "every Lua mod of the suite loads without an error");
+        Check(ask("TestReloadPart") == "part one", "wxl.test-reload answers the part it shipped with");
+        Check(send("wxl order 1") && seen("1"),
+              "wxl.test-order-a answers the order message, and wxl.test-order-b, after it, sees that answer");
+
+        Check(ask("TestReloadWrite", "part number two") == "part number two" && api && api->poll() == 1 &&
+                  ask("TestReloadPart") == "part number two",
+              "TestReloadWrite rewrites lib/part.lua; the mod reloads with the new part");
+
+        Check(ask("TestOrderTouch", "a-second") == "a-second" && api && api->poll() == 1 &&
+                  ask("TestOrderMark") == "a-second",
+              "TestOrderTouch rewrites mark.lua and wxl.test-order-a reloads");
+        Check(send("wxl order 2") && seen("2"), "wxl.test-order-a still runs first after its reload");
+
+        Check(ask("TestReloadBreak") == "true" && api && api->poll() == 1 &&
+                  ask("TestReloadPart").find("not running") != std::string::npos &&
+                  sink.Has("mod wxl.test-reload stays unloaded"),
+              "TestReloadBreak breaks mod.json: the mod unloads and stays so");
+        std::error_code ec;
+        fs::copy_file(mods / "wxl.test-reload" / "mod.json.good", mods / "wxl.test-reload" / "mod.json",
+                      fs::copy_options::overwrite_existing, ec);
+        Check(!ec && api && api->poll() == 1 && ask("TestReloadPart") == "part number two",
+              "mod.json.good put back, as wxl.test-manifest does, loads the mod again");
+
+        host.Shutdown();
+        if (g_failures) sink.Dump();
+    }
+
     Section("objects across a reload");
     {
         using wxltest::FakeObjects;

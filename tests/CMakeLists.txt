@@ -94,6 +94,9 @@ else()
     target_compile_options(scout PRIVATE -Werror)
 endif()
 
+# The in-game test suite, assembled as a Mods folder for a client (ingame/README.md).
+add_subdirectory(ingame)
+
 add_executable(wxl-scout-tests scout_tests.cpp)
 target_link_libraries(wxl-scout-tests PRIVATE wxl::host)
 target_include_directories(wxl-scout-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

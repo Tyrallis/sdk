@@ -89,6 +89,9 @@ cmake --build build --config Debug
 ctest --test-dir build -C Debug
 ```
 
+The same build assembles the in-game test suite, `build/ingame/Mods/`, to copy into a client:
+see [`tests/ingame/README.md`](tests/ingame/README.md).
+
 ### Run the tests from Linux
 
 The suites are Windows executables. From Linux they build with clang-cl and run under Wine, one
@@ -268,6 +271,8 @@ examples/lua-services/ a Lua mod using the services: files, a search path, datab
 examples/memory-report/ a Lua mod that writes where the client's memory goes into a report
 examples/probe/    a Lua test tool: every event the runtime raises, and /mark, into the log
 tests/             the contract, the mod host, the shared runtime and wxl.lua, each against fakes
+tests/ingame/      the same against a real client: test mods and wxl.selftest, which drives them
+                   from the game and logs PASS or FAIL per check
 ```
 
 A mod links `wxl::sdk` and nothing else. A runtime links `wxl::host` and `wxl::runtime` too, and

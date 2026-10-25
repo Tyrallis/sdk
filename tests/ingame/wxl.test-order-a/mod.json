@@ -1,0 +1,12 @@
+{
+  "$schema": "../../../schema/mod.json",
+  "id": "wxl.test-order-a",
+  "name": "Test order A",
+  "version": "1.0.0",
+  "abi": "0.1.6",
+  "description": "Runs before wxl.test-order-b on the same event, and still does after it reloads: it answers a chat message wxl.selftest sends, which wxl.test-order-b then sees answered.",
+  "lua": "init.lua",
+  "optional": [
+    { "service": "wxl.script", "version": 1 }
+  ]
+}

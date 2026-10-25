@@ -1,0 +1,12 @@
+{
+  "$schema": "../../../schema/mod.json",
+  "id": "wxl.test-throw-ready",
+  "name": "Test throw at ready",
+  "version": "1.0.0",
+  "abi": "0.1.8",
+  "description": "Throws a C++ exception from OnReady: the runtime disables the mod and none of its code runs again.",
+  "binaries": {
+    "win-x64": "bin/x64/test-throw-ready.dll",
+    "win-x86": "bin/x86/test-throw-ready.dll"
+  }
+}
