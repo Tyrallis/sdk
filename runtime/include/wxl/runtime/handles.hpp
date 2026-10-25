@@ -11,8 +11,11 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <unordered_map>
 #include <vector>
+
+#include <ankerl/unordered_dense.h>
+
+#include "wxl/hash.hpp"
 
 #include "wxl/abi.h"
 
@@ -123,8 +126,14 @@ namespace wxl::runtime
 
         std::vector<Slot>                         slots_;
         std::vector<std::size_t>                  free_;
-        std::unordered_map<void*, wxl_handle>     byObject_;
-        std::unordered_map<uint64_t, wxl_handle>  byKey_;
+        // Open-addressed, values kept dense: an object event looks its handle up on every raise.
+        struct PointerHash
+        {
+            using is_avalanching = void;
+            uint64_t operator()(void* p) const noexcept { return Hash64()(reinterpret_cast<uintptr_t>(p)); }
+        };
+        ankerl::unordered_dense::map<void*, wxl_handle, PointerHash> byObject_;
+        ankerl::unordered_dense::map<uint64_t, wxl_handle, Hash64> byKey_;
         std::size_t                               live_ = 0;
     };
 } // namespace wxl::runtime
