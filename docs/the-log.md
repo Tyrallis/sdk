@@ -37,6 +37,11 @@ The level is one of `TRACE`, `DEBUG`, `INFO`, `WARN` and `ERROR`, from the most 
 most serious. The tag is `session`, `core`, `host` or `crash` for the runtime itself, `wxl.lua` for
 the Lua engine, and your mod's id for what your mod prints.
 
+The file is UTF-8 text, and stays so whatever a mod prints: a byte that is not part of a UTF-8
+character, or a control character other than a tab or a line break, is written as `\x` and its
+two hex digits. If you print the raw payload of a network message and see `\x82` in the log, that
+is the byte 0x82.
+
 A launch reads in this order:
 
 1. **The header**, tagged `session`: when the launch started, which runtime it is (`x86` for the
@@ -154,7 +159,9 @@ are. Then type `/mark` alone: the chat box shows the next step, and the log's ma
 began (`==== MARK 4: step 4/19: ... ====`). `/step` shows the current step again.
 
 The probe also writes the first few times each event happens, with what it carries, a line of
-counts every minute, and, when the client closes, the events that never happened. That is a lot of
+counts every minute, and, when the client closes, the events that never happened. One of them is
+always there: `OnObjectFieldChanged` reaches only the mods that watch a field, and the probe
+watches none, so the line gives that reason next to it. That is a lot of
 information, and it costs: listening to every event makes the client do work it normally skips,
 so the game runs slower while the probe is installed. Take it out of `Mods/` when the test is over.
 

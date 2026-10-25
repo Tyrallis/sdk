@@ -1224,6 +1224,22 @@ int main(int argc, char** argv)
         Check(std::string(LevelName(WXL_LOG_TRACE)) == "TRACE" &&
                   std::string(LevelName(WXL_LOG_ERROR)) == "ERROR",
               "levels have names");
+
+        Check(IsLogText("plain\ttab\r\n") && IsLogText("\xC3\xA9t\xC3\xA9 \xE2\x82\xAC \xF0\x9F\x98\x80") &&
+                  IsLogText(""),
+              "ASCII, tabs, line breaks and two-, three- and four-byte sequences are text");
+        Check(!IsLogText("\x82") && !IsLogText("a\xC3") && !IsLogText("\xC0\xAF") && !IsLogText("\xE0\x80\xAF") &&
+                  !IsLogText("\xED\xA0\x80") && !IsLogText("\xF4\x90\x80\x80") && !IsLogText("\xFF") &&
+                  !IsLogText("\x1B[31m") && !IsLogText(std::string_view("a\0b", 3)),
+              "a stray continuation, a cut sequence, overlong forms, a surrogate, bytes past U+10FFFF, "
+              "an escape and a NUL are not");
+        Check(EscapeForLog("a\x82z \xC3\xA9 \xE2\x82") == "a\\x82z \xC3\xA9 \\xE2\\x82",
+              "the bytes outside a sequence are escaped, the sequences kept");
+        CaptureSink bytes;
+        Logger      binary(&bytes, WXL_LOG_INFO);
+        binary.Info("t\xFF", std::string_view("743, \"\x82\"\0end", 12));
+        Check(bytes.lines.size() == 1 && bytes.lines[0] == "[INFO ] [t\\xFF] 743, \"\\x82\"\\x00end",
+              "a line that is not text reaches the sink escaped, its tag included");
     }
 
     Section("mod host with in-process binaries");

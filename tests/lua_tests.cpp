@@ -1566,6 +1566,11 @@ print("later " .. tostring(s.Unredirect("Interface\\Nope.txt")) .. " " .. tostri
         Check(sink.Has("[wxl.probe] OnMessageReceived #1: 502, <4 bytes 01 00 FF 10>, nil"),
               "bytes are shown in hex, an answer the runtime gave nothing to answer through as nil");
 
+        const wxl_cvar_args cvar{wxl_str{"wxlProbe", 8}, wxl_str{"\x82", 1}, wxl_str{"caf\xC3\xA9", 5}};
+        host.Raise(WXL_EV_CVarChanged, &cvar);
+        Check(sink.Has("[wxl.probe] OnCVarChanged #1: \"wxlProbe\", <1 bytes 82>, \"caf\xC3\xA9\""),
+              "a string that is not UTF-8 is shown as its bytes, so the log stays text; UTF-8 is kept as text");
+
         wxl_ui_event_args ui{};
         ui.name = wxl_str{"PLAYER_ENTERING_WORLD", 21};
         for (int i = 0; i < 7; ++i) host.Raise(WXL_EV_UiEvent, &ui);
@@ -1580,8 +1585,8 @@ print("later " .. tostring(s.Unredirect("Interface\\Nope.txt")) .. " " .. tostri
         const wxl_update_args tick{40.0f};
         host.Raise(WXL_EV_Update, &tick);
         host.Raise(WXL_EV_Update, &tick);
-        Check(sink.Has("[wxl.probe] minute 1: 4 events, 11 raises: OnUiEvent 7, OnUpdate 2, OnMessageReceived 1, "
-                       "OnWorldEnter 1"),
+        Check(sink.Has("[wxl.probe] minute 1: 5 events, 12 raises: OnUiEvent 7, OnUpdate 2, OnCVarChanged 1, "
+                       "OnMessageReceived 1, OnWorldEnter 1"),
               "after a minute, a line of what came in it, busiest first");
 
         wxl_value text{};
@@ -1592,7 +1597,7 @@ print("later " .. tostring(s.Unredirect("Interface\\Nope.txt")) .. " " .. tostri
                   marked.results[0].as.number == 1.0,
               "WxlProbeMark answers the mark's number, and the text it marked");
         Check(sink.Has("[wxl.probe] ==== MARK 1: opened the bank ====") &&
-                  sink.Has("[wxl.probe] since the probe loaded (80.0 s): 4 events, 11 raises: OnUiEvent 7, OnUpdate 2"),
+                  sink.Has("[wxl.probe] since the probe loaded (80.0 s): 5 events, 12 raises: OnUiEvent 7, OnUpdate 2"),
               "a mark is a line of its own, followed by what came since the previous one");
         Check(sink.Has("[wxl.probe] memory at mark 1: no snapshot: unsupported"),
               "and the memory, or why there is none");
@@ -1616,9 +1621,12 @@ print("later " .. tostring(s.Unredirect("Interface\\Nope.txt")) .. " " .. tostri
               "the steps' text is trimmed, and a mark past the last says so");
 
         host.Stage(WXL_STAGE_SHUTDOWN);
-        Check(sink.Has("[wxl.probe] summary: 4 of ") && sink.Has("[wxl.probe] never seen: ") &&
+        Check(sink.Has("[wxl.probe] summary: 5 of ") && sink.Has("[wxl.probe] never seen: ") &&
                   sink.Has("OnTextureLoad"),
               "at exit, the totals and the events that never came");
+        Check(sink.Has("OnObjectFieldChanged (reaches only a mod that watches a field (wxl.object.Watch); the probe "
+                       "watches none)"),
+              "the never-seen line says why OnObjectFieldChanged cannot reach the probe");
         if (g_failures) sink.Dump();
     }
 

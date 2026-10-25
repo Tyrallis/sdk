@@ -39,6 +39,15 @@ namespace wxl::host
     /// "[INFO ] [tag] message" -- the shape a sink may use when it has no format of its own.
     std::string FormatLine(wxl_log_level level, std::string_view tag, std::string_view message);
 
+    /// Whether @p text is text a log file can hold as it is: well-formed UTF-8 (no stray
+    /// continuation byte, no cut or overlong sequence, no surrogate, nothing past U+10FFFF) with
+    /// no control character other than a tab, a line feed or a carriage return.
+    bool IsLogText(std::string_view text);
+
+    /// @p text with every byte IsLogText refuses written as `\xNN`: a line a mod hands over keeps
+    /// the log file valid UTF-8 text and still says which bytes it held.
+    std::string EscapeForLog(std::string_view text);
+
     /**
      * @brief Routes lines to a sink, dropping those below a minimum level.
      *
@@ -58,9 +67,15 @@ namespace wxl::host
 
         bool Enabled(wxl_log_level level) const { return sink_ && level >= minimum_; }
 
+        /// Hands the line to the sink, with any byte of @p tag or @p message that is not text
+        /// escaped (EscapeForLog): a sink only ever receives UTF-8 text.
         void Write(wxl_log_level level, std::string_view tag, std::string_view message) const
         {
-            if (Enabled(level)) sink_->Write(level, tag, message);
+            if (!Enabled(level)) return;
+            if (IsLogText(tag) && IsLogText(message))
+                sink_->Write(level, tag, message);
+            else
+                sink_->Write(level, EscapeForLog(tag), EscapeForLog(message));
         }
 
         void Debug(std::string_view tag, std::string_view message) const

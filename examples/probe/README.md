@@ -15,12 +15,19 @@ What it writes, each line tagged `[wxl.probe]`:
 
 - at load, how many events it listens to, and the events this runtime never raises;
 - the first five occurrences of each event, with every argument in a compact form:
-  `OnUnitDeath #1: Unit(0x000000000000002B) "Young Wolf"`;
+  `OnUnitDeath #1: Unit(0x000000000000002B) "Young Wolf"`; a string that is not UTF-8 text (a
+  network message's payload, say) is shown as its bytes in hex, `<1 bytes 82>`, so the log stays a
+  text file;
 - every minute, how many times each event came in that minute, busiest first;
 - `/mark <text>` in the chat box: `==== MARK 3: opened the bank ====`, what came since the previous
   mark, and the memory at that moment (from `wxl.footprint`); with a Tracy viewer connected, the
   mark is also a message on its timeline. `/run WxlProbeMark("text")` does the same;
 - when the client closes, the totals, and the events that never came.
+
+**An event the probe cannot see.** `OnObjectFieldChanged` reaches only the mods that watch a field
+(`wxl.object.Watch("Unit", "Health")`), and only for the fields each one watches. The probe
+watches none, so the event is always in its "never seen" line, with that reason next to it: its
+absence says nothing about the runtime. A mod of yours that watches a field sees it.
 
 **A test plan in the game.** Put a `steps.txt` next to `init.lua`, one step per line (blank lines
 and lines starting with `#` are left out). On entering the world the chat box says how many steps

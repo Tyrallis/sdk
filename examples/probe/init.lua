@@ -17,6 +17,12 @@ local PER_LINE = 900  -- characters of a list before it continues on the next li
 -- handler, for example. Add a name here to take an event out of the probe.
 local SKIP = {}
 
+-- Events that reach only the mods that asked for them: their absence from a probe's log is
+-- expected, and the "never seen" line says why.
+local ON_REQUEST = {
+    OnObjectFieldChanged = "reaches only a mod that watches a field (wxl.object.Watch); the probe watches none",
+}
+
 -- --- what an argument looks like in the log -----------------------------------------------
 
 local function number(value)
@@ -26,15 +32,51 @@ local function number(value)
     return string.format("%.6g", value)
 end
 
+-- Whether a string is UTF-8 text: well-formed sequences (shortest form, no surrogates, at most
+-- U+10FFFF) and no control character other than a tab or a line break.
+local function utf8(value)
+    if value:find("[%z\1-\8\11\12\14-\31\127]") then return false end
+    local i, n = 1, #value
+    while i <= n do
+        local lead = value:byte(i)
+        local length, low, high = 1, 0x80, 0xBF
+        if lead < 0x80 then length = 1
+        elseif lead >= 0xC2 and lead <= 0xDF then length = 2
+        elseif lead == 0xE0 then length, low = 3, 0xA0
+        elseif lead == 0xED then length, high = 3, 0x9F
+        elseif lead >= 0xE1 and lead <= 0xEF then length = 3
+        elseif lead == 0xF0 then length, low = 4, 0x90
+        elseif lead == 0xF4 then length, high = 4, 0x8F
+        elseif lead >= 0xF1 and lead <= 0xF3 then length = 4
+        else return false end
+        if length > 1 then
+            if i + length - 1 > n then return false end
+            local second = value:byte(i + 1)
+            if second < low or second > high then return false end
+            for k = i + 2, i + length - 1 do
+                local byte = value:byte(k)
+                if byte < 0x80 or byte > 0xBF then return false end
+            end
+        end
+        i = i + length
+    end
+    return true
+end
+
 local function text(value)
-    -- A control character other than a tab or a line break means bytes, not text.
-    if value:find("[%z\1-\8\11\12\14-\31\127]") then
+    -- Anything that is not UTF-8 text is bytes: shown in hex, so the log stays text.
+    if not utf8(value) then
         local hex = {}
         for i = 1, math.min(BYTES, #value) do hex[i] = string.format("%02X", value:byte(i)) end
         return string.format("<%d bytes %s%s>", #value, table.concat(hex, " "), #value > BYTES and " ..." or "")
     end
-    local shown = value:sub(1, TEXT):gsub("\\", "\\\\"):gsub("\n", "\\n"):gsub("\r", "\\r"):gsub("\"", "\\\"")
-    if #value > TEXT then return string.format("\"%s...\"(%d)", shown, #value) end
+    -- Cut at a character's start, never inside one.
+    local cut = math.min(TEXT, #value)
+    while cut < #value and cut > 0 and value:byte(cut + 1) >= 0x80 and value:byte(cut + 1) <= 0xBF do
+        cut = cut - 1
+    end
+    local shown = value:sub(1, cut):gsub("\\", "\\\\"):gsub("\n", "\\n"):gsub("\r", "\\r"):gsub("\"", "\\\"")
+    if cut < #value then return string.format("\"%s...\"(%d)", shown, #value) end
     return "\"" .. shown .. "\""
 end
 
@@ -175,7 +217,10 @@ registerForEvent("onShutdown", function()
     list(string.format("summary: %d of %d events seen, %d raises", #items, #probes, raises), items)
     local never = {}
     for _, probe in ipairs(probes) do
-        if probe.total == 0 then never[#never + 1] = probe.name end
+        if probe.total == 0 then
+            local why = ON_REQUEST[probe.name]
+            never[#never + 1] = why and (probe.name .. " (" .. why .. ")") or probe.name
+        end
     end
     list("never seen", never)
 end)
