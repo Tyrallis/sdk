@@ -42,7 +42,9 @@
 #if !defined(WXL_EVENT) && !defined(WXL_EVENT_World) && !defined(WXL_EVENT_Render) && \
     !defined(WXL_EVENT_Object) && !defined(WXL_EVENT_Asset) && !defined(WXL_EVENT_Net) && \
     !defined(WXL_EVENT_Lua) && !defined(WXL_EVENT_Combat) && !defined(WXL_EVENT_Player) && \
-    !defined(WXL_EVENT_Glue) && !defined(WXL_EVENT_Chat) && !defined(WXL_EVENTS_SINCE)
+    !defined(WXL_EVENT_Glue) && !defined(WXL_EVENT_Chat) && !defined(WXL_EVENT_Loot) && \
+    !defined(WXL_EVENT_Item) && !defined(WXL_EVENT_Quest) && !defined(WXL_EVENT_Group) && \
+    !defined(WXL_EVENT_Social) && !defined(WXL_EVENTS_SINCE)
     #error "define WXL_EVENT(family, name, id, args), a WXL_EVENT_<family> or WXL_EVENTS_SINCE before events.def"
 #endif
 
@@ -93,6 +95,26 @@
 #ifndef WXL_EVENT_Chat
     #define WXL_EVENT_Chat(name, id, args)
     #define WXL_EVENT_Chat_DEFAULTED
+#endif
+#ifndef WXL_EVENT_Loot
+    #define WXL_EVENT_Loot(name, id, args)
+    #define WXL_EVENT_Loot_DEFAULTED
+#endif
+#ifndef WXL_EVENT_Item
+    #define WXL_EVENT_Item(name, id, args)
+    #define WXL_EVENT_Item_DEFAULTED
+#endif
+#ifndef WXL_EVENT_Quest
+    #define WXL_EVENT_Quest(name, id, args)
+    #define WXL_EVENT_Quest_DEFAULTED
+#endif
+#ifndef WXL_EVENT_Group
+    #define WXL_EVENT_Group(name, id, args)
+    #define WXL_EVENT_Group_DEFAULTED
+#endif
+#ifndef WXL_EVENT_Social
+    #define WXL_EVENT_Social(name, id, args)
+    #define WXL_EVENT_Social_DEFAULTED
 #endif
 
 // --- World: the game's own facts -----------------------------------------------------------
@@ -341,6 +363,123 @@ WXL_EVENT(Asset, ArchiveUnmounted, 76, wxl_archive_args)
 /** The largest free block of the address space fell under the threshold a mod watches (wxl.footprint). */
 WXL_EVENT(World, MemoryPressure,   77, wxl_memory_pressure_args)
 
+// --- Gameplay: auras, loot, items, quests, groups and the people around ---------------------
+//
+// Raised where the client commits what the server told it: the aura slot it fills, the loot
+// window it opens, the inventory slot it updates, the quest log entry it writes. A message the
+// client only reports (a roll, a reward, an invitation) is read before the client parses it.
+
+WXL_EVENTS_SINCE(0, 1, 17, 78)
+
+/** An aura was put in one of a unit's aura slots. */
+WXL_EVENT(Object, UnitAuraApplied,   78, wxl_aura_args)
+/** An aura left a unit's aura slot, with what it was. */
+WXL_EVENT(Object, UnitAuraRemoved,   79, wxl_aura_args)
+/** An aura still on a unit gained or lost stacks, or had its duration renewed. */
+WXL_EVENT(Object, UnitAuraRefreshed, 80, wxl_aura_args)
+/** A unit mounted, dismounted or changed mounts. */
+WXL_EVENT(Object, UnitMountChanged,  81, wxl_mount_args)
+
+/** The loot window opened on something. One LootSlot per item follows. */
+WXL_EVENT(Loot, LootOpened,      82, wxl_loot_args)
+/** One item of the loot window that just opened, in the window's order. */
+WXL_EVENT(Loot, LootSlot,        83, wxl_loot_slot_args)
+/** An item left the loot window: taken by the player or by someone of its group. */
+WXL_EVENT(Loot, LootSlotCleared, 84, wxl_loot_slot_args)
+/** The loot window closed. */
+WXL_EVENT(Loot, LootClosed,      85, wxl_loot_args)
+/** The local player received its share of looted money. */
+WXL_EVENT(Loot, LootMoney,       86, wxl_loot_money_args)
+/** A roll started on an item of a group's loot. */
+WXL_EVENT(Loot, LootRollStart,   87, wxl_loot_roll_start_args)
+/** A member of the group chose on a roll. */
+WXL_EVENT(Loot, LootRoll,        88, wxl_loot_roll_args)
+/** A roll was won. */
+WXL_EVENT(Loot, LootRollWon,     89, wxl_loot_roll_args)
+/** Everyone passed on a roll. */
+WXL_EVENT(Loot, LootAllPassed,   90, wxl_loot_roll_args)
+
+/** An item was looted, given or made for the local player or a member of its group. */
+WXL_EVENT(Item, ItemPushed,            91, wxl_item_push_args)
+/** A slot of the local player's inventory or of one of its bags got another item, or none. */
+WXL_EVENT(Item, InventorySlotChanged,  92, wxl_inventory_slot_args)
+/** An item's durability changed. */
+WXL_EVENT(Item, ItemDurabilityChanged, 93, wxl_item_durability_args)
+/** An item's stack count changed. */
+WXL_EVENT(Item, ItemStackChanged,      94, wxl_item_stack_args)
+/** The server refused an inventory change, with its reason. */
+WXL_EVENT(Item, InventoryError,        95, wxl_inventory_error_args)
+
+/** A quest entered the local player's quest log. */
+WXL_EVENT(Quest, QuestAccepted,         96, wxl_quest_args)
+/** A quest left the quest log: abandoned, turned in or removed by the server. */
+WXL_EVENT(Quest, QuestRemoved,          97, wxl_quest_args)
+/** The count of one of a quest's objectives moved. */
+WXL_EVENT(Quest, QuestObjectiveChanged, 98, wxl_quest_objective_args)
+/** Every objective of a quest of the log is done. */
+WXL_EVENT(Quest, QuestCompleted,        99, wxl_quest_args)
+/** A quest of the log failed. */
+WXL_EVENT(Quest, QuestFailed,          100, wxl_quest_args)
+/** A quest was turned in, with its rewards. */
+WXL_EVENT(Quest, QuestTurnedIn,        101, wxl_quest_reward_args)
+/** A quest giver greets the player with the quests it has. */
+WXL_EVENT(Quest, QuestGiverGreeting,   102, wxl_quest_giver_args)
+/** A quest giver shows a quest's details, to accept it. */
+WXL_EVENT(Quest, QuestGiverDetail,     103, wxl_quest_giver_args)
+/** A quest giver shows what a quest still asks for. */
+WXL_EVENT(Quest, QuestGiverProgress,   104, wxl_quest_giver_args)
+/** A quest giver shows a quest's reward, to turn it in. */
+WXL_EVENT(Quest, QuestGiverReward,     105, wxl_quest_giver_args)
+
+/** The local player is invited to a group. A handler may accept or decline it. */
+WXL_EVENT(Group, GroupInvite,            106, wxl_group_invite_args)
+/** The server listed the local player's group. One GroupMember per other member follows. */
+WXL_EVENT(Group, GroupUpdated,           107, wxl_group_args)
+/** One other member of the group, in the list's order. */
+WXL_EVENT(Group, GroupMember,            108, wxl_group_member_args)
+/** The local player is no longer in a group. */
+WXL_EVENT(Group, GroupLeft,              109, wxl_group_left_args)
+/** The group's loot method, master looter or threshold changed. */
+WXL_EVENT(Group, GroupLootMethodChanged, 110, wxl_group_loot_args)
+/** A ready check started. */
+WXL_EVENT(Group, ReadyCheck,             111, wxl_ready_check_args)
+/** A member answered the ready check. */
+WXL_EVENT(Group, ReadyCheckResponse,     112, wxl_ready_check_response_args)
+/** The ready check is over. */
+WXL_EVENT(Group, ReadyCheckFinished,     113, wxl_ready_check_end_args)
+
+/** The local player is challenged to a duel. A handler may accept or decline it. */
+WXL_EVENT(Social, DuelRequested,    114, wxl_duel_request_args)
+/** The local player's duel counts down to its start. */
+WXL_EVENT(Social, DuelCountdown,    115, wxl_duel_countdown_args)
+/** A duel in view was won. */
+WXL_EVENT(Social, DuelWon,          116, wxl_duel_won_args)
+/** The local player's duel is over, fought or cancelled. */
+WXL_EVENT(Social, DuelFinished,     117, wxl_duel_finished_args)
+/** A trade moved a step: proposed, opened, accepted, completed, cancelled, refused. */
+WXL_EVENT(Social, TradeStatus,      118, wxl_trade_args)
+/** A unit in view played an emote's animation. */
+WXL_EVENT(Social, Emote,            119, wxl_emote_args)
+/** A player's text emote reached the local player. */
+WXL_EVENT(Social, TextEmote,        120, wxl_text_emote_args)
+/** Someone offers to resurrect the local player. A handler may accept or decline it. */
+WXL_EVENT(Social, ResurrectRequest, 121, wxl_resurrect_request_args)
+/** A window opened on someone the player talks to: a vendor, a trainer, a banker, a quest giver, ... */
+WXL_EVENT(Social, WindowOpened,     122, wxl_window_args)
+/** That window closed. */
+WXL_EVENT(Social, WindowClosed,     123, wxl_window_args)
+
+/** The local player died. */
+WXL_EVENT(Player, PlayerDied,         124, wxl_unit_args)
+/** The local player released its spirit and is a ghost. */
+WXL_EVENT(Player, PlayerReleased,     125, wxl_unit_args)
+/** The local player is alive again, after death or as a ghost. */
+WXL_EVENT(Player, PlayerResurrected,  126, wxl_unit_args)
+/** The local player's standing with a faction changed. */
+WXL_EVENT(Player, ReputationChanged,  127, wxl_reputation_args)
+/** A player in view, or the local player, earned an achievement. */
+WXL_EVENT(Player, AchievementEarned,  128, wxl_achievement_args)
+
 // Give back whatever was defaulted above, so the file can be included again right after with a
 // different selector. What the consumer defined itself is left alone: undefining it here would
 // break the consumer that includes the table twice on purpose.
@@ -392,4 +531,24 @@ WXL_EVENT(World, MemoryPressure,   77, wxl_memory_pressure_args)
 #ifdef WXL_EVENT_Chat_DEFAULTED
     #undef WXL_EVENT_Chat
     #undef WXL_EVENT_Chat_DEFAULTED
+#endif
+#ifdef WXL_EVENT_Loot_DEFAULTED
+    #undef WXL_EVENT_Loot
+    #undef WXL_EVENT_Loot_DEFAULTED
+#endif
+#ifdef WXL_EVENT_Item_DEFAULTED
+    #undef WXL_EVENT_Item
+    #undef WXL_EVENT_Item_DEFAULTED
+#endif
+#ifdef WXL_EVENT_Quest_DEFAULTED
+    #undef WXL_EVENT_Quest
+    #undef WXL_EVENT_Quest_DEFAULTED
+#endif
+#ifdef WXL_EVENT_Group_DEFAULTED
+    #undef WXL_EVENT_Group
+    #undef WXL_EVENT_Group_DEFAULTED
+#endif
+#ifdef WXL_EVENT_Social_DEFAULTED
+    #undef WXL_EVENT_Social
+    #undef WXL_EVENT_Social_DEFAULTED
 #endif

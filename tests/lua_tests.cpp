@@ -1870,6 +1870,121 @@ print("later " .. tostring(s.Unredirect("Interface\\Nope.txt")) .. " " .. tostri
         if (g_failures) sink.Dump();
     }
 
+    Section("the gameplay events");
+    {
+        const fs::path mods = MakeTree(scratch, "gameplay", binary, fs::path());
+        WriteFile(mods / "play" / "mod.json", LuaManifest("wxl.play"));
+        WriteFile(mods / "play" / "init.lua", R"(
+Observe("ObjectScript", "OnUnitAuraApplied", function(unit, guid, slot, spell, caster, caster_guid, stacks,
+                                                      previous, level, flags, harmful, duration, remaining)
+    print(string.format("aura %d slot %d stacks %d harmful %s left %d of %d caster %s", spell, slot, stacks,
+                        tostring(harmful), remaining, duration, tostring(caster)))
+end)
+Observe("LootScript", "OnLootOpened", function(source, guid, kind, money, count)
+    print("loot " .. kind .. " " .. money .. " " .. count)
+end)
+Observe("LootScript", "OnLootSlot", function(index, slot, item, quantity, display, suffix, property, slot_type)
+    print("slot " .. index .. " " .. item .. " x" .. quantity .. " " .. slot_type .. " " .. property)
+end)
+Observe("ItemScript", "OnInventorySlotChanged", function(container, container_guid, slot, previous, item, item_guid)
+    print("inventory slot " .. slot .. " item " .. tostring(item))
+end)
+Observe("QuestScript", "OnQuestGiverDetail", function(giver, giver_guid, quest, title, text, count, shared_by)
+    print("detail " .. quest .. " " .. title .. " / " .. text)
+end)
+Observe("QuestScript", "OnQuestObjectiveChanged", function(quest, slot, objective, previous, current)
+    print("objective " .. quest .. " #" .. objective .. " " .. previous .. "->" .. current)
+end)
+Observe("GroupScript", "OnGroupUpdated", function(group, raid, battleground, count, subgroup, leader, method)
+    print("group " .. count .. " " .. tostring(raid) .. " " .. method)
+end)
+Observe("SocialScript", "OnWindowOpened", function(kind, npc, npc_guid)
+    print("window " .. kind)
+end)
+Observe("PlayerScript", "OnReputationChanged", function(faction, previous, current, bonus)
+    print("reputation " .. faction .. " " .. previous .. "->" .. current)
+end)
+Override("GroupScript", "OnGroupInvite", function(inviter, can_accept)
+    print("invited by " .. inviter)
+    return true
+end)
+Override("SocialScript", "OnDuelRequested", function(challenger, challenger_guid, arbiter)
+    return nil, true
+end)
+function SocialScript:OnTradeStatus(status, partner)
+    print("trade " .. status)
+end
+)");
+
+        CaptureSink sink;
+        ModHost     host(Config(mods, sink));
+        host.LoadAll();
+        host.Stage(WXL_STAGE_READY);
+
+        wxl_aura_args aura{};
+        aura.unit = WXL_HANDLE_NONE, aura.slot = 2, aura.spell_id = 8050, aura.stacks = 1, aura.harmful = WXL_TRUE,
+        aura.duration = 18000, aura.remaining = 12000;
+        host.Raise(WXL_EV_UnitAuraApplied, &aura);
+        Check(sink.Has("[wxl.play] aura 8050 slot 2 stacks 1 harmful true left 12000 of 18000 caster nil"),
+              "UnitAuraApplied reaches Lua with every member, a caster out of view as nil");
+
+        wxl_loot_args loot{};
+        loot.kind = WXL_LOOT_FISHING, loot.money = 12, loot.count = 1;
+        host.Raise(WXL_EV_LootOpened, &loot);
+        wxl_loot_slot_args slot{};
+        slot.item_id = 6303, slot.quantity = 1, slot.slot_type = WXL_LOOT_SLOT_TAKE, slot.random_property_id = -3;
+        host.Raise(WXL_EV_LootSlot, &slot);
+        Check(sink.Has("[wxl.play] loot fishing 12 1") && sink.Has("[wxl.play] slot 0 6303 x1 take -3"),
+              "LootOpened and LootSlot name their enums and keep a signed property");
+
+        wxl_inventory_slot_args inventory{};
+        inventory.slot = 23, inventory.item = WXL_HANDLE_NONE;
+        host.Raise(WXL_EV_InventorySlotChanged, &inventory);
+        Check(sink.Has("[wxl.play] inventory slot 23 item nil"), "InventorySlotChanged, an emptied slot's item nil");
+
+        wxl_quest_giver_args detail{};
+        detail.quest_id = 783, detail.title = wxl_str{"A Threat Within", 15}, detail.text = wxl_str{"Hail.", 5};
+        host.Raise(WXL_EV_QuestGiverDetail, &detail);
+        const wxl_quest_objective_args objective{783, 0, 1, 2, 3};
+        host.Raise(WXL_EV_QuestObjectiveChanged, &objective);
+        Check(sink.Has("[wxl.play] detail 783 A Threat Within / Hail.") && sink.Has("[wxl.play] objective 783 #1 2->3"),
+              "the quest events carry their strings and counts");
+
+        wxl_group_args group{};
+        group.count = 4, group.raid = WXL_FALSE, group.loot_method = WXL_LOOT_NEED_BEFORE_GREED;
+        host.Raise(WXL_EV_GroupUpdated, &group);
+        Check(sink.Has("[wxl.play] group 4 false need_before_greed"), "GroupUpdated with its loot method by name");
+
+        wxl_window_args window{};
+        window.kind = WXL_WINDOW_AUCTION;
+        host.Raise(WXL_EV_WindowOpened, &window);
+        const wxl_reputation_args reputation{72, 2900, 3000, 0.0f};
+        host.Raise(WXL_EV_ReputationChanged, &reputation);
+        Check(sink.Has("[wxl.play] window auction") && sink.Has("[wxl.play] reputation 72 2900->3000"),
+              "WindowOpened and ReputationChanged");
+
+        wxl_bool              accept = WXL_FALSE, decline = WXL_FALSE;
+        wxl_group_invite_args invite{};
+        invite.inviter = wxl_str{"Jaina", 5}, invite.can_accept = WXL_TRUE, invite.accept = &accept,
+        invite.decline = &decline;
+        host.Raise(WXL_EV_GroupInvite, &invite);
+        Check(sink.Has("[wxl.play] invited by Jaina") && accept == WXL_TRUE && decline == WXL_FALSE,
+              "an Override of GroupInvite accepts by returning true");
+        accept = decline = WXL_FALSE;
+        wxl_duel_request_args duel{};
+        duel.accept = &accept, duel.decline = &decline;
+        host.Raise(WXL_EV_DuelRequested, &duel);
+        Check(accept == WXL_FALSE && decline == WXL_TRUE, "and one of DuelRequested declines with nil, true");
+
+        wxl_trade_args trade{};
+        trade.status = WXL_TRADE_COMPLETE;
+        host.Raise(WXL_EV_TradeStatus, &trade);
+        Check(sink.Has("[wxl.play] trade complete"), "a family method of a new family is subscribed: SocialScript");
+
+        host.Shutdown();
+        if (g_failures) sink.Dump();
+    }
+
     Section("what a mod's abi lets it use");
     {
         const wxl::reflect::Version since = wxl::reflect::SinceOf(WXL_EV_ChatMessage);

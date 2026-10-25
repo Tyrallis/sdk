@@ -1204,6 +1204,34 @@
 ---arrives as its number.
 ---@alias wxl.XpSource "kill"|"other"
 
+---A wxl_loot_kind value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.LootKind "corpse"|"pickpocket"|"fishing"|"disenchant"|"skinning"|"prospecting"|"milling"
+
+---A wxl_loot_slot_type value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.LootSlotType "take"|"roll"|"master"|"locked"|"owner"
+
+---A wxl_roll_type value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.RollType "pass"|"need"|"greed"|"disenchant"
+
+---A wxl_loot_method value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.LootMethod "free_for_all"|"round_robin"|"master"|"group"|"need_before_greed"
+
+---A wxl_group_left_reason value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.GroupLeftReason "removed"|"disbanded"
+
+---A wxl_trade_status value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.TradeStatus "busy"|"proposed"|"initiated"|"cancelled"|"accepted"|"already_trading"|"not_found"|"state_changed"|"complete"|"unaccepted"|"too_far"|"wrong_faction"|"failed"|"closed"|"ignored"|"stunned"|"target_stunned"|"dead"|"target_dead"|"logging_out"|"target_logging_out"|"restricted"|"wrong_realm"|"not_on_taplist"
+
+---A wxl_window_kind value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.WindowKind "gossip"|"merchant"|"trainer"|"bank"|"auction"|"mail"|"taxi"|"trade"|"quest"|"guild_bank"|"stable"|"petition"|"tabard"
+
 -- The script families. A function defined on one of these tables as On<Event> is
 -- subscribed when the entry file has run and called with the event's parameters;
 -- on an event that can be answered its return values are taken, as Override
@@ -1256,6 +1284,10 @@ RenderScript = {}
 ---@field OnSpellCooldownChanged fun(self: ObjectScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, spell_id: integer, change: wxl.CooldownChange|integer, delay: integer)
 ---@field OnSpellCastCancel fun(self: ObjectScript, caster: wxl.Object|nil, caster_guid: wxl.Guid, spell_id: integer, cast_count: integer, reason: integer, notify_server: boolean)
 ---@field OnObjectFieldChanged fun(self: ObjectScript, object: wxl.Object|nil, type: wxl.ObjectType|integer, field: integer, count: integer, old_value: wxl.FieldValue, new_value: wxl.FieldValue)
+---@field OnUnitAuraApplied fun(self: ObjectScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, slot: integer, spell_id: integer, caster: wxl.Object|nil, caster_guid: wxl.Guid, stacks: integer, previous_stacks: integer, level: integer, flags: integer, harmful: boolean, duration: integer, remaining: integer)
+---@field OnUnitAuraRemoved fun(self: ObjectScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, slot: integer, spell_id: integer, caster: wxl.Object|nil, caster_guid: wxl.Guid, stacks: integer, previous_stacks: integer, level: integer, flags: integer, harmful: boolean, duration: integer, remaining: integer)
+---@field OnUnitAuraRefreshed fun(self: ObjectScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, slot: integer, spell_id: integer, caster: wxl.Object|nil, caster_guid: wxl.Guid, stacks: integer, previous_stacks: integer, level: integer, flags: integer, harmful: boolean, duration: integer, remaining: integer)
+---@field OnUnitMountChanged fun(self: ObjectScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, previous_display_id: integer, display_id: integer)
 ObjectScript = {}
 
 ---@class AssetScript
@@ -1299,6 +1331,11 @@ CombatScript = {}
 ---@field OnPlayerLevelUp fun(self: PlayerScript, level: integer, health: integer, mana: integer, rage: integer, focus: integer, energy: integer, happiness: integer, runes: integer, runic_power: integer, strength: integer, agility: integer, stamina: integer, intellect: integer, spirit: integer)
 ---@field OnPlayerXpGain fun(self: PlayerScript, source: wxl.Object|nil, source_guid: wxl.Guid, amount: integer, kind: wxl.XpSource|integer, bonus: integer, group_multiplier: number, refer_a_friend: boolean)
 ---@field OnPlayerMoneyChanged fun(self: PlayerScript, player: wxl.Object|nil, previous: integer, current: integer)
+---@field OnPlayerDied fun(self: PlayerScript, unit: wxl.Object|nil)
+---@field OnPlayerReleased fun(self: PlayerScript, unit: wxl.Object|nil)
+---@field OnPlayerResurrected fun(self: PlayerScript, unit: wxl.Object|nil)
+---@field OnReputationChanged fun(self: PlayerScript, faction_id: integer, previous: integer, current: integer, bonus: number)
+---@field OnAchievementEarned fun(self: PlayerScript, player: wxl.Object|nil, player_guid: wxl.Guid, achievement_id: integer, date: integer, silent: boolean)
 PlayerScript = {}
 
 ---@class GlueScript
@@ -1317,7 +1354,64 @@ GlueScript = {}
 ---@field OnChatAddonMessage fun(self: ChatScript, type: integer, sender: wxl.Object|nil, sender_guid: wxl.Guid, sender_name: string, prefix: string, text: string, channel: string, gm: boolean)
 ChatScript = {}
 
----@alias wxl.Family "WorldScript"|"RenderScript"|"ObjectScript"|"AssetScript"|"NetScript"|"LuaScript"|"CombatScript"|"PlayerScript"|"GlueScript"|"ChatScript"
+---@class LootScript
+---@field OnLootOpened fun(self: LootScript, source: wxl.Object|nil, source_guid: wxl.Guid, kind: wxl.LootKind|integer, money: integer, count: integer)
+---@field OnLootSlot fun(self: LootScript, index: integer, slot: integer, item_id: integer, quantity: integer, display_id: integer, random_suffix: integer, random_property_id: integer, slot_type: wxl.LootSlotType|integer)
+---@field OnLootSlotCleared fun(self: LootScript, index: integer, slot: integer, item_id: integer, quantity: integer, display_id: integer, random_suffix: integer, random_property_id: integer, slot_type: wxl.LootSlotType|integer)
+---@field OnLootClosed fun(self: LootScript, source: wxl.Object|nil, source_guid: wxl.Guid, kind: wxl.LootKind|integer, money: integer, count: integer)
+---@field OnLootMoney fun(self: LootScript, amount: integer, alone: boolean)
+---@field OnLootRollStart fun(self: LootScript, source_guid: wxl.Guid, slot: integer, item_id: integer, random_suffix: integer, random_property_id: integer, quantity: integer, duration: integer, vote_mask: integer, roll_id: integer)
+---@field OnLootRoll fun(self: LootScript, source_guid: wxl.Guid, slot: integer, item_id: integer, random_suffix: integer, random_property_id: integer, player_guid: wxl.Guid, roll: integer, roll_type: wxl.RollType|integer, auto_pass: boolean)
+---@field OnLootRollWon fun(self: LootScript, source_guid: wxl.Guid, slot: integer, item_id: integer, random_suffix: integer, random_property_id: integer, player_guid: wxl.Guid, roll: integer, roll_type: wxl.RollType|integer, auto_pass: boolean)
+---@field OnLootAllPassed fun(self: LootScript, source_guid: wxl.Guid, slot: integer, item_id: integer, random_suffix: integer, random_property_id: integer, player_guid: wxl.Guid, roll: integer, roll_type: wxl.RollType|integer, auto_pass: boolean)
+LootScript = {}
+
+---@class ItemScript
+---@field OnItemPushed fun(self: ItemScript, player_guid: wxl.Guid, bag: integer, slot: integer, item_id: integer, suffix_factor: integer, random_property_id: integer, count: integer, total: integer, received: boolean, created: boolean, announced: boolean)
+---@field OnInventorySlotChanged fun(self: ItemScript, container: wxl.Object|nil, container_guid: wxl.Guid, slot: integer, previous_guid: wxl.Guid, item: wxl.Object|nil, item_guid: wxl.Guid)
+---@field OnItemDurabilityChanged fun(self: ItemScript, item: wxl.Object|nil, item_guid: wxl.Guid, previous: integer, current: integer, maximum: integer)
+---@field OnItemStackChanged fun(self: ItemScript, item: wxl.Object|nil, item_guid: wxl.Guid, previous: integer, current: integer)
+---@field OnInventoryError fun(self: ItemScript, result: integer, item_guid: wxl.Guid, other_guid: wxl.Guid, required_level: integer)
+ItemScript = {}
+
+---@class QuestScript
+---@field OnQuestAccepted fun(self: QuestScript, quest_id: integer, log_slot: integer)
+---@field OnQuestRemoved fun(self: QuestScript, quest_id: integer, log_slot: integer)
+---@field OnQuestObjectiveChanged fun(self: QuestScript, quest_id: integer, log_slot: integer, objective: integer, previous: integer, current: integer)
+---@field OnQuestCompleted fun(self: QuestScript, quest_id: integer, log_slot: integer)
+---@field OnQuestFailed fun(self: QuestScript, quest_id: integer, log_slot: integer)
+---@field OnQuestTurnedIn fun(self: QuestScript, quest_id: integer, xp: integer, money: integer, honor: integer, talents: integer, arena_points: integer)
+---@field OnQuestGiverGreeting fun(self: QuestScript, giver: wxl.Object|nil, giver_guid: wxl.Guid, quest_id: integer, title: string, text: string, count: integer, shared_by: wxl.Guid)
+---@field OnQuestGiverDetail fun(self: QuestScript, giver: wxl.Object|nil, giver_guid: wxl.Guid, quest_id: integer, title: string, text: string, count: integer, shared_by: wxl.Guid)
+---@field OnQuestGiverProgress fun(self: QuestScript, giver: wxl.Object|nil, giver_guid: wxl.Guid, quest_id: integer, title: string, text: string, count: integer, shared_by: wxl.Guid)
+---@field OnQuestGiverReward fun(self: QuestScript, giver: wxl.Object|nil, giver_guid: wxl.Guid, quest_id: integer, title: string, text: string, count: integer, shared_by: wxl.Guid)
+QuestScript = {}
+
+---@class GroupScript
+---@field OnGroupInvite fun(self: GroupScript, inviter: string, can_accept: boolean, accept: boolean|nil, decline: boolean|nil): boolean|nil, boolean|nil answers through accept, then decline
+---@field OnGroupUpdated fun(self: GroupScript, group_guid: wxl.Guid, raid: boolean, battleground: boolean, count: integer, subgroup: integer, leader_guid: wxl.Guid, loot_method: wxl.LootMethod|integer, looter_guid: wxl.Guid, loot_threshold: integer, dungeon_difficulty: integer, raid_difficulty: integer)
+---@field OnGroupMember fun(self: GroupScript, index: integer, count: integer, member: wxl.Object|nil, member_guid: wxl.Guid, name: string, online: boolean, subgroup: integer, flags: integer, roles: integer)
+---@field OnGroupLeft fun(self: GroupScript, reason: wxl.GroupLeftReason|integer)
+---@field OnGroupLootMethodChanged fun(self: GroupScript, loot_method: wxl.LootMethod|integer, looter_guid: wxl.Guid, loot_threshold: integer)
+---@field OnReadyCheck fun(self: GroupScript, initiator: wxl.Object|nil, initiator_guid: wxl.Guid, duration: integer)
+---@field OnReadyCheckResponse fun(self: GroupScript, member: wxl.Object|nil, member_guid: wxl.Guid, ready: boolean)
+---@field OnReadyCheckFinished fun(self: GroupScript, initiator_guid: wxl.Guid)
+GroupScript = {}
+
+---@class SocialScript
+---@field OnDuelRequested fun(self: SocialScript, challenger: wxl.Object|nil, challenger_guid: wxl.Guid, arbiter_guid: wxl.Guid, accept: boolean|nil, decline: boolean|nil): boolean|nil, boolean|nil answers through accept, then decline
+---@field OnDuelCountdown fun(self: SocialScript, duration: integer)
+---@field OnDuelWon fun(self: SocialScript, winner: string, loser: string, fled: boolean)
+---@field OnDuelFinished fun(self: SocialScript, completed: boolean)
+---@field OnTradeStatus fun(self: SocialScript, status: wxl.TradeStatus|integer, partner_guid: wxl.Guid)
+---@field OnEmote fun(self: SocialScript, unit: wxl.Object|nil, unit_guid: wxl.Guid, emote_id: integer)
+---@field OnTextEmote fun(self: SocialScript, sender: wxl.Object|nil, sender_guid: wxl.Guid, text_emote: integer, emote_number: integer, target_name: string)
+---@field OnResurrectRequest fun(self: SocialScript, offerer: wxl.Object|nil, offerer_guid: wxl.Guid, name: string, sickness: boolean, accept: boolean|nil, decline: boolean|nil): boolean|nil, boolean|nil answers through accept, then decline
+---@field OnWindowOpened fun(self: SocialScript, kind: wxl.WindowKind|integer, npc: wxl.Object|nil, npc_guid: wxl.Guid)
+---@field OnWindowClosed fun(self: SocialScript, kind: wxl.WindowKind|integer, npc: wxl.Object|nil, npc_guid: wxl.Guid)
+SocialScript = {}
+
+---@alias wxl.Family "WorldScript"|"RenderScript"|"ObjectScript"|"AssetScript"|"NetScript"|"LuaScript"|"CombatScript"|"PlayerScript"|"GlueScript"|"ChatScript"|"LootScript"|"ItemScript"|"QuestScript"|"GroupScript"|"SocialScript"
 
 ---Calls `handler` with the event's parameters whenever it is raised. Returns the
 ---handler's id.
@@ -1399,6 +1493,57 @@ ChatScript = {}
 ---@overload fun(family: "AssetScript", method: "OnArchiveMounted", handler: fun(path: string, priority: integer, hash_entries: integer, block_entries: integer, bytes: integer)): integer
 ---@overload fun(family: "AssetScript", method: "OnArchiveUnmounted", handler: fun(path: string, priority: integer, hash_entries: integer, block_entries: integer, bytes: integer)): integer
 ---@overload fun(family: "WorldScript", method: "OnMemoryPressure", handler: fun(largest_free: integer, free: integer, committed: integer, threshold: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnUnitAuraApplied", handler: fun(unit: wxl.Object|nil, unit_guid: wxl.Guid, slot: integer, spell_id: integer, caster: wxl.Object|nil, caster_guid: wxl.Guid, stacks: integer, previous_stacks: integer, level: integer, flags: integer, harmful: boolean, duration: integer, remaining: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnUnitAuraRemoved", handler: fun(unit: wxl.Object|nil, unit_guid: wxl.Guid, slot: integer, spell_id: integer, caster: wxl.Object|nil, caster_guid: wxl.Guid, stacks: integer, previous_stacks: integer, level: integer, flags: integer, harmful: boolean, duration: integer, remaining: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnUnitAuraRefreshed", handler: fun(unit: wxl.Object|nil, unit_guid: wxl.Guid, slot: integer, spell_id: integer, caster: wxl.Object|nil, caster_guid: wxl.Guid, stacks: integer, previous_stacks: integer, level: integer, flags: integer, harmful: boolean, duration: integer, remaining: integer)): integer
+---@overload fun(family: "ObjectScript", method: "OnUnitMountChanged", handler: fun(unit: wxl.Object|nil, unit_guid: wxl.Guid, previous_display_id: integer, display_id: integer)): integer
+---@overload fun(family: "LootScript", method: "OnLootOpened", handler: fun(source: wxl.Object|nil, source_guid: wxl.Guid, kind: wxl.LootKind|integer, money: integer, count: integer)): integer
+---@overload fun(family: "LootScript", method: "OnLootSlot", handler: fun(index: integer, slot: integer, item_id: integer, quantity: integer, display_id: integer, random_suffix: integer, random_property_id: integer, slot_type: wxl.LootSlotType|integer)): integer
+---@overload fun(family: "LootScript", method: "OnLootSlotCleared", handler: fun(index: integer, slot: integer, item_id: integer, quantity: integer, display_id: integer, random_suffix: integer, random_property_id: integer, slot_type: wxl.LootSlotType|integer)): integer
+---@overload fun(family: "LootScript", method: "OnLootClosed", handler: fun(source: wxl.Object|nil, source_guid: wxl.Guid, kind: wxl.LootKind|integer, money: integer, count: integer)): integer
+---@overload fun(family: "LootScript", method: "OnLootMoney", handler: fun(amount: integer, alone: boolean)): integer
+---@overload fun(family: "LootScript", method: "OnLootRollStart", handler: fun(source_guid: wxl.Guid, slot: integer, item_id: integer, random_suffix: integer, random_property_id: integer, quantity: integer, duration: integer, vote_mask: integer, roll_id: integer)): integer
+---@overload fun(family: "LootScript", method: "OnLootRoll", handler: fun(source_guid: wxl.Guid, slot: integer, item_id: integer, random_suffix: integer, random_property_id: integer, player_guid: wxl.Guid, roll: integer, roll_type: wxl.RollType|integer, auto_pass: boolean)): integer
+---@overload fun(family: "LootScript", method: "OnLootRollWon", handler: fun(source_guid: wxl.Guid, slot: integer, item_id: integer, random_suffix: integer, random_property_id: integer, player_guid: wxl.Guid, roll: integer, roll_type: wxl.RollType|integer, auto_pass: boolean)): integer
+---@overload fun(family: "LootScript", method: "OnLootAllPassed", handler: fun(source_guid: wxl.Guid, slot: integer, item_id: integer, random_suffix: integer, random_property_id: integer, player_guid: wxl.Guid, roll: integer, roll_type: wxl.RollType|integer, auto_pass: boolean)): integer
+---@overload fun(family: "ItemScript", method: "OnItemPushed", handler: fun(player_guid: wxl.Guid, bag: integer, slot: integer, item_id: integer, suffix_factor: integer, random_property_id: integer, count: integer, total: integer, received: boolean, created: boolean, announced: boolean)): integer
+---@overload fun(family: "ItemScript", method: "OnInventorySlotChanged", handler: fun(container: wxl.Object|nil, container_guid: wxl.Guid, slot: integer, previous_guid: wxl.Guid, item: wxl.Object|nil, item_guid: wxl.Guid)): integer
+---@overload fun(family: "ItemScript", method: "OnItemDurabilityChanged", handler: fun(item: wxl.Object|nil, item_guid: wxl.Guid, previous: integer, current: integer, maximum: integer)): integer
+---@overload fun(family: "ItemScript", method: "OnItemStackChanged", handler: fun(item: wxl.Object|nil, item_guid: wxl.Guid, previous: integer, current: integer)): integer
+---@overload fun(family: "ItemScript", method: "OnInventoryError", handler: fun(result: integer, item_guid: wxl.Guid, other_guid: wxl.Guid, required_level: integer)): integer
+---@overload fun(family: "QuestScript", method: "OnQuestAccepted", handler: fun(quest_id: integer, log_slot: integer)): integer
+---@overload fun(family: "QuestScript", method: "OnQuestRemoved", handler: fun(quest_id: integer, log_slot: integer)): integer
+---@overload fun(family: "QuestScript", method: "OnQuestObjectiveChanged", handler: fun(quest_id: integer, log_slot: integer, objective: integer, previous: integer, current: integer)): integer
+---@overload fun(family: "QuestScript", method: "OnQuestCompleted", handler: fun(quest_id: integer, log_slot: integer)): integer
+---@overload fun(family: "QuestScript", method: "OnQuestFailed", handler: fun(quest_id: integer, log_slot: integer)): integer
+---@overload fun(family: "QuestScript", method: "OnQuestTurnedIn", handler: fun(quest_id: integer, xp: integer, money: integer, honor: integer, talents: integer, arena_points: integer)): integer
+---@overload fun(family: "QuestScript", method: "OnQuestGiverGreeting", handler: fun(giver: wxl.Object|nil, giver_guid: wxl.Guid, quest_id: integer, title: string, text: string, count: integer, shared_by: wxl.Guid)): integer
+---@overload fun(family: "QuestScript", method: "OnQuestGiverDetail", handler: fun(giver: wxl.Object|nil, giver_guid: wxl.Guid, quest_id: integer, title: string, text: string, count: integer, shared_by: wxl.Guid)): integer
+---@overload fun(family: "QuestScript", method: "OnQuestGiverProgress", handler: fun(giver: wxl.Object|nil, giver_guid: wxl.Guid, quest_id: integer, title: string, text: string, count: integer, shared_by: wxl.Guid)): integer
+---@overload fun(family: "QuestScript", method: "OnQuestGiverReward", handler: fun(giver: wxl.Object|nil, giver_guid: wxl.Guid, quest_id: integer, title: string, text: string, count: integer, shared_by: wxl.Guid)): integer
+---@overload fun(family: "GroupScript", method: "OnGroupInvite", handler: fun(inviter: string, can_accept: boolean, accept: boolean|nil, decline: boolean|nil)): integer
+---@overload fun(family: "GroupScript", method: "OnGroupUpdated", handler: fun(group_guid: wxl.Guid, raid: boolean, battleground: boolean, count: integer, subgroup: integer, leader_guid: wxl.Guid, loot_method: wxl.LootMethod|integer, looter_guid: wxl.Guid, loot_threshold: integer, dungeon_difficulty: integer, raid_difficulty: integer)): integer
+---@overload fun(family: "GroupScript", method: "OnGroupMember", handler: fun(index: integer, count: integer, member: wxl.Object|nil, member_guid: wxl.Guid, name: string, online: boolean, subgroup: integer, flags: integer, roles: integer)): integer
+---@overload fun(family: "GroupScript", method: "OnGroupLeft", handler: fun(reason: wxl.GroupLeftReason|integer)): integer
+---@overload fun(family: "GroupScript", method: "OnGroupLootMethodChanged", handler: fun(loot_method: wxl.LootMethod|integer, looter_guid: wxl.Guid, loot_threshold: integer)): integer
+---@overload fun(family: "GroupScript", method: "OnReadyCheck", handler: fun(initiator: wxl.Object|nil, initiator_guid: wxl.Guid, duration: integer)): integer
+---@overload fun(family: "GroupScript", method: "OnReadyCheckResponse", handler: fun(member: wxl.Object|nil, member_guid: wxl.Guid, ready: boolean)): integer
+---@overload fun(family: "GroupScript", method: "OnReadyCheckFinished", handler: fun(initiator_guid: wxl.Guid)): integer
+---@overload fun(family: "SocialScript", method: "OnDuelRequested", handler: fun(challenger: wxl.Object|nil, challenger_guid: wxl.Guid, arbiter_guid: wxl.Guid, accept: boolean|nil, decline: boolean|nil)): integer
+---@overload fun(family: "SocialScript", method: "OnDuelCountdown", handler: fun(duration: integer)): integer
+---@overload fun(family: "SocialScript", method: "OnDuelWon", handler: fun(winner: string, loser: string, fled: boolean)): integer
+---@overload fun(family: "SocialScript", method: "OnDuelFinished", handler: fun(completed: boolean)): integer
+---@overload fun(family: "SocialScript", method: "OnTradeStatus", handler: fun(status: wxl.TradeStatus|integer, partner_guid: wxl.Guid)): integer
+---@overload fun(family: "SocialScript", method: "OnEmote", handler: fun(unit: wxl.Object|nil, unit_guid: wxl.Guid, emote_id: integer)): integer
+---@overload fun(family: "SocialScript", method: "OnTextEmote", handler: fun(sender: wxl.Object|nil, sender_guid: wxl.Guid, text_emote: integer, emote_number: integer, target_name: string)): integer
+---@overload fun(family: "SocialScript", method: "OnResurrectRequest", handler: fun(offerer: wxl.Object|nil, offerer_guid: wxl.Guid, name: string, sickness: boolean, accept: boolean|nil, decline: boolean|nil)): integer
+---@overload fun(family: "SocialScript", method: "OnWindowOpened", handler: fun(kind: wxl.WindowKind|integer, npc: wxl.Object|nil, npc_guid: wxl.Guid)): integer
+---@overload fun(family: "SocialScript", method: "OnWindowClosed", handler: fun(kind: wxl.WindowKind|integer, npc: wxl.Object|nil, npc_guid: wxl.Guid)): integer
+---@overload fun(family: "PlayerScript", method: "OnPlayerDied", handler: fun(unit: wxl.Object|nil)): integer
+---@overload fun(family: "PlayerScript", method: "OnPlayerReleased", handler: fun(unit: wxl.Object|nil)): integer
+---@overload fun(family: "PlayerScript", method: "OnPlayerResurrected", handler: fun(unit: wxl.Object|nil)): integer
+---@overload fun(family: "PlayerScript", method: "OnReputationChanged", handler: fun(faction_id: integer, previous: integer, current: integer, bonus: number)): integer
+---@overload fun(family: "PlayerScript", method: "OnAchievementEarned", handler: fun(player: wxl.Object|nil, player_guid: wxl.Guid, achievement_id: integer, date: integer, silent: boolean)): integer
 ---@param family wxl.Family
 ---@param method string
 ---@param handler function
@@ -1416,6 +1561,9 @@ function Observe(family, method, handler) end
 ---@overload fun(family: "ObjectScript", method: "OnSpellCastRequest", handler: fun(caster: wxl.Object|nil, spell_id: integer, item: wxl.Object|nil, target_guid: wxl.Guid, confirmed: boolean, refused: boolean|nil): boolean|nil): integer
 ---@overload fun(family: "ObjectScript", method: "OnItemUseRequest", handler: fun(item: wxl.Object|nil, item_guid: wxl.Guid, target_guid: wxl.Guid, confirmed: boolean, refused: boolean|nil): boolean|nil): integer
 ---@overload fun(family: "ChatScript", method: "OnChatSend", handler: fun(text: string, type: string, language: string, target: string, prefix: string, addon: boolean, suppressed: boolean|nil): boolean|nil): integer
+---@overload fun(family: "GroupScript", method: "OnGroupInvite", handler: fun(inviter: string, can_accept: boolean, accept: boolean|nil, decline: boolean|nil): boolean|nil, boolean|nil): integer
+---@overload fun(family: "SocialScript", method: "OnDuelRequested", handler: fun(challenger: wxl.Object|nil, challenger_guid: wxl.Guid, arbiter_guid: wxl.Guid, accept: boolean|nil, decline: boolean|nil): boolean|nil, boolean|nil): integer
+---@overload fun(family: "SocialScript", method: "OnResurrectRequest", handler: fun(offerer: wxl.Object|nil, offerer_guid: wxl.Guid, name: string, sickness: boolean, accept: boolean|nil, decline: boolean|nil): boolean|nil, boolean|nil): integer
 ---@param family wxl.Family
 ---@param method string
 ---@param handler function

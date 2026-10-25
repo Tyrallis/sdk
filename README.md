@@ -5,7 +5,7 @@
 **The contract a WarcraftXL mod is written against**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![ABI](https://img.shields.io/badge/ABI-0.1.16-blue.svg)](include/wxl/abi.h)
+[![ABI](https://img.shields.io/badge/ABI-0.1.17-blue.svg)](include/wxl/abi.h)
 [![C++](https://img.shields.io/badge/C%2B%2B-17%20and%20up-blue.svg)](#-getting-started)
 [![Header only](https://img.shields.io/badge/header--only-yes-lightgrey.svg)](include/wxl)
 
@@ -194,9 +194,9 @@ serves the client's own Lua and watches the server traffic -- and
 
 ## 🔌 What a runtime offers
 
-Events are grouped into ten script families: `WorldScript`, `RenderScript`, `ObjectScript`,
-`AssetScript`, `NetScript`, `LuaScript`, `CombatScript`, `PlayerScript`, `GlueScript` and
-`ChatScript`. Override the hooks you want; the rest cost nothing. A hook takes its event's
+Events are grouped into fifteen script families: `WorldScript`, `RenderScript`, `ObjectScript`,
+`AssetScript`, `NetScript`, `LuaScript`, `CombatScript`, `PlayerScript`, `GlueScript`,
+`ChatScript`, `LootScript`, `ItemScript`, `QuestScript`, `GroupScript` and `SocialScript`. Override the hooks you want; the rest cost nothing. A hook takes its event's
 arguments as parameters, `OnMessageReceived(uint32_t opcode, wxl::Bytes data, wxl::Answer
 suppressed)`, in C++ and in Lua alike.
 
@@ -283,7 +283,7 @@ supplies only the bindings that reach its own client.
 
 ## 🔢 Versioning
 
-`major.minor.feature`, in [`abi.h`](include/wxl/abi.h): today `0.1.16`.
+`major.minor.feature`, in [`abi.h`](include/wxl/abi.h): today `0.1.17`.
 
 - **Major** changes when an existing field, signature or id changes meaning. A runtime refuses a
   mod built against a different major.

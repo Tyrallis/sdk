@@ -89,6 +89,94 @@ WXL_ENUM_VALUE(wxl_xp_source, WXL_XP_KILL,  0, kill)  ///< a kill
 WXL_ENUM_VALUE(wxl_xp_source, WXL_XP_OTHER, 1, other) ///< anything else: a quest, an exploration
 WXL_ENUM_END(wxl_xp_source)
 
+/// How the loot window was opened, as the server says.
+WXL_ENUM(wxl_loot_kind)
+WXL_ENUM_VALUE(wxl_loot_kind, WXL_LOOT_CORPSE,       1, corpse)       ///< a corpse or a container
+WXL_ENUM_VALUE(wxl_loot_kind, WXL_LOOT_PICKPOCKET,   2, pickpocket)
+WXL_ENUM_VALUE(wxl_loot_kind, WXL_LOOT_FISHING,      3, fishing)
+WXL_ENUM_VALUE(wxl_loot_kind, WXL_LOOT_DISENCHANT,   4, disenchant)
+WXL_ENUM_VALUE(wxl_loot_kind, WXL_LOOT_SKINNING,     6, skinning)     ///< skinning, mining, herbalism
+WXL_ENUM_VALUE(wxl_loot_kind, WXL_LOOT_PROSPECTING,  7, prospecting)
+WXL_ENUM_VALUE(wxl_loot_kind, WXL_LOOT_MILLING,      8, milling)
+WXL_ENUM_END(wxl_loot_kind)
+
+/// Whether the local player can take an item of the loot window itself.
+WXL_ENUM(wxl_loot_slot_type)
+WXL_ENUM_VALUE(wxl_loot_slot_type, WXL_LOOT_SLOT_TAKE,   0, take)   ///< it can
+WXL_ENUM_VALUE(wxl_loot_slot_type, WXL_LOOT_SLOT_ROLL,   1, roll)   ///< it is rolled for
+WXL_ENUM_VALUE(wxl_loot_slot_type, WXL_LOOT_SLOT_MASTER, 2, master) ///< the master looter hands it out
+WXL_ENUM_VALUE(wxl_loot_slot_type, WXL_LOOT_SLOT_LOCKED, 3, locked) ///< someone else's
+WXL_ENUM_VALUE(wxl_loot_slot_type, WXL_LOOT_SLOT_OWNER,  4, owner)  ///< the player's own, for its group's loot
+WXL_ENUM_END(wxl_loot_slot_type)
+
+/// What a player chose on a loot roll.
+WXL_ENUM(wxl_roll_type)
+WXL_ENUM_VALUE(wxl_roll_type, WXL_ROLL_PASS,       0, pass)
+WXL_ENUM_VALUE(wxl_roll_type, WXL_ROLL_NEED,       1, need)
+WXL_ENUM_VALUE(wxl_roll_type, WXL_ROLL_GREED,      2, greed)
+WXL_ENUM_VALUE(wxl_roll_type, WXL_ROLL_DISENCHANT, 3, disenchant)
+WXL_ENUM_END(wxl_roll_type)
+
+/// How a group shares its loot.
+WXL_ENUM(wxl_loot_method)
+WXL_ENUM_VALUE(wxl_loot_method, WXL_LOOT_FREE_FOR_ALL,     0, free_for_all)
+WXL_ENUM_VALUE(wxl_loot_method, WXL_LOOT_ROUND_ROBIN,      1, round_robin)
+WXL_ENUM_VALUE(wxl_loot_method, WXL_LOOT_MASTER,           2, master)
+WXL_ENUM_VALUE(wxl_loot_method, WXL_LOOT_GROUP,            3, group)
+WXL_ENUM_VALUE(wxl_loot_method, WXL_LOOT_NEED_BEFORE_GREED, 4, need_before_greed)
+WXL_ENUM_END(wxl_loot_method)
+
+/// Why the local player is no longer in a group.
+WXL_ENUM(wxl_group_left_reason)
+WXL_ENUM_VALUE(wxl_group_left_reason, WXL_GROUP_REMOVED,   0, removed)   ///< it left or was removed: SMSG_GROUP_UNINVITE
+WXL_ENUM_VALUE(wxl_group_left_reason, WXL_GROUP_DISBANDED, 1, disbanded) ///< the group is gone: SMSG_GROUP_DESTROYED
+WXL_ENUM_END(wxl_group_left_reason)
+
+/// A step of a trade, as the server numbers it.
+WXL_ENUM(wxl_trade_status)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_BUSY,             0, busy)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_PROPOSED,         1, proposed)        ///< someone asks the player to trade
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_INITIATED,        2, initiated)       ///< the window opens
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_CANCELLED,        3, cancelled)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_ACCEPTED,         4, accepted)        ///< the other side accepted
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_ALREADY_TRADING,  5, already_trading)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_NOT_FOUND,        6, not_found)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_STATE_CHANGED,    7, state_changed)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_COMPLETE,         8, complete)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_UNACCEPTED,       9, unaccepted)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_TOO_FAR,         10, too_far)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_WRONG_FACTION,   11, wrong_faction)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_FAILED,          12, failed)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_CLOSED,          13, closed)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_IGNORED,         14, ignored)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_STUNNED,         15, stunned)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_TARGET_STUNNED,  16, target_stunned)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_DEAD,            17, dead)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_TARGET_DEAD,     18, target_dead)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_LOGGING_OUT,     19, logging_out)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_TARGET_LOGGING_OUT, 20, target_logging_out)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_RESTRICTED,      21, restricted)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_WRONG_REALM,     22, wrong_realm)
+WXL_ENUM_VALUE(wxl_trade_status, WXL_TRADE_NOT_ON_TAPLIST,  23, not_on_taplist)
+WXL_ENUM_END(wxl_trade_status)
+
+/// A window of the interface that opens on someone the player talks to.
+WXL_ENUM(wxl_window_kind)
+WXL_ENUM_VALUE(wxl_window_kind, WXL_WINDOW_GOSSIP,     0, gossip)
+WXL_ENUM_VALUE(wxl_window_kind, WXL_WINDOW_MERCHANT,   1, merchant)
+WXL_ENUM_VALUE(wxl_window_kind, WXL_WINDOW_TRAINER,    2, trainer)
+WXL_ENUM_VALUE(wxl_window_kind, WXL_WINDOW_BANK,       3, bank)
+WXL_ENUM_VALUE(wxl_window_kind, WXL_WINDOW_AUCTION,    4, auction)
+WXL_ENUM_VALUE(wxl_window_kind, WXL_WINDOW_MAIL,       5, mail)
+WXL_ENUM_VALUE(wxl_window_kind, WXL_WINDOW_TAXI,       6, taxi)
+WXL_ENUM_VALUE(wxl_window_kind, WXL_WINDOW_TRADE,      7, trade)
+WXL_ENUM_VALUE(wxl_window_kind, WXL_WINDOW_QUEST,      8, quest)
+WXL_ENUM_VALUE(wxl_window_kind, WXL_WINDOW_GUILD_BANK, 9, guild_bank)
+WXL_ENUM_VALUE(wxl_window_kind, WXL_WINDOW_STABLE,    10, stable)
+WXL_ENUM_VALUE(wxl_window_kind, WXL_WINDOW_PETITION,  11, petition)
+WXL_ENUM_VALUE(wxl_window_kind, WXL_WINDOW_TABARD,    12, tabard)
+WXL_ENUM_END(wxl_window_kind)
+
 #ifdef WXL_ENUM_DEFAULTED
     #undef WXL_ENUM
     #undef WXL_ENUM_DEFAULTED

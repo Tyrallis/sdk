@@ -240,6 +240,49 @@ namespace
         }
     };
 
+    /// The gameplay families: direct parameters, enums as their C types, answers through wxl::Answer.
+    struct GameplayLoot final : wxl::LootScript
+    {
+        wxl_loot_kind kind   = WXL_LOOT_CORPSE;
+        uint32_t      money  = 0;
+        int32_t       suffix = 0;
+        void OnLootOpened(wxl::Object, wxl_guid, wxl_loot_kind k, uint32_t m, uint32_t) override { kind = k, money = m; }
+        void OnLootSlot(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, int32_t property,
+                        wxl_loot_slot_type) override
+        {
+            suffix = property;
+        }
+    };
+
+    struct GameplayGroup final : wxl::GroupScript
+    {
+        std::string inviter;
+        void OnGroupInvite(std::string_view who, bool canAccept, wxl::Answer accept, wxl::Answer) override
+        {
+            inviter = std::string(who);
+            if (canAccept) accept.Set();
+        }
+    };
+
+    struct GameplaySocial final : wxl::SocialScript
+    {
+        wxl_window_kind window = WXL_WINDOW_GOSSIP;
+        void OnWindowOpened(wxl_window_kind kind, wxl::Object, wxl_guid) override { window = kind; }
+        void OnResurrectRequest(wxl::Object, wxl_guid, std::string_view, bool, wxl::Answer, wxl::Answer decline) override
+        {
+            decline.Set();
+        }
+    };
+
+    struct GameplayQuest final : wxl::QuestScript
+    {
+        uint32_t objective = 0, current = 0;
+        void OnQuestObjectiveChanged(uint32_t, uint32_t, uint32_t which, uint32_t, uint32_t now) override
+        {
+            objective = which, current = now;
+        }
+    };
+
     /// Sees what an earlier handler answered.
     struct LateNetScript final : wxl::NetScript
     {
@@ -665,6 +708,48 @@ int main()
 
         wxl::ScriptMgr::Add(&world);
         Check(host.LiveSubscriptions() == afterWorld, "a family subscribes again after Clear");
+        wxl::ScriptMgr::Clear();
+    }
+
+    Section("the gameplay families");
+    {
+        GameplayLoot   loot;
+        GameplayGroup  group;
+        GameplaySocial social;
+        GameplayQuest  quest;
+        wxl::ScriptMgr::Add(&loot);
+        wxl::ScriptMgr::Add(&group);
+        wxl::ScriptMgr::Add(&social);
+        wxl::ScriptMgr::Add(&quest);
+
+        wxl_loot_args opened{};
+        opened.kind = WXL_LOOT_SKINNING, opened.money = 7;
+        host.Raise(WXL_EV_LootOpened, &opened);
+        wxl_loot_slot_args slot{};
+        slot.random_property_id = -40;
+        host.Raise(WXL_EV_LootSlot, &slot);
+        Check(loot.kind == WXL_LOOT_SKINNING && loot.money == 7 && loot.suffix == -40,
+              "LootScript: the kind as wxl_loot_kind, a signed property as int32_t");
+
+        wxl_bool              accept = WXL_FALSE, decline = WXL_FALSE;
+        wxl_group_invite_args invite{wxl::Str("Jaina"), WXL_TRUE, &accept, &decline};
+        host.Raise(WXL_EV_GroupInvite, &invite);
+        Check(group.inviter == "Jaina" && accept == WXL_TRUE && decline == WXL_FALSE,
+              "GroupScript: OnGroupInvite answers through its accept");
+
+        wxl_window_args window{};
+        window.kind = WXL_WINDOW_TRAINER;
+        host.Raise(WXL_EV_WindowOpened, &window);
+        accept = decline = WXL_FALSE;
+        wxl_resurrect_request_args offer{};
+        offer.accept = &accept, offer.decline = &decline;
+        host.Raise(WXL_EV_ResurrectRequest, &offer);
+        Check(social.window == WXL_WINDOW_TRAINER && decline == WXL_TRUE && accept == WXL_FALSE,
+              "SocialScript: a window by kind, a resurrection declined");
+
+        const wxl_quest_objective_args moved{783, 0, 2, 4, 5};
+        host.Raise(WXL_EV_QuestObjectiveChanged, &moved);
+        Check(quest.objective == 2 && quest.current == 5, "QuestScript: the objective and its count");
         wxl::ScriptMgr::Clear();
     }
 
