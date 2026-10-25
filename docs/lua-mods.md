@@ -885,12 +885,19 @@ time you enter the world. `Run(text, name)` runs Lua text in the client's state,
 ### Hook points: `wxl.hook`
 
 A runtime can name points of the client a native mod may detour. Lua lists them; attaching one is
-for C++, since a detour is native code:
+for C++, since a detour is native code. Only the runtime for the original client has them: the
+recompiled client calls the platform from its own code and detours nothing, so there `wxl.hook` is
+absent and `Points()` answers `nil, "unsupported"`. Check the answer before you use it:
 
 **`examples/lua-services/init.lua`**
 
 ```lua
-    print(#wxl.hook.Points() .. " hook point(s) named")
+    local points, why = wxl.hook.Points()
+    if points then
+        print(#points .. " hook point(s) named")
+    else
+        print("no hook points on this runtime: " .. why)
+    end
 ```
 
 Each point is a table with its `name` and `signature`; `HasPoint(name)` asks for one.

@@ -41,8 +41,14 @@ registerForEvent("onInit", function()
     -- The client reads each database once, early: whether it has read this one already.
     print("Spell.dbc read already: " .. tostring(wxl.data.IsLoaded("Spell.dbc")))
 
-    -- The points this runtime names for a native hook.
-    print(#wxl.hook.Points() .. " hook point(s) named")
+    -- The points this runtime names for a native hook. The recompiled client has no detours, so
+    -- there the service is absent and the call answers nil and why.
+    local points, why = wxl.hook.Points()
+    if points then
+        print(#points .. " hook point(s) named")
+    else
+        print("no hook points on this runtime: " .. why)
+    end
 end)
 
 -- A function the client's own scripts can call, from an addon or from the chat box:
