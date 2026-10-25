@@ -1040,7 +1040,7 @@ step(function()
     result("Model:Attach on the head", hat:Attach(body, 11, 0) == true)
     result("Model:Parent is the player's model", hat:Parent() == body)
     -- Thousands of batches a frame: listened to for these two seconds only.
-    if wxl.runtime.Raises("RenderScript", "ModelBatchDrawn") then
+    if wxl.runtime.Raises("RenderScript", "OnModelBatchDrawn") then
         batchId = Observe("RenderScript", "OnModelBatchDrawn", function() batches = batches + 1 end)
     end
     wait(2)
