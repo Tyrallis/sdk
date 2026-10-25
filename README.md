@@ -265,6 +265,7 @@ examples/scout/    a worked example: the world, the client's Lua, the server tra
 examples/lua-hello/ the same in Lua: a folder, no build
 examples/lua-services/ a Lua mod using the services: files, a search path, databases, the
                    client's own script
+examples/memory-report/ a Lua mod that writes where the client's memory goes into a report
 tests/             the contract, the mod host, the shared runtime and wxl.lua, each against fakes
 ```
 

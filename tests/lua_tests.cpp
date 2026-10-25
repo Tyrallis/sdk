@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <initializer_list>
 #include <cstring>
 #include <filesystem>
@@ -86,6 +87,14 @@ namespace
         fs::create_directories(path.parent_path());
         std::ofstream stream(path, std::ios::binary);
         stream << text;
+    }
+
+    std::string ReadFile(const fs::path& path)
+    {
+        std::ifstream      stream(path, std::ios::binary);
+        std::ostringstream text;
+        text << stream.rdbuf();
+        return text.str();
     }
 
 #define WXL_TEST_STR_(x) #x
@@ -1312,6 +1321,70 @@ int main(int argc, char** argv)
 
         host.Shutdown();
         if (g_failures) sink.Dump();
+    }
+
+    Section("the memory-report example");
+    {
+        using wxltest::FakeFootprint;
+        using wxltest::FakeScript;
+
+        const fs::path mods   = MakeTree(scratch, "memory", binary, fs::path());
+        const fs::path folder = mods / "memory-report";
+        fs::copy(fs::path(example).parent_path() / "memory-report", folder, fs::copy_options::recursive);
+        FakeScript::Live() = WXL_SCRIPT_CONTEXT_GAME;
+        FakeScript::Functions().clear();
+        FakeFootprint::Running()   = false;
+        FakeFootprint::Snapshots() = 0;
+        FakeFootprint::Reports().clear();
+
+        CaptureSink sink;
+        HostConfig  config = Config(mods, sink);
+        config.services.push_back(PublishedService{WXL_SCRIPT_SERVICE, WXL_SCRIPT_SERVICE_VERSION, FakeScript::Table()});
+        config.services.push_back(
+            PublishedService{WXL_FOOTPRINT_SERVICE, WXL_FOOTPRINT_SERVICE_VERSION, FakeFootprint::Table()});
+        ModHost host(std::move(config));
+        host.LoadAll();
+        host.Stage(WXL_STAGE_READY);
+        const wxl_lua_api* api =
+            static_cast<const wxl_lua_api*>(host.Table()->get_service(WXL_LUA_SERVICE, WXL_LUA_SERVICE_VERSION));
+
+        Check(FakeFootprint::Running() && FakeFootprint::Threshold() == 256ull * 1024 * 1024,
+              "the example starts accounting at load and watches the address space");
+
+        wxl_script_call asked = ScriptCallOf({});
+        Check(FakeScript::Invoke("MemoryReport", asked) && asked.results.size() == 1 &&
+                  std::string(asked.results[0].as.string.data, asked.results[0].as.string.size) == "memory-report.txt",
+              "MemoryReport() writes a report and answers its name");
+        const std::string text = ReadFile(folder / "memory-report.txt");
+        Check(FakeFootprint::Snapshots() == 1 &&
+                  text.find("700.0 MB   in 3000 blocks; the largest is      90.0 MB") != std::string::npos &&
+                  text.find("Storm by source file: 2 files") != std::string::npos &&
+                  text.find("Data\\patch-3.MPQ") != std::string::npos &&
+                  text.find("DBFilesClient\\Spell.dbc") != std::string::npos,
+              "the report holds the address space, Storm by source file, the archives and the databases");
+        Check(text.find("wxl.memory-report/heap") != std::string::npos &&
+                  FakeFootprint::Reports().count("wxl.memory-report/heap"),
+              "and the mod's own Lua heap, which Snapshot reports for every Lua mod");
+        Check(ReadFile(folder / "memory-sources.csv").find("new,524288000,1000000,545259520,9000000") !=
+                  std::string::npos,
+              "memory-sources.csv lists every source file");
+        Check(api && api->poll() == 0, "writing its reports into its own folder does not reload the mod");
+
+        const wxl_memory_pressure_args pressure{80ull << 20, 600ull << 20, 2700ull << 20, 256ull << 20};
+        host.Raise(WXL_EV_MemoryPressure, &pressure);
+        Check(sink.Has("[wxl.memory-report] address space low: the largest free block is      80.0 MB") &&
+                  FakeFootprint::Snapshots() == 2,
+              "MemoryPressure is logged and brings a report of its own");
+
+        host.Stage(WXL_STAGE_SHUTDOWN);
+        const std::string history = ReadFile(folder / "memory-history.csv");
+        size_t            rows    = 0;
+        for (char c : history) rows += c == '\n';
+        Check(rows == 4 && history.find("the client is closing") != std::string::npos && !FakeFootprint::Running(),
+              "the last report is written at exit, one line of history per report, and accounting stops");
+        if (const char* keep = std::getenv("WXL_MEMORY_REPORT_OUT"))
+            for (const char* name : {"memory-report.txt", "memory-sources.csv", "memory-history.csv"})
+                fs::copy_file(folder / name, fs::path(keep) / name, fs::copy_options::overwrite_existing);
     }
 
     Section("handler order across reloads");
