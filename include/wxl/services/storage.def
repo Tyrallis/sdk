@@ -26,10 +26,12 @@ WXL_API(storage, read_at, ReadAt, read_bytes, (File file, u64 offset), generated
         "Reads at an offset: as many bytes as asked, or what is left.")
 WXL_API_CLOSE(storage, close, Close, none, File, collected,
               "Closes the file; one the mod lets go of is closed for it.")
-WXL_API(storage, add_search_path, AddSearchPath, result, (str directory, i32 priority), generated, generated,
-        "Adds a folder inside the client's folder to the files searched: the higher priority wins a "
-        "name, the client's own data is 0.")
+WXL_API(storage, add_search_path, AddSearchPath, result, (str directory, i32 priority), shim, generated,
+        "Adds a folder inside the client's folder to the files searched, until the mod removes it or "
+        "goes: the higher priority wins a name, the client's own data is 0.")
 WXL_API(storage, mount_archive, MountArchive, result, (str path, i32 priority), generated, generated,
         "Adds an archive to the files searched, at a priority as AddSearchPath's.")
 WXL_API(storage, find, Find, list<wxl_str>, (str pattern), generated, by_hand,
         "The names matching a pattern, * standing for any run of characters, each once.")
+WXL_API(storage, remove_search_path, RemoveSearchPath, result, (str directory), shim, generated,
+        "Takes a folder the mod added back out of the files searched; not_found for one it did not add.")

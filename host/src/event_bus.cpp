@@ -207,7 +207,9 @@ namespace wxl::host
         Reclaim();
     }
 
-    void EventBus::Emit(wxl_event event, const void* args)
+    void EventBus::Emit(wxl_event event, const void* args) { EmitTo(event, args, nullptr, nullptr); }
+
+    void EventBus::EmitTo(wxl_event event, const void* args, AcceptFn accept, void* user)
     {
         if (!Known(event)) return;
 
@@ -239,6 +241,7 @@ namespace wxl::host
                 for (Entry* entry : *list)
                 {
                     if (!entry->live.load(std::memory_order_acquire)) continue;
+                    if (accept && !accept(user, entry->owner)) continue;
 
                     HandlerCall    call{entry->handler, entry->user, args, event, logger_};
                     const uint32_t owner = entry->owner;

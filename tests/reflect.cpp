@@ -539,7 +539,7 @@ int main()
             if (std::strcmp(rows[i].member, "add_search_path") == 0) add = &rows[i];
         Check(add && std::strcmp(add->name, "AddSearchPath") == 0 && std::strcmp(add->answer, "result") == 0 &&
                   std::strcmp(add->params, "(str directory, i32 priority)") == 0 &&
-                  add->lua == wxl::api::Lua::generated && add->cxx == wxl::api::Cxx::generated &&
+                  add->lua == wxl::api::Lua::shim && add->cxx == wxl::api::Cxx::generated &&
                   add->offset == offsetof(wxl_storage_api, add_search_path),
               "a row reads back as written: its name, kinds, parameter names and columns");
 

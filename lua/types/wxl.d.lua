@@ -1721,7 +1721,7 @@ function Object:Guild() end
 local File = {}
 
 ---Reads at an offset: as many bytes as asked, or what is left.
----@param offset? integer 0 when left out
+---@param offset integer
 ---@param count integer how many bytes, at most
 ---@return string|nil bytes
 ---@return string|nil reason
@@ -1808,16 +1808,18 @@ function storage.Read(path) end
 ---@return string|nil reason
 function storage.Open(path) end
 
----Adds a folder inside the client's folder to the files searched: the higher priority wins a name, the client's own data is 0.
+---Adds a folder inside the client's folder to the files searched, for this mod: the higher
+---priority wins a name, the client's own data is 0. It stays until RemoveSearchPath, or until
+---the mod is disabled, reloads or unloads; adding it again changes its priority.
 ---@param directory string
----@param priority? integer 0 when left out
+---@param priority integer
 ---@return true|nil ok
 ---@return string|nil reason
 function storage.AddSearchPath(directory, priority) end
 
 ---Adds an archive to the files searched, at a priority as AddSearchPath's.
 ---@param path string
----@param priority? integer 0 when left out
+---@param priority integer
 ---@return true|nil ok
 ---@return string|nil reason
 function storage.MountArchive(path, priority) end
@@ -1827,6 +1829,13 @@ function storage.MountArchive(path, priority) end
 ---@return string[]|nil
 ---@return string|nil reason
 function storage.Find(pattern) end
+
+---Takes a folder this mod added back out of the files searched; nil, "not_found" for one
+---it did not add.
+---@param directory string
+---@return true|nil ok
+---@return string|nil reason
+function storage.RemoveSearchPath(directory) end
 
 ---wxl.data. The client's databases, served from a mod's own files before the client reads them.
 ---@class wxl.data
@@ -1879,7 +1888,7 @@ local patch = {}
 
 ---Writes the replacement bytes at an address that holds the expected ones; refused otherwise.
 ---@param name string
----@param address? integer 0 when left out
+---@param address integer
 ---@param expected string the bytes, as a string
 ---@param replacement string the bytes, as a string
 ---@return wxl.Patch|nil
@@ -1887,13 +1896,13 @@ local patch = {}
 function patch.Apply(name, address, expected, replacement) end
 
 ---Whether an address holds the expected bytes right now.
----@param address? integer 0 when left out
+---@param address integer
 ---@param expected string the bytes, as a string
 ---@return boolean|nil
 ---@return string|nil reason
 function patch.Matches(address, expected) end
 
----The address of a byte pattern in the image's read-only data, after an earlier one or from the start.
+---The address of a byte pattern in the image's read-only data, after an earlier one or, `after` left out (0), from the start.
 ---@param pattern string the bytes, as a string
 ---@param after? integer 0 when left out
 ---@return integer|nil address
@@ -1941,11 +1950,18 @@ function object.InView(type) end
 function object.Fields(objects, name, element) end
 
 ---Asks for ObjectScript's OnObjectFieldChanged whenever the field changes on an object of
----the type (nil for every object), from now on, for every mod observing it.
+---the type (nil for every object), for this mod, until Unwatch or until the mod closes.
 ---@param type wxl.ObjectType|"Object"|nil
 ---@param name wxl.FieldName|string
 ---@return boolean|nil watched, string|nil reason
 function object.Watch(type, name) end
+
+---Gives back what Watch(type, name) took: this mod's handlers no longer receive the
+---field's changes. True also for a field the mod did not watch.
+---@param type wxl.ObjectType|"Object"|nil
+---@param name wxl.FieldName|string
+---@return boolean|nil done, string|nil reason
+function object.Unwatch(type, name) end
 
 ---@class wxl
 ---@field mod wxl.ModInfo this mod, from its manifest or its folder

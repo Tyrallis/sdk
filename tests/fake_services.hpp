@@ -264,6 +264,19 @@ namespace wxltest
             return WXL_OK;
         }
 
+        /// unwatch_field takes back the first watch it matches, as a runtime does.
+        static wxl_result WXL_CALL UnwatchField(uint32_t type, uint32_t first, uint32_t count)
+        {
+            std::vector<Watch>& watches = Watches();
+            for (auto it = watches.begin(); it != watches.end(); ++it)
+            {
+                if (it->type != type || it->first != first || it->count != count) continue;
+                watches.erase(it);
+                break;
+            }
+            return WXL_OK;
+        }
+
         static const wxl_object_api* Table()
         {
             static wxl_object_api api = [] {
@@ -289,6 +302,7 @@ namespace wxltest
                 t.read_field_many = &ReadFieldMany;
                 t.write_fields    = &WriteFields;
                 t.watch_field     = &WatchField;
+                t.unwatch_field   = &UnwatchField;
                 return t;
             }();
             return &api;
@@ -705,6 +719,18 @@ namespace wxltest
             return WXL_OK;
         }
 
+        static wxl_result WXL_CALL RemoveSearchPath(wxl_str directory)
+        {
+            const std::string folder = Native(Key(directory));
+            for (auto it = SearchPaths().begin(); it != SearchPaths().end(); ++it)
+                if (it->first == folder)
+                {
+                    SearchPaths().erase(it);
+                    return WXL_OK;
+                }
+            return WXL_E_NOT_FOUND;
+        }
+
         static wxl_result WXL_CALL MountArchive(wxl_str, int32_t) { return WXL_OK; }
 
         static uint32_t WXL_CALL Find(wxl_str pattern, wxl_str* out, uint32_t capacity)
@@ -734,6 +760,7 @@ namespace wxltest
                 t.close           = &Close;
                 t.add_search_path = &AddSearchPath;
                 t.mount_archive   = &MountArchive;
+                t.remove_search_path = &RemoveSearchPath;
                 t.find            = &Find;
                 return t;
             }();

@@ -453,9 +453,19 @@ print("open missing " .. show(s.Open("nope")))
 print("find " .. show(#s.Find("Interface\\*"), #s.Find("nothing*"), s.Find("Interface\\h*")[1]))
 print("search " .. show(s.AddSearchPath(wxl.mod.directory .. "\\assets", 1), s.Read("Interface\\probe.txt"),
                         s.Read("Interface\\hello.txt"), s.AddSearchPath(wxl.mod.directory .. "\\none", 1)))
-print("mount " .. show(s.MountArchive("Data\\x.MPQ")))
+print("mount " .. show(s.MountArchive("Data\\x.MPQ", 1)))
 print("no path " .. show(pcall(s.Exists)))
+print("no priority " .. show(pcall(s.MountArchive, "Data\\x.MPQ")))
+print("no folder priority " .. show(pcall(s.AddSearchPath, wxl.mod.directory .. "\\assets")))
 print("bad priority " .. show(pcall(s.AddSearchPath, "x", 1.5)))
+local g = s.Open("Interface\\hello.txt")
+print("no offset " .. show(pcall(g.ReadAt, g)))
+print("no count " .. show(pcall(g.ReadAt, g, 0)))
+g:Close()
+print("remove " .. show(s.RemoveSearchPath(wxl.mod.directory .. "\\assets"), s.Read("Interface\\probe.txt"),
+                        s.RemoveSearchPath(wxl.mod.directory .. "\\assets")))
+print("remove other " .. show(s.RemoveSearchPath(wxl.mod.directory .. "\\..\\lua-services\\assets")))
+s.AddSearchPath(wxl.mod.directory .. "/assets/", 1)
 
 print("data " .. show(d.IsLoaded("Spell.dbc"), d.ServeTable("Item.dbc", "Interface\\hello.txt"), d.ServedFrom("Item.dbc"),
                       select(2, d.ServeTable("Item.dbc", "Interface\\hello.txt")), d.RestoreTable("Item.dbc"),
@@ -478,6 +488,7 @@ local patch = p.Apply("probe nop", 0x1000, "\144\144", "\204\204")
 print("patch " .. show(tostring(patch):match("^Patch") ~= nil, p.Matches(0x1000, "\204\204"), p.Find("\204"), p.Find("\204", 0x1000),
                        p.Apply("again", 0x1000, "\144\144", "\1\1")))
 print("patch sizes " .. show(pcall(p.Apply, "x", 0x1000, "\204", "\1\1")))
+print("no address " .. show(pcall(p.Matches, nil, "\204")))
 p.Apply("second", 0x1004, "\144", "\195")
 )lua";
 
@@ -545,12 +556,31 @@ registerForEvent("onInit", function()
     print("many " .. tostring(many[1]) .. " " .. tostring(many[2]) .. " " .. tostring(many[3]))
     print("watch " .. tostring(wxl.object.Watch("Unit", "Health")) .. " " .. tostring(wxl.object.Watch(nil, "Entry")))
     print("watch refused " .. tostring(select(2, wxl.object.Watch("Unit", "UNIT_FIELD_CREATEDBY"))))
+    wxl.object.Watch("Unit", "HoverHeight")
+    wxl.object.Watch("Player", "Target")
+    wxl.object.Watch("Player", "Bytes0")
+    print("watch again " .. tostring(wxl.object.Watch("Unit", "Health")))
 end)
 
 Observe("ObjectScript", "OnObjectFieldChanged", function(object, kind, field, count, old, new)
     local shown = function(v) return type(v) == "table" and table.concat(v, ",") or tostring(v) end
     print("changed " .. object:Name() .. " " .. kind .. " " .. field .. " " .. count .. " " ..
           shown(old) .. " -> " .. shown(new))
+    if field == wxl.field.Unit.Health then
+        print("unwatch " .. tostring(wxl.object.Unwatch("Unit", "Health")) .. " " ..
+              tostring(wxl.object.Unwatch("Unit", "Health")))
+    end
+end)
+)lua";
+
+    // A second mod, which watches what the first does not.
+    constexpr const char* kOtherFields = R"lua(
+registerForEvent("onInit", function()
+    wxl.object.Watch("Unit", "MaxHealth")
+end)
+
+Observe("ObjectScript", "OnObjectFieldChanged", function(object, kind, field)
+    print("other changed " .. field)
 end)
 )lua";
 } // namespace
@@ -1056,8 +1086,28 @@ int main(int argc, char** argv)
         Check(sink.Has("[wxl.services] find 3 0 Interface\\hello.txt"), "find answers an array of names");
         Check(sink.Has("[wxl.services] search true from disk hello, overridden nil not_found"),
               "a folder added to the search path serves its files, ahead of the client's at a priority above 0");
-        Check(sink.Has("[wxl.services] mount true"), "a number left out is 0");
-        Check(sink.Has("[wxl.services] no path false ") && sink.Has("bad argument #1"), "a missing argument is an error");
+        Check(sink.Has("[wxl.services] mount true"), "an archive mounts");
+        Check(sink.Has("[wxl.services] no path false ") &&
+                  sink.Has("wxl.storage.Exists: 'path' (argument 1) is missing; it takes a string"),
+              "a missing argument is an error naming the function and the parameter");
+        Check(sink.Has("[wxl.services] no priority false ") &&
+                  sink.Has("wxl.storage.MountArchive: 'priority' (argument 2) is missing; it takes a whole number"),
+              "a whole number left out is an error, not 0");
+        Check(sink.Has("[wxl.services] no folder priority false ") &&
+                  sink.Has("wxl.storage.AddSearchPath: 'priority' (argument 2) is missing; it takes a whole number"),
+              "AddSearchPath's priority too");
+        Check(sink.Has("[wxl.services] no offset false ") &&
+                  sink.Has("File:ReadAt: 'offset' (argument 2) is missing; it takes a whole number") &&
+                  sink.Has("[wxl.services] no count false ") &&
+                  sink.Has("File:ReadAt: 'count' (argument 3) is missing; it takes how many bytes to read, a whole number"),
+              "a method names itself on its resource");
+        Check(sink.Has("[wxl.services] no address false ") &&
+                  sink.Has("wxl.patch.Matches: 'address' (argument 1) is missing; it takes a whole number"),
+              "nil is a missing argument too");
+        Check(sink.Has("[wxl.services] remove true nil nil not_found"),
+              "a folder removed serves nothing, and removing it again finds nothing");
+        Check(sink.Has("[wxl.services] remove other nil not_found"),
+              "a mod cannot remove a folder another mod added");
         Check(sink.Has("[wxl.services] bad priority false ") && sink.Has("a whole number from -2147483648 to 2147483647"),
               "a number that is not whole, or out of range, is an error that says what is wanted");
         Check(sink.Has("[wxl.services] data true true Interface\\hello.txt failed true true"),
@@ -1147,6 +1197,15 @@ int main(int argc, char** argv)
         Check(!FakeScript::Functions().count("ProbeGlue") && FakeScript::Functions().count("ProbeAdd"),
               "and only in those");
 
+        const auto searched = [](const fs::path& folder) {
+            std::error_code ignored;
+            for (const auto& known : FakeStorage::SearchPaths())
+                if (fs::equivalent(fs::path(known.first), folder, ignored)) return true;
+            return false;
+        };
+        Check(searched(mods / "services" / "assets") && searched(mods / "lua-services" / "assets"),
+              "each mod's folder is searched, however it was spelled");
+
         // A reload: the patches go back, newest first; the functions stay bound and reach the new state.
         const size_t restored = FakePatch::RestoreOrder().size();
         Check(api && api->reload("wxl.services") == WXL_OK, "the mod reloads");
@@ -1165,11 +1224,14 @@ int main(int argc, char** argv)
         Check(api && api->reload("wxl.services") == WXL_OK && FakePatch::Live().empty() &&
                   FakePatch::Image() == std::vector<uint8_t>(16, 0x90),
               "a reload that fails to load still gives the patches back, and the image is as it was");
+        Check(!searched(mods / "services" / "assets") && searched(mods / "lua-services" / "assets"),
+              "and its folder leaves the search; the other mod's stays");
         wxl_script_call after = ScriptCallOf({});
         Check(FakeScript::Invoke("ProbeAdd", after) && Contains(after.error, "the Lua mod that registered it is not running"),
               "a function whose mod is not loaded fails the call, saying so");
 
         host.Shutdown();
+        Check(FakeStorage::SearchPaths().empty(), "the mods' folders leave the search as they close");
         // What the context holds points into wxl.lua, which is unloaded now.
         FakeScript::Functions().clear();
         FakeStorage::Files().erase("Interface\\FrameXML\\FrameXML.toc");
@@ -1342,6 +1404,8 @@ int main(int argc, char** argv)
         const fs::path mods = MakeTree(scratch, "fields", binary, fs::path());
         WriteFile(mods / "fields" / "mod.json", LuaManifest("wxl.fields"));
         WriteFile(mods / "fields" / "init.lua", kFields);
+        WriteFile(mods / "other" / "mod.json", LuaManifest("wxl.other"));
+        WriteFile(mods / "other" / "init.lua", kOtherFields);
 
         CaptureSink sink;
         ModHost     host(Config(mods, sink));
@@ -1368,10 +1432,12 @@ int main(int argc, char** argv)
         Check(sink.Has("[wxl.fields] many 0 77 false"),
               "wxl.object.Fields reads a list in one call, false where an object has no such field");
         Check(sink.Has("[wxl.fields] watch true true"), "Watch asks the runtime");
-        Check(FakeObjects::Watches().size() == 2 && FakeObjects::Watches()[0].type == WXL_OBJECT_UNIT &&
+        Check(FakeObjects::Watches().size() == 6 && FakeObjects::Watches()[0].type == WXL_OBJECT_UNIT &&
                   FakeObjects::Watches()[0].first == 0x18 && FakeObjects::Watches()[0].count == 1 &&
                   FakeObjects::Watches()[1].type == WXL_OBJECT_UNKNOWN && FakeObjects::Watches()[1].first == 3,
               "with the type and the field's dwords; nil is every object");
+        Check(sink.Has("[wxl.fields] watch again true"),
+              "asking again for a field the mod watches answers true and asks nothing more");
         Check(sink.Has("[wxl.fields] watch refused the client does not see UNIT_FIELD_CREATEDBY change: it keeps no copy of it from before an update"),
               "a field the client does not see change is refused, saying why");
 
@@ -1380,7 +1446,7 @@ int main(int argc, char** argv)
         std::memcpy(&oldBits, &before, 4);
         std::memcpy(&newBits, &after, 4);
         const wxl_object_field_args health{FakeObjects::kBoar, WXL_OBJECT_UNIT, 0x18, 1, 90, 77};
-        const wxl_object_field_args radius{FakeObjects::kBoar, WXL_OBJECT_UNIT, 0x41, 1, oldBits, newBits};
+        const wxl_object_field_args radius{FakeObjects::kBoar, WXL_OBJECT_UNIT, 0x92, 1, oldBits, newBits};
         const wxl_object_field_args target{FakeObjects::kPlayer, WXL_OBJECT_PLAYER, 0x12, 2, 0, 0xF130000000001234ull};
         const wxl_object_field_args bytes{FakeObjects::kPlayer, WXL_OBJECT_PLAYER, 0x17, 1, 0x01000201u, 0x04000201u};
         host.Raise(WXL_EV_ObjectFieldChanged, &health);
@@ -1388,12 +1454,23 @@ int main(int argc, char** argv)
         host.Raise(WXL_EV_ObjectFieldChanged, &target);
         host.Raise(WXL_EV_ObjectFieldChanged, &bytes);
         Check(sink.Has("[wxl.fields] changed Boar Unit 24 1 90 -> 77"), "OnObjectFieldChanged hands an integer as a number");
-        Check(sink.Has("[wxl.fields] changed Boar Unit 65 1 1.5 -> 2"), "a float as a number");
+        Check(sink.Has("[wxl.fields] changed Boar Unit 146 1 1.5 -> 2"), "a float as a number");
         Check(sink.Has("[wxl.fields] changed Thorgrim Player 18 2 0x0000000000000000 -> 0xF130000000001234"),
               "a guid as its string, nothing lost");
         Check(sink.Has("[wxl.fields] changed Thorgrim Player 23 1 1,2,0,1 -> 1,2,0,4"), "bytes as a table");
+        Check(!sink.Has("[wxl.other] other changed"), "a mod receives none of the changes another mod watches");
+
+        Check(sink.Has("[wxl.fields] unwatch true true") && FakeObjects::Watches().size() == 5,
+              "Unwatch gives the field back, once, and again is no mistake");
+        const wxl_object_field_args maxHealth{FakeObjects::kBoar, WXL_OBJECT_UNIT, 0x20, 1, 120, 100};
+        host.Raise(WXL_EV_ObjectFieldChanged, &health);
+        host.Raise(WXL_EV_ObjectFieldChanged, &maxHealth);
+        Check(sink.Count("[wxl.fields] changed Boar Unit 24") == 1, "a field given back no longer reaches the mod");
+        Check(sink.Has("[wxl.other] other changed 32") && !sink.Has("[wxl.fields] changed Boar Unit 32"),
+              "and each mod receives what it watches");
 
         host.Shutdown();
+        Check(FakeObjects::Watches().empty(), "the mods' watches are given back when they close");
         if (g_failures) sink.Dump();
     }
 

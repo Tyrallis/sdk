@@ -3,10 +3,15 @@
 
 #include "Shims.hpp"
 
+#include <algorithm>
+#include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "ScriptMod.hpp"
@@ -15,6 +20,7 @@
 #include "wxl/sdk.hpp"
 #include "wxl/services/rows.hpp"
 #include "wxl/services/script.h"
+#include "wxl/services/storage.h"
 
 namespace wxl::lua::shims
 {
@@ -314,13 +320,123 @@ namespace wxl::lua::shims
             lua_pushboolean(L, 1);
             return 1;
         }
+
+        // --- wxl.storage: the folders each mod adds -----------------------------------------
+        //
+        // The host sees every folder a Lua mod adds as wxl.lua's. Which mod added it is kept
+        // here, so that a mod removes only its own and its folders go when it does; a folder two
+        // mods add stays until the last of them lets it go.
+
+        struct Folder
+        {
+            std::string             key;       ///< the folder, absolute, lower case, backslashes
+            std::string             directory; ///< as the first mod gave it
+            std::vector<ScriptMod*> holders;
+        };
+
+        std::vector<Folder> g_folders;
+
+        const wxl_storage_api* Storage() { return wxl::api::Table<wxl_storage_api>(); }
+
+        /// One folder however it is spelled: absolute against the current directory, which is
+        /// the client's folder, as the runtime reads it.
+        std::string FolderKey(const std::string& directory)
+        {
+            std::error_code       ignored;
+            std::filesystem::path path = std::filesystem::absolute(std::filesystem::u8path(directory), ignored);
+            std::string           key  = path.lexically_normal().u8string();
+            for (char& c : key) c = c == '/' ? '\\' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            while (key.size() > 3 && key.back() == '\\') key.pop_back();
+            return key;
+        }
+
+        /// The string at an argument the script may not leave out.
+        std::string CheckDirectory(lua_State* L, const char* function)
+        {
+            if (lua_isnoneornil(L, 1))
+                luaL_error(L, "wxl.storage.%s: 'directory' (argument 1) is missing; it takes a string", function);
+            size_t      size = 0;
+            const char* text = luaL_checklstring(L, 1, &size);
+            return std::string(text, size);
+        }
+
+        /// Takes a mod off a folder; the runtime lets the folder go with its last holder.
+        void LetGo(size_t index, ScriptMod& mod)
+        {
+            Folder& folder = g_folders[index];
+            folder.holders.erase(std::remove(folder.holders.begin(), folder.holders.end(), &mod), folder.holders.end());
+            if (!folder.holders.empty()) return;
+            const wxl_storage_api* api = Storage();
+            if (api && wxl::detail::Carries(api, &wxl_storage_api::remove_search_path))
+                api->remove_search_path(Str(folder.directory));
+            g_folders.erase(g_folders.begin() + static_cast<std::ptrdiff_t>(index));
+        }
+
+        int L_AddSearchPath(lua_State* L)
+        {
+            ScriptMod&        mod       = Self(L);
+            const std::string directory = CheckDirectory(L, "AddSearchPath");
+            if (lua_isnoneornil(L, 2))
+                return luaL_error(L, "wxl.storage.AddSearchPath: 'priority' (argument 2) is missing; it takes a "
+                                     "whole number");
+            const lua_Number priority = luaL_checknumber(L, 2);
+            if (std::floor(priority) != priority || priority < INT32_MIN || priority > INT32_MAX)
+                return luaL_argerror(L, 2, "a whole number from -2147483648 to 2147483647");
+
+            const wxl_storage_api* api = Storage();
+            if (!api || !wxl::detail::Carries(api, &wxl_storage_api::add_search_path))
+                return PushResultFailure(L, WXL_E_UNSUPPORTED);
+            const wxl_result result = api->add_search_path(Str(directory), static_cast<int32_t>(priority));
+            if (result != WXL_OK) return PushResultFailure(L, result);
+
+            const std::string key   = FolderKey(directory);
+            const auto        known = std::find_if(g_folders.begin(), g_folders.end(),
+                                                   [&](const Folder& folder) { return folder.key == key; });
+            if (known == g_folders.end())
+                g_folders.push_back(Folder{key, directory, {&mod}});
+            else if (std::find(known->holders.begin(), known->holders.end(), &mod) == known->holders.end())
+                known->holders.push_back(&mod);
+            lua_pushboolean(L, 1);
+            return 1;
+        }
+
+        int L_RemoveSearchPath(lua_State* L)
+        {
+            ScriptMod&        mod       = Self(L);
+            const std::string directory = CheckDirectory(L, "RemoveSearchPath");
+            const wxl_storage_api* api = Storage();
+            if (!api || !wxl::detail::Carries(api, &wxl_storage_api::remove_search_path))
+                return PushResultFailure(L, WXL_E_UNSUPPORTED);
+
+            const std::string key = FolderKey(directory);
+            for (size_t i = 0; i < g_folders.size(); ++i)
+            {
+                const Folder& folder = g_folders[i];
+                if (folder.key != key ||
+                    std::find(folder.holders.begin(), folder.holders.end(), &mod) == folder.holders.end())
+                    continue;
+                LetGo(i, mod);
+                lua_pushboolean(L, 1);
+                return 1;
+            }
+            return PushResultFailure(L, WXL_E_NOT_FOUND);
+        }
     } // namespace
 
     lua_CFunction Find(std::string_view service, std::string_view name)
     {
         if (service == "script" && name == "RegisterFunction") return &L_RegisterFunction;
         if (service == "script" && name == "RegisterEvent") return &L_RegisterEvent;
+        if (service == "storage" && name == "AddSearchPath") return &L_AddSearchPath;
+        if (service == "storage" && name == "RemoveSearchPath") return &L_RemoveSearchPath;
         return nullptr;
+    }
+
+    void ReleaseFolders(ScriptMod& mod)
+    {
+        for (size_t i = g_folders.size(); i-- > 0;)
+            if (std::find(g_folders[i].holders.begin(), g_folders[i].holders.end(), &mod) != g_folders[i].holders.end())
+                LetGo(i, mod);
     }
 
     void Start()
@@ -343,6 +459,7 @@ namespace wxl::lua::shims
 
     void Forget(ScriptMod& mod)
     {
+        ReleaseFolders(mod);
         // The state closes right after: its references go with it, nothing to release here.
         for (Function& function : g_functions)
         {

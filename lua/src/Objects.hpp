@@ -8,8 +8,12 @@
 #ifndef WXL_LUA_OBJECTS_HPP
 #define WXL_LUA_OBJECTS_HPP
 
+#include <cstdint>
+#include <vector>
+
 #include "Lua.hpp"
 #include "wxl/abi.h"
+#include "wxl/events.h"
 
 namespace wxl::lua
 {
@@ -27,8 +31,43 @@ namespace wxl::lua
     /// The handle of the object userdata at an index; raises a Lua error for anything else.
     wxl_handle CheckObject(lua_State* L, int index);
 
-    /// Pushes the `wxl.object` table: LocalPlayer, FromGuid, InView, Fields, Watch.
-    void PushObjectModule(lua_State* L);
+    /**
+     * @brief The fields one Lua mod watches, through its wxl.object.Watch.
+     *
+     * The host knows wxl.lua, not the Lua mods in it: each watch_field call is wxl.lua's, and
+     * this keeps which mod asked, so that a mod receives ObjectFieldChanged for its own fields
+     * only and gives them back when it closes. One watch per field and type: asking again for
+     * one the mod watches changes nothing.
+     */
+    class FieldWatches
+    {
+    public:
+        FieldWatches() = default;
+        ~FieldWatches() { Release(); }
+
+        FieldWatches(const FieldWatches&)            = delete;
+        FieldWatches& operator=(const FieldWatches&) = delete;
+
+        /// Whether the mod watches the element an event carries, on that object's type.
+        bool Covers(const wxl_object_field_args& args) const;
+
+        /// Gives every watch back to the runtime: the mod closes, reloads or is disabled.
+        void Release();
+
+        /// One field the mod watches: the type it asked for, the kind and the field's dwords.
+        struct Entry
+        {
+            uint32_t        type;
+            wxl_object_type kind;
+            uint32_t        index;
+            uint32_t        size;
+        };
+        std::vector<Entry> entries;
+    };
+
+    /// Pushes the `wxl.object` table: LocalPlayer, FromGuid, InView, Fields, Watch, Unwatch; the
+    /// last two keep what they do in @p watches.
+    void PushObjectModule(lua_State* L, FieldWatches& watches);
 
     /// Pushes the `wxl.field` table: kind -> field name -> dword index, from update_fields.def.
     void PushFieldModule(lua_State* L);

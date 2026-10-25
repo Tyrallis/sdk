@@ -57,7 +57,13 @@ typedef struct wxl_storage_api
     // A mod that ships assets makes them findable here rather than by writing into the client's
     // own data folder. Higher priority wins a name collision; the client's own data is 0.
 
-    /// Adds a directory to the search path.
+    /**
+     * @brief Adds a directory to the search path, for the calling mod.
+     *
+     * The folder is the mod's: adding it again changes its priority, and it leaves the search
+     * when the mod removes it (remove_search_path) or goes -- disabled or unloaded. Another mod
+     * may add the same folder; each holds its own.
+     */
     wxl_result(WXL_CALL* add_search_path)(wxl_str directory, int32_t priority);
 
     /// Adds an archive to the search path.
@@ -73,6 +79,17 @@ typedef struct wxl_storage_api
      * @return how many matched, which may exceed @p capacity.
      */
     uint32_t(WXL_CALL* find)(wxl_str pattern, wxl_str* out, uint32_t capacity);
+
+    // --- appended in 0.1.10 -----------------------------------------------------------------
+
+    /**
+     * @brief Takes a folder the calling mod added back out of the search path.
+     *
+     * Named as add_search_path was given it, or by any spelling of the same folder. From here on
+     * no name is answered from it; a file opened from it already stays open. WXL_E_NOT_FOUND
+     * when the mod holds no such folder -- another mod's stays.
+     */
+    wxl_result(WXL_CALL* remove_search_path)(wxl_str directory);
 } wxl_storage_api;
 
 #ifdef __cplusplus

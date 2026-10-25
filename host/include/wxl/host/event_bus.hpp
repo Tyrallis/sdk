@@ -100,6 +100,14 @@ namespace wxl::host
 
         void Emit(wxl_event event, const void* args);
 
+        /// Whether a subscription's owner receives one dispatch.
+        using AcceptFn = bool (*)(void* user, uint32_t owner);
+
+        /// Dispatches to the subscriptions whose owner @p accept takes, in the same order as
+        /// Emit: an event that concerns some mods only (ObjectFieldChanged goes to the mods
+        /// watching the field). A null @p accept is Emit.
+        void EmitTo(wxl_event event, const void* args, AcceptFn accept, void* user);
+
         /**
          * @brief Waits until no other thread is inside a dispatch.
          *

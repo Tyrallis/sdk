@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "fake_host.hpp"
@@ -952,6 +953,25 @@ int main()
                   FakeObjects::Watches()[1].type == WXL_OBJECT_PLAYER && FakeObjects::Watches()[1].count == 2,
               "Watch asks for the field's kind, or the type named, over the field's dwords");
         Check(objects.Watch(wxl::field::Unit::CreatedBy) == WXL_E_UNSUPPORTED, "and passes on a refusal");
+        Check(objects.Unwatch(wxl::field::Unit::Target, WXL_OBJECT_PLAYER) == WXL_OK &&
+                  FakeObjects::Watches().size() == 1,
+              "Unwatch gives one back, by the same field and type");
+        {
+            wxl::FieldWatch held(wxl::field::Unit::MaxHealth);
+            Check(held && held.Result() == WXL_OK && FakeObjects::Watches().size() == 2 &&
+                      FakeObjects::Watches()[1].first == wxl::field::Unit::MaxHealth.index,
+                  "a FieldWatch takes a watch when it is made");
+            wxl::FieldWatch moved = std::move(held);
+            Check(!held && moved && FakeObjects::Watches().size() == 2, "and moves without a second one");
+            wxl::FieldWatch refused(wxl::field::Unit::CreatedBy);
+            Check(!refused && refused.Result() == WXL_E_UNSUPPORTED, "a refused one holds nothing");
+            wxl::FieldWatch kept(wxl::field::Unit::Level);
+            kept.Release();
+            Check(!kept && FakeObjects::Watches().size() == 3, "Release lets a watch go without giving it back");
+        }
+        Check(FakeObjects::Watches().size() == 2 && FakeObjects::Watches()[1].first == wxl::field::Unit::Level.index,
+              "and one gives its watch back when it goes");
+        objects.Unwatch(wxl::field::Unit::Level);
 
         struct Changes final : wxl::ObjectScript
         {

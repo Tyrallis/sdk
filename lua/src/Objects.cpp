@@ -711,13 +711,25 @@ namespace wxl::lua
             return 1;
         }
 
+        FieldWatches& WatchesOf(lua_State* L)
+        {
+            return *static_cast<FieldWatches*>(lua_touserdata(L, lua_upvalueindex(1)));
+        }
+
         /// wxl.object.Watch(type, name): ObjectFieldChanged for that field on objects of that
-        /// type (nil for every object), from now on.
+        /// type (nil for every object), to this mod, from now on.
         int Watch(lua_State* L)
         {
-            const uint32_t        type = CheckType(L, 1, "Watch");
-            const field::Row&     row  = CheckField(L, type, 2);
-            const wxl_object_api* api  = Api();
+            FieldWatches&         watches = WatchesOf(L);
+            const uint32_t        type    = CheckType(L, 1, "Watch");
+            const field::Row&     row     = CheckField(L, type, 2);
+            for (const FieldWatches::Entry& entry : watches.entries)
+            {
+                if (entry.type != type || entry.kind != row.kind || entry.index != row.index) continue;
+                lua_pushboolean(L, 1);
+                return 1;
+            }
+            const wxl_object_api* api = Api();
             if (!api || !wxl::detail::Carries(api, &wxl_object_api::watch_field))
                 return PushFailure(L, WXL_E_UNSUPPORTED);
             const wxl_result result = api->watch_field(type, row.index, row.size);
@@ -735,6 +747,28 @@ namespace wxl::lua
                 return 2;
             }
             if (result != WXL_OK) return PushFailure(L, result);
+            watches.entries.push_back(FieldWatches::Entry{type, row.kind, row.index, row.size});
+            lua_pushboolean(L, 1);
+            return 1;
+        }
+
+        /// wxl.object.Unwatch(type, name): gives back what Watch(type, name) took; true, also
+        /// for a field the mod did not watch.
+        int Unwatch(lua_State* L)
+        {
+            FieldWatches&     watches = WatchesOf(L);
+            const uint32_t    type    = CheckType(L, 1, "Unwatch");
+            const field::Row& row     = CheckField(L, type, 2);
+            for (auto it = watches.entries.begin(); it != watches.entries.end(); ++it)
+            {
+                if (it->type != type || it->kind != row.kind || it->index != row.index) continue;
+                const wxl_object_api* api = Api();
+                if (!api || !wxl::detail::Carries(api, &wxl_object_api::unwatch_field))
+                    return PushFailure(L, WXL_E_UNSUPPORTED);
+                api->unwatch_field(type, row.index, row.size);
+                watches.entries.erase(it);
+                break;
+            }
             lua_pushboolean(L, 1);
             return 1;
         }
@@ -908,9 +942,29 @@ namespace wxl::lua
 
     wxl_handle CheckObject(lua_State* L, int index) { return CheckBox(L, index)->handle; }
 
-    void PushObjectModule(lua_State* L)
+    bool FieldWatches::Covers(const wxl_object_field_args& args) const
     {
-        lua_createtable(L, 0, 5);
+        const field::Kind* kind = field::OwnerOf(args.type, args.field);
+        if (!kind) return false;
+        for (const Entry& entry : entries)
+            if (entry.kind == kind->type && args.field >= entry.index && args.field < entry.index + entry.size &&
+                field::Carries(args.type, entry.type))
+                return true;
+        return false;
+    }
+
+    void FieldWatches::Release()
+    {
+        if (entries.empty()) return;
+        const wxl_object_api* api = Api();
+        if (api && wxl::detail::Carries(api, &wxl_object_api::unwatch_field))
+            for (const Entry& entry : entries) api->unwatch_field(entry.type, entry.index, entry.size);
+        entries.clear();
+    }
+
+    void PushObjectModule(lua_State* L, FieldWatches& watches)
+    {
+        lua_createtable(L, 0, 6);
         lua_pushcfunction(L, &LocalPlayer);
         lua_setfield(L, -2, "LocalPlayer");
         lua_pushcfunction(L, &FromGuid);
@@ -919,8 +973,12 @@ namespace wxl::lua
         lua_setfield(L, -2, "InView");
         lua_pushcfunction(L, &FieldsOf);
         lua_setfield(L, -2, "Fields");
-        lua_pushcfunction(L, &Watch);
+        lua_pushlightuserdata(L, &watches);
+        lua_pushcclosure(L, &Watch, 1);
         lua_setfield(L, -2, "Watch");
+        lua_pushlightuserdata(L, &watches);
+        lua_pushcclosure(L, &Unwatch, 1);
+        lua_setfield(L, -2, "Unwatch");
     }
 
     void PushFieldModule(lua_State* L)

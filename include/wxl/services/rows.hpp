@@ -17,8 +17,9 @@
 //   WXL_API(svc, member, Name, answer, (params), lua, cxx, doc)
 //       one member. `answer (params)` reads as a C++ function type over the kinds below, its
 //       parameters named for the reader: `out<u64> (str path)`. `lua` is `generated` (wxl.lua
-//       marshals it from the kinds), `shim` (it takes a callback, so a hand-written shim in
-//       sdk/lua/src/Shims.cpp serves it) or `native` (no script reaches it). `cxx` is
+//       marshals it from the kinds), `shim` (a hand-written shim in sdk/lua/src/Shims.cpp
+//       serves it: it takes a callback, or what it does is kept for each script mod and undone
+//       when the mod goes) or `native` (no script reaches it). `cxx` is
 //       `generated` (the facade's method is this row) or `by_hand` (the facade has an idiomatic
 //       one: RAII, a container, a template). `doc` says what it does in a line, for a script's
 //       editor definitions; empty for a native row.
@@ -43,6 +44,9 @@
 //   values (const wxl_value*, uint32_t count)  bytes const void*
 //   bytes_size uint32_t: the length of the bytes before it, which must all be as long
 //   a resource: its ctype
+//   opt<K> the C parameters of K, a parameter a script may leave out: it is then K's zero (0
+//       for a number), which the row's doc says. Every other parameter a script must give, and
+//       one left out is an error naming the function and the parameter.
 //
 // Answers: the C return, and the C parameters the answer appends after the row's own:
 //   none void  result wxl_result  boolean wxl_bool  u32  uptr  str wxl_str
@@ -100,6 +104,8 @@ namespace wxl::api
         struct values {};
         struct bytes {};
         struct bytes_size {};
+        template <class K>
+        struct opt {};
 
         // Answers.
         struct none {};
@@ -185,6 +191,11 @@ namespace wxl::api
     struct Param<R, std::enable_if_t<IsResource<R>::value>>
     {
         using C = List<typename R::type>;
+    };
+    template <class K>
+    struct Param<kind::opt<K>>
+    {
+        using C = typename Param<K>::C;
     };
 
     /// The C return of an answer kind, and the C parameters it appends.
@@ -560,6 +571,11 @@ namespace wxl::api
     {
         using type = bool;
         static wxl_bool ToC(bool value) { return value ? WXL_TRUE : WXL_FALSE; }
+    };
+    /// A parameter a script may leave out is an ordinary one in C++.
+    template <class K>
+    struct CxxParam<kind::opt<K>> : CxxParam<K>
+    {
     };
 
     /// The C++ answer of a kind: what a missing member answers, and what a call does.

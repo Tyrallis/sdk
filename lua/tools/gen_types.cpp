@@ -234,20 +234,23 @@ namespace
         return parameters;
     }
 
-    /// A parameter as lua-language-server reads it, or empty for one that is no argument.
+    /// A parameter as lua-language-server reads it, or empty for one that is no argument. An
+    /// opt<K> may be left out, and is K's zero then; every other one must be given.
     std::string LuaParam(const Parameter& parameter)
     {
-        const std::string& k = parameter.kind;
+        const std::string optional = Inside(parameter.kind, "opt");
+        const std::string& k       = optional.empty() ? parameter.kind : optional;
+        const std::string  name    = parameter.name + (optional.empty() ? "" : "?");
         if (k == "bytes_size") return std::string();
         if (k == "values") return "---@param ... nil|number|string|boolean the values it carries\n";
-        if (k == "str" || k == "cstr") return "---@param " + parameter.name + " string\n";
-        if (k == "bytes") return "---@param " + parameter.name + " string the bytes, as a string\n";
+        if (k == "str" || k == "cstr") return "---@param " + name + " string\n";
+        if (k == "bytes") return "---@param " + name + " string the bytes, as a string\n";
         if (k == "i32" || k == "u32" || k == "u64" || k == "uptr")
-            return "---@param " + parameter.name + "? integer 0 when left out\n";
-        if (k == "f64") return "---@param " + parameter.name + " number\n";
-        if (k == "boolean") return "---@param " + parameter.name + " boolean\n";
-        if (IsResourceKind(k)) return "---@param " + parameter.name + " wxl." + k + "\n";
-        return "---@param " + parameter.name + " any\n";
+            return "---@param " + name + " integer" + (optional.empty() ? "" : " 0 when left out") + "\n";
+        if (k == "f64") return "---@param " + name + " number\n";
+        if (k == "boolean") return "---@param " + name + " boolean\n";
+        if (IsResourceKind(k)) return "---@param " + name + " wxl." + k + "\n";
+        return "---@param " + name + " any\n";
     }
 
     std::string ArgumentName(const Parameter& parameter)
@@ -295,6 +298,18 @@ namespace
                    "---@param name string\n---@param context? wxl.ScriptContext\n"
                    "---@return true|nil ok\n---@return string|nil reason\n"
                    "function " + owner + ".RegisterEvent(name, context) end\n\n";
+        if (name == "AddSearchPath")
+            return "---Adds a folder inside the client's folder to the files searched, for this mod: the higher\n"
+                   "---priority wins a name, the client's own data is 0. It stays until RemoveSearchPath, or until\n"
+                   "---the mod is disabled, reloads or unloads; adding it again changes its priority.\n"
+                   "---@param directory string\n---@param priority integer\n"
+                   "---@return true|nil ok\n---@return string|nil reason\n"
+                   "function " + owner + ".AddSearchPath(directory, priority) end\n\n";
+        if (name == "RemoveSearchPath")
+            return "---Takes a folder this mod added back out of the files searched; nil, \"not_found\" for one\n"
+                   "---it did not add.\n"
+                   "---@param directory string\n---@return true|nil ok\n---@return string|nil reason\n"
+                   "function " + owner + ".RemoveSearchPath(directory) end\n\n";
         return std::string();
     }
 
@@ -628,9 +643,13 @@ namespace
                "---@param objects wxl.Object[]\n---@param name wxl.FieldName|string\n---@param element? integer\n"
                "---@return (wxl.FieldValue|false)[]\nfunction object.Fields(objects, name, element) end\n\n"
                "---Asks for ObjectScript's OnObjectFieldChanged whenever the field changes on an object of\n"
-               "---the type (nil for every object), from now on, for every mod observing it.\n"
+               "---the type (nil for every object), for this mod, until Unwatch or until the mod closes.\n"
                "---@param type wxl.ObjectType|\"Object\"|nil\n---@param name wxl.FieldName|string\n"
                "---@return boolean|nil watched, string|nil reason\nfunction object.Watch(type, name) end\n\n"
+               "---Gives back what Watch(type, name) took: this mod's handlers no longer receive the\n"
+               "---field's changes. True also for a field the mod did not watch.\n"
+               "---@param type wxl.ObjectType|\"Object\"|nil\n---@param name wxl.FieldName|string\n"
+               "---@return boolean|nil done, string|nil reason\nfunction object.Unwatch(type, name) end\n\n"
                "---@class wxl\n"
                "---@field mod wxl.ModInfo this mod, from its manifest or its folder\n"
                "---@field runtime wxl.RuntimeInfo the runtime that loaded wxl.lua\n"

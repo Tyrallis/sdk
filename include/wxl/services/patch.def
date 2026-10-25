@@ -24,5 +24,6 @@ WXL_API_CLOSE(patch, restore, Restore, result, Patch, unloaded,
               "Puts back the bytes the patch replaced; a mod's are put back, newest first, when it unloads.")
 WXL_API(patch, matches, Matches, boolean, (uptr address, bytes expected, bytes_size size), generated, by_hand,
         "Whether an address holds the expected bytes right now.")
-WXL_API(patch, find, Find, address, (bytes pattern, bytes_size size, uptr after), generated, by_hand,
-        "The address of a byte pattern in the image's read-only data, after an earlier one or from the start.")
+WXL_API(patch, find, Find, address, (bytes pattern, bytes_size size, opt<uptr> after), generated, by_hand,
+        "The address of a byte pattern in the image's read-only data, after an earlier one or, `after` left "
+        "out (0), from the start.")

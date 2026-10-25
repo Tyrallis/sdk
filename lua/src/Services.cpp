@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -180,18 +181,33 @@ namespace wxl::lua
 
         // --- reading the arguments ---------------------------------------------------------
 
-        /// Where the next Lua argument is, and the length the bytes so far share.
+        struct LuaRow;
+
+        /// Where the next Lua argument is, the row's next parameter, and the length the bytes so
+        /// far share.
         struct Reader
         {
-            lua_State* L;
-            int        next;
-            int64_t    bytes = -1;
+            lua_State*    L;
+            int           next;
+            const LuaRow* row;
+            int           declared = 0; ///< the row's parameters read so far, bytes_size included
+            int64_t       bytes    = -1;
         };
 
-        /// A whole number in [low, high]; nil, or an argument left out, is 0.
+        /// Raises the error of a parameter left out: the function, the parameter, what it takes.
+        [[noreturn]] void MissingArgument(const Reader& r, int declared, const char* what);
+
+        /// Counts the row's next parameter, and raises MissingArgument when the script left it
+        /// out or passed nil: only an opt<K> parameter may be left out.
+        void Require(Reader& r, const char* what)
+        {
+            const int declared = r.declared++;
+            if (lua_isnoneornil(r.L, r.next)) MissingArgument(r, declared, what);
+        }
+
+        /// A whole number in [low, high].
         double CheckWhole(lua_State* L, int index, double low, double high)
         {
-            if (lua_isnoneornil(L, index)) return 0;
             const double value = luaL_checknumber(L, index);
             if (std::floor(value) != value || value < low || value > high)
             {
@@ -211,6 +227,7 @@ namespace wxl::lua
             using Held = wxl_str;
             static Held Read(Reader& r)
             {
+                Require(r, "a string");
                 size_t      size = 0;
                 const char* text = luaL_checklstring(r.L, r.next++, &size);
                 return wxl_str{text, static_cast<uint32_t>(size)};
@@ -222,7 +239,11 @@ namespace wxl::lua
         struct Arg<kind::cstr>
         {
             using Held = const char*;
-            static Held Read(Reader& r) { return luaL_checkstring(r.L, r.next++); }
+            static Held Read(Reader& r)
+            {
+                Require(r, "a string");
+                return luaL_checkstring(r.L, r.next++);
+            }
             static std::tuple<const char*> C(Held held) { return {held}; }
         };
 
@@ -232,6 +253,7 @@ namespace wxl::lua
             using Held = T;
             static Held Read(Reader& r)
             {
+                Require(r, "a whole number");
                 const double high = static_cast<double>(High) < kExact ? static_cast<double>(High) : kExact;
                 return static_cast<T>(CheckWhole(r.L, r.next++, static_cast<double>(Low), high));
             }
@@ -247,7 +269,11 @@ namespace wxl::lua
         struct Arg<kind::f64>
         {
             using Held = double;
-            static Held Read(Reader& r) { return luaL_checknumber(r.L, r.next++); }
+            static Held Read(Reader& r)
+            {
+                Require(r, "a number");
+                return luaL_checknumber(r.L, r.next++);
+            }
             static std::tuple<double> C(Held held) { return {held}; }
         };
 
@@ -257,6 +283,7 @@ namespace wxl::lua
             using Held = wxl_bool;
             static Held Read(Reader& r)
             {
+                Require(r, "true or false");
                 luaL_checktype(r.L, r.next, LUA_TBOOLEAN);
                 return lua_toboolean(r.L, r.next++) ? WXL_TRUE : WXL_FALSE;
             }
@@ -270,6 +297,7 @@ namespace wxl::lua
             using Held = std::vector<wxl_value>;
             static Held Read(Reader& r)
             {
+                ++r.declared;
                 const int top = lua_gettop(r.L);
                 for (int i = r.next; i <= top; ++i)
                 {
@@ -321,6 +349,7 @@ namespace wxl::lua
             using Held = const void*;
             static Held Read(Reader& r)
             {
+                Require(r, "a string of bytes");
                 size_t      size  = 0;
                 const int   index = r.next++;
                 const char* data  = luaL_checklstring(r.L, index, &size);
@@ -337,7 +366,11 @@ namespace wxl::lua
         struct Arg<kind::bytes_size>
         {
             using Held = uint32_t;
-            static Held Read(Reader& r) { return r.bytes < 0 ? 0u : static_cast<uint32_t>(r.bytes); }
+            static Held Read(Reader& r)
+            {
+                ++r.declared;
+                return r.bytes < 0 ? 0u : static_cast<uint32_t>(r.bytes);
+            }
             static std::tuple<uint32_t> C(Held held) { return {held}; }
         };
 
@@ -348,6 +381,7 @@ namespace wxl::lua
             using Held = typename R::type;
             static Held Read(Reader& r)
             {
+                Require(r, (std::string("a wxl.") + R::kName).c_str());
                 const int    index = r.next++;
                 ResourceBox* box   = CheckResource<R>(r.L, index);
                 if (!box->open)
@@ -358,6 +392,21 @@ namespace wxl::lua
                 return static_cast<Held>(box->value);
             }
             static std::tuple<Held> C(Held held) { return {held}; }
+        };
+
+        /// A parameter a script may leave out: K's zero when it does, which the row's doc says.
+        template <class K>
+        struct Arg<kind::opt<K>>
+        {
+            using Held = typename Arg<K>::Held;
+            static Held Read(Reader& r)
+            {
+                if (!lua_isnoneornil(r.L, r.next)) return Arg<K>::Read(r);
+                ++r.declared;
+                ++r.next;
+                return Held{};
+            }
+            static auto C(const Held& held) { return Arg<K>::C(held); }
         };
 
         // --- pushing the answer ------------------------------------------------------------
@@ -580,6 +629,7 @@ namespace wxl::lua
             template <class F>
             static int Call(lua_State* L, Reader& r, F&& f)
             {
+                if (lua_isnoneornil(L, r.next)) MissingArgument(r, -1, "how many bytes to read, a whole number");
                 const uint64_t count = static_cast<uint64_t>(CheckWhole(L, r.next++, 0, 0x7FFFFFFF));
                 std::string    bytes(static_cast<size_t>(count) + 1, '\0');
                 uint64_t       got    = 0;
@@ -649,7 +699,7 @@ namespace wxl::lua
             {
                 const Api* api = wxl::api::Table<Api>();
                 if (!wxl::detail::Carries(api, Member)) return PushResultFailure(L, WXL_E_UNSUPPORTED);
-                Reader reader{L, 1};
+                Reader reader{L, 1, static_cast<const LuaRow*>(lua_touserdata(L, lua_upvalueindex(1)))};
                 // Braced, so that the arguments are read left to right.
                 const std::tuple<typename Arg<P>::Held...> held{Arg<P>::Read(reader)...};
                 const auto c = Gather(held, std::index_sequence_for<P...>{});
@@ -737,7 +787,45 @@ namespace wxl::lua
             const char*   name;
             lua_CFunction call;      ///< null for a shim row: Shims.hpp serves it
             const char*   method_of; ///< the resource it is a method of, or null for a module function
+            const char*   params;    ///< as the row writes them, "(str directory, i32 priority)"
         };
+
+        /// The name of a row's parameter by its place, from its params text: "priority".
+        std::string ParameterName(const char* params, int place)
+        {
+            std::string inner(params ? params : "");
+            if (inner.size() >= 2) inner = inner.substr(1, inner.size() - 2);
+            int    at    = 0;
+            size_t start = 0;
+            while (start <= inner.size())
+            {
+                size_t end = inner.find(',', start);
+                if (end == std::string::npos) end = inner.size();
+                if (at == place)
+                {
+                    std::string piece = inner.substr(start, end - start);
+                    while (!piece.empty() && piece.back() == ' ') piece.pop_back();
+                    const size_t space = piece.rfind(' ');
+                    return space == std::string::npos ? piece : piece.substr(space + 1);
+                }
+                ++at;
+                start = end + 1;
+            }
+            return "?";
+        }
+
+        void MissingArgument(const Reader& r, int declared, const char* what)
+        {
+            const std::string function =
+                r.row ? (r.row->method_of ? std::string(r.row->method_of) + ":" + r.row->name
+                                          : std::string("wxl.") + r.row->service + "." + r.row->name)
+                      : std::string("?");
+            const std::string parameter = declared < 0 ? std::string("count")
+                                                       : ParameterName(r.row ? r.row->params : nullptr, declared);
+            luaL_error(r.L, "%s: '%s' (argument %d) is missing; it takes %s", function.c_str(), parameter.c_str(),
+                       r.next, what);
+            std::abort(); // not reached: luaL_error does not return
+        }
 
         struct LuaResource
         {
@@ -752,8 +840,8 @@ namespace wxl::lua
 
 #define WXL_LUA_generated(svc, member, Name, answer, params)                                 \
     LuaRow{#svc, #Name, &Call<&wxl_##svc##_api::member, answer params>::Invoke,             \
-           MethodOf<answer params>::kName},
-#define WXL_LUA_shim(svc, member, Name, answer, params) LuaRow{#svc, #Name, nullptr, nullptr},
+           MethodOf<answer params>::kName, #params},
+#define WXL_LUA_shim(svc, member, Name, answer, params) LuaRow{#svc, #Name, nullptr, nullptr, #params},
 #define WXL_LUA_native(svc, member, Name, answer, params)
 #define WXL_API_SERVICE(svc, name, version, access, doc)
 #define WXL_API(svc, member, Name, answer, params, lua, cxx, doc) \
@@ -761,7 +849,7 @@ namespace wxl::lua
 #define WXL_API_RESOURCE(svc, Name, ctype, none_value)
 #define WXL_API_FIELD(type, member, field_kind)
 #define WXL_API_CLOSE(svc, member, Name, answer, Resource, when, doc) \
-    LuaRow{#svc, #Name, &CloseCall<kind::Resource>, kind::Resource::kName},
+    LuaRow{#svc, #Name, &CloseCall<kind::Resource>, kind::Resource::kName, "(" #Resource " self)"},
             const LuaRow kRows[] = {
 #include "wxl/services/script.def"
 #include "wxl/services/storage.def"
@@ -844,7 +932,8 @@ namespace wxl::lua
                 for (const LuaRow& row : rows::kRows)
                 {
                     if (!row.method_of || std::strcmp(row.method_of, resource.name) != 0) continue;
-                    lua_pushcfunction(L, row.call);
+                    lua_pushlightuserdata(L, const_cast<LuaRow*>(&row));
+                    lua_pushcclosure(L, row.call, 1);
                     lua_setfield(L, -2, row.name);
                 }
                 lua_setfield(L, -2, "__index");
@@ -889,7 +978,8 @@ namespace wxl::lua
                 if (std::strcmp(row.service, service.id) != 0 || row.method_of) continue;
                 if (row.call)
                 {
-                    lua_pushcfunction(L, row.call);
+                    lua_pushlightuserdata(L, const_cast<LuaRow*>(&row));
+                    lua_pushcclosure(L, row.call, 1);
                 }
                 else
                 {

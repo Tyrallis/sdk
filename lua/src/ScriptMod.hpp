@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "Lua.hpp"
+#include "Objects.hpp"
 #include "wxl/host/discovery.hpp"
 #include "wxl/reflect.hpp"
 
@@ -85,8 +86,13 @@ namespace wxl::lua
         /// Closes the state and forgets the callbacks. The runtime drops the handlers first.
         void Close();
 
-        /// Stops its code from running until the next load. The state stays until Close.
-        void Disable() { disabled_ = true; }
+        /// Stops its code from running until the next load, and gives back its field watches
+        /// and its search folders. The state stays until Close.
+        void Disable();
+
+        /// The fields it watches through wxl.object.Watch: what decides which ObjectFieldChanged
+        /// its handlers receive. Given back at Disable and Close.
+        const FieldWatches& Watches() const { return fieldWatches_; }
 
         /// Runs every callback registered under a name; onUpdate receives @p delta.
         void Call(Callback which, float delta = 0.0f);
@@ -176,6 +182,7 @@ namespace wxl::lua
         int                  traceback_  = LUA_NOREF;
         std::vector<int>     callbacks_[static_cast<size_t>(Callback::Count)];
         std::vector<Watched> watched_;
+        FieldWatches         fieldWatches_;
     };
 } // namespace wxl::lua
 

@@ -201,6 +201,17 @@ namespace
             watched.push_back(Watched{kind, first, dwords, local});
             return true;
         }
+
+        /// What the service let go of, and whether this client can take a handler back.
+        mutable std::vector<Watched> unwatched;
+        bool                         canUnwatch = true;
+
+        bool UnwatchElement(wxl_object_type kind, uint32_t first, uint32_t dwords, bool local) const override
+        {
+            if (!canUnwatch) return false;
+            unwatched.push_back(Watched{kind, first, dwords, local});
+            return true;
+        }
         void Report(const char* line) const override { reports.emplace_back(line); }
 
         bool Reported(const char* line) const
@@ -576,6 +587,55 @@ int main()
         Check(service.FieldChange(0x700, WXL_OBJECT_UNIT, 0x16, 1, &was, args) &&
                   !service.FieldChange(0x720, WXL_OBJECT_UNIT, 0x16, 1, &was, args),
               "a unit field watched for players raises for a player and not for a creature");
+
+        // A watch is its caller's: the runtime says who calls, and asks Delivers who receives.
+        uint32_t caller = 5;
+        service.SetCaller([](void* user) { return *static_cast<uint32_t*>(user); }, &caller);
+        const size_t asked = binding.watched.size();
+        Check(api->watch_field(WXL_OBJECT_UNIT, 0x20, 1) == WXL_OK && binding.watched.size() == asked + 1,
+              "a mod's first watch of UNIT_FIELD_MAXHEALTH asks the client");
+        Check(service.FieldChange(0x720, WXL_OBJECT_UNIT, 0x20, 1, &was, args) && service.Delivers(5, args) &&
+                  !service.Delivers(0, args) && !service.Delivers(6, args),
+              "its changes are delivered to that mod only");
+        caller = 6;
+        Check(api->watch_field(WXL_OBJECT_PLAYER, 0x20, 1) == WXL_OK && binding.watched.size() == asked + 1,
+              "another mod's watch of it, for players, asks nothing more");
+        Check(!service.Delivers(6, args), "and receives no creature's change");
+        Check(service.FieldChange(0x700, WXL_OBJECT_UNIT, 0x20, 1, &was, args) && service.Delivers(6, args) &&
+                  service.Delivers(5, args),
+              "a player's reaches both: a watch for units covers players");
+        caller = 5;
+        Check(api->unwatch_field(WXL_OBJECT_UNIT, 0x20, 1) == WXL_OK && binding.unwatched.empty() &&
+                  !service.Delivers(5, args) && service.Delivers(6, args),
+              "giving one back stops that mod's changes and keeps the client's handler for the other");
+        Check(api->unwatch_field(WXL_OBJECT_UNIT, 0x20, 1) == WXL_OK, "giving back twice is no mistake");
+        Check(service.WatchCount(6) == 1, "the other holds its one watch");
+        service.DropWatches(6);
+        Check(service.WatchCount(6) == 0 && binding.unwatched.size() == 1 && binding.unwatched[0].first == 0x20 &&
+                  !service.FieldChange(0x700, WXL_OBJECT_UNIT, 0x20, 1, &was, args),
+              "a mod that goes gives back its watches, the last one lets the client's handler go");
+
+        Check(api->watch_field(WXL_OBJECT_UNIT, 0x18, 1) == WXL_OK && api->watch_field(WXL_OBJECT_UNIT, 0x18, 1) == WXL_OK &&
+                  api->unwatch_field(WXL_OBJECT_UNIT, 0x18, 1) == WXL_OK &&
+                  service.FieldChange(0x720, WXL_OBJECT_UNIT, 0x18, 1, &was, args) && service.Delivers(5, args),
+              "each watch is given back on its own: two asked, one given back, the field still comes");
+        Check(api->unwatch_field(WXL_OBJECT_UNIT, 0x18, 1) == WXL_OK && !service.Delivers(5, args) &&
+                  service.Delivers(0, args) && binding.unwatched.size() == 1,
+              "the second given back ends it, while the watch of nobody's code goes on");
+        Check(api->unwatch_field(WXL_OBJECT_UNIT, 0x13, 1) == WXL_E_INVALID &&
+                  binding.Reported("unwatch_field: dword 0x13 is the second half of an element of UNIT_FIELD_TARGET "
+                                   "(from 0x12); start the range at 0x12"),
+              "unwatch_field checks the range as watch_field does");
+
+        binding.canUnwatch = false;
+        Check(api->watch_field(WXL_OBJECT_UNIT, 0x3B, 1) == WXL_OK && api->unwatch_field(WXL_OBJECT_UNIT, 0x3B, 1) == WXL_OK &&
+                  !service.FieldChange(0x720, WXL_OBJECT_UNIT, 0x3B, 1, &was, args),
+              "a client that keeps its handler reports into nothing once no watch is left");
+        const size_t kept = binding.watched.size();
+        Check(api->watch_field(WXL_OBJECT_UNIT, 0x3B, 1) == WXL_OK && binding.watched.size() == kept &&
+                  service.FieldChange(0x720, WXL_OBJECT_UNIT, 0x3B, 1, &was, args),
+              "and the next watch reuses the handler it kept");
+        service.SetCaller(nullptr, nullptr);
 
         binding.canWatch = false;
         Check(api->watch_field(WXL_OBJECT_UNIT, 0x19, 1) == WXL_E_UNSUPPORTED &&

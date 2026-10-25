@@ -275,11 +275,28 @@ typedef struct wxl_object_api
      * some fields; the others are refused with WXL_E_UNSUPPORTED and named in the log. The
      * player's fields past PLAYER_FIELD_PAD_0 (scope local) are seen on the active player only.
      *
-     * A watch lasts as long as the runtime, across worlds; asking again for what is watched
-     * changes nothing. Every mod subscribed to ObjectFieldChanged receives every watched change,
-     * whoever asked for it.
+     * A watch belongs to the mod that asked for it, and the event goes to that mod's handlers
+     * only: a mod receives the changes it watches and no other mod's, whatever it subscribed
+     * to. A watch lasts, across worlds, until the mod gives it back with unwatch_field or goes
+     * -- disabled or unloaded -- which gives back all of its watches. Each call is one watch:
+     * two parts of a mod that each ask for a field each give it back, and the mod receives the
+     * field's changes, once each, until the last one does.
      */
     wxl_result(WXL_CALL* watch_field)(uint32_t type, uint32_t first, uint32_t count);
+
+    // --- appended in 0.1.10 -----------------------------------------------------------------
+
+    /**
+     * @brief Gives back one of the calling mod's watches of dwords [first, first + count) on
+     *        objects of @p type, as watch_field took it.
+     *
+     * For each element of the range, one watch the mod holds for that type goes; with its last
+     * one the mod stops receiving the element's changes. An element it does not watch is left
+     * as it is, so giving back more than was asked for is not a mistake. Another mod's watch of
+     * the same field goes on. The range is checked as watch_field checks it -- elements, the
+     * kind's block -- and refused with WXL_E_INVALID when it is wrong.
+     */
+    wxl_result(WXL_CALL* unwatch_field)(uint32_t type, uint32_t first, uint32_t count);
 } wxl_object_api;
 
 #ifdef __cplusplus

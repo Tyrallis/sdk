@@ -5,7 +5,9 @@
 
 #include "wxl/runtime/object_service.hpp"
 
+#include <algorithm>
 #include <cstdarg>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 
@@ -89,6 +91,7 @@ namespace wxl::runtime
         api_.read_field_many = &ObjectService::ReadFieldManyThunk;
         api_.write_fields    = &ObjectService::WriteFieldsThunk;
         api_.watch_field     = &ObjectService::WatchFieldThunk;
+        api_.unwatch_field   = &ObjectService::UnwatchFieldThunk;
 
 #define WXL_OBJECT_READ(kinds, member, Method, type) \
     api_.member = &Get<type, &ObjectBinding::Method, k##kinds>;
@@ -377,17 +380,23 @@ namespace wxl::runtime
         return instance_ ? instance_->Watch(type, first, count) : WXL_E_UNSUPPORTED;
     }
 
-    wxl_result ObjectService::Watch(uint32_t type, uint32_t first, uint32_t count)
+    wxl_result WXL_CALL ObjectService::UnwatchFieldThunk(uint32_t type, uint32_t first, uint32_t count)
+    {
+        return instance_ ? instance_->Unwatch(type, first, count) : WXL_E_UNSUPPORTED;
+    }
+
+    wxl_result ObjectService::Elements(const char* call, uint32_t type, uint32_t first, uint32_t count,
+                                       bool watchable, std::vector<Element>& out) const
     {
         const field::Kind* kind = field::KindOf(type);
         if (!kind)
         {
-            Refuse("watch_field: %u is not an object type (wxl_object_type)", type);
+            Refuse("%s: %u is not an object type (wxl_object_type)", call, type);
             return WXL_E_INVALID;
         }
         if (count == 0)
         {
-            Refuse("watch_field: a count of 0 dwords watches nothing; ask for at least one");
+            Refuse("%s: a count of 0 dwords names nothing; ask for at least one", call);
             return WXL_E_INVALID;
         }
         const uint32_t end = kind->end;
@@ -395,20 +404,13 @@ namespace wxl::runtime
         {
             char range[48];
             Range(range, sizeof range, first, count);
-            Refuse("watch_field: %s %s past %s %s's 0x%X", range, count == 1 ? "is" : "run",
+            Refuse("%s: %s %s past %s %s's 0x%X", call, range, count == 1 ? "is" : "run",
                    Article(kind->name), kind->name, end);
             return WXL_E_INVALID;
         }
 
-        // The elements the range covers, checked whole before anything is watched.
-        struct Element
-        {
-            const field::Kind* owner;
-            uint32_t           index;
-            uint32_t           dwords;
-            bool               local;
-        };
-        std::vector<Element> elements;
+        // Checked whole before anything changes.
+        out.clear();
         for (uint32_t index = first; index < first + count;)
         {
             const field::Row* row = field::RowAt(type, index);
@@ -417,50 +419,124 @@ namespace wxl::runtime
             const uint32_t start = row->index + (index - row->index) / size * size;
             if (start != index)
             {
-                Refuse("watch_field: dword 0x%X is the second half of an element of %s (from 0x%X); "
-                       "start the range at 0x%X", index, row->name, start, start);
+                Refuse("%s: dword 0x%X is the second half of an element of %s (from 0x%X); "
+                       "start the range at 0x%X", call, index, row->name, start, start);
                 return WXL_E_INVALID;
             }
             if (index + size > first + count)
             {
-                Refuse("watch_field: the range ends inside an element of %s (0x%X..0x%X); end it "
-                       "at 0x%X", row->name, index, index + size - 1, index + size);
+                Refuse("%s: the range ends inside an element of %s (0x%X..0x%X); end it "
+                       "at 0x%X", call, row->name, index, index + size - 1, index + size);
                 return WXL_E_INVALID;
             }
             const field::Kind* owner = field::OwnerOf(type, index);
             field::Watch       scope = field::WatchOf(owner->type, index);
             if (size == 2 && field::WatchOf(owner->type, index + 1) != scope) scope = field::Watch::none;
-            if (scope == field::Watch::none)
+            if (watchable && scope == field::Watch::none)
             {
                 if (row->Elements() > 1)
-                    Refuse("watch_field: element 0x%X of %s is not one the client sees change: it keeps "
-                           "no copy of it from before an update", index, row->name);
+                    Refuse("%s: element 0x%X of %s is not one the client sees change: it keeps "
+                           "no copy of it from before an update", call, index, row->name);
                 else
-                    Refuse("watch_field: %s (dword 0x%X) is not one the client sees change: it keeps "
-                           "no copy of it from before an update", row->name, index);
+                    Refuse("%s: %s (dword 0x%X) is not one the client sees change: it keeps "
+                           "no copy of it from before an update", call, row->name, index);
                 return WXL_E_UNSUPPORTED;
             }
-            elements.push_back(Element{owner, index, size, scope == field::Watch::local});
+            out.push_back(Element{owner->type, index, size, scope == field::Watch::local});
             index += size;
         }
+        return WXL_OK;
+    }
 
+    wxl_result ObjectService::Watch(uint32_t type, uint32_t first, uint32_t count)
+    {
+        std::vector<Element> elements;
+        const wxl_result     checked = Elements("watch_field", type, first, count, true, elements);
+        if (checked != WXL_OK) return checked;
+
+        // One entry per call: each is given back on its own.
+        const uint32_t owner = Caller();
         for (const Element& element : elements)
         {
-            std::vector<uint16_t>& slots = watches_[element.owner->type];
-            if (slots.size() < element.owner->end) slots.resize(element.owner->end, 0);
-            uint16_t& slot = slots[element.index];
-            if (!(slot & kRegistered))
+            std::vector<Slot>& slots = watches_[element.kind];
+            if (slots.size() < field::KindOf(element.kind)->end) slots.resize(field::KindOf(element.kind)->end);
+            Slot& slot = slots[element.index];
+            if (!slot.installed)
             {
-                if (!binding_.WatchElement(element.owner->type, element.index, element.dwords, element.local))
+                if (!binding_.WatchElement(element.kind, element.index, element.dwords, element.local))
                 {
                     Refuse("watch_field: this runtime cannot watch fields");
                     return WXL_E_UNSUPPORTED;
                 }
-                slot |= kRegistered;
+                slot.installed = true;
             }
-            slot |= uint16_t(1u << type);
+            ++slot.watchers;
+            watchList_.push_back(WatchEntry{owner, type, element});
+            Refresh(element.kind, element.index);
         }
         return WXL_OK;
+    }
+
+    wxl_result ObjectService::Unwatch(uint32_t type, uint32_t first, uint32_t count)
+    {
+        std::vector<Element> elements;
+        const wxl_result     checked = Elements("unwatch_field", type, first, count, false, elements);
+        if (checked != WXL_OK) return checked;
+
+        const uint32_t owner = Caller();
+        for (const Element& element : elements)
+        {
+            const auto held = std::find_if(watchList_.begin(), watchList_.end(), [&](const WatchEntry& w) {
+                return w.owner == owner && w.type == type && w.element.kind == element.kind &&
+                       w.element.index == element.index;
+            });
+            if (held == watchList_.end()) continue;
+            watchList_.erase(held);
+            Release(element);
+        }
+        return WXL_OK;
+    }
+
+    void ObjectService::DropWatches(uint32_t owner)
+    {
+        std::vector<Element> released;
+        for (size_t i = 0; i < watchList_.size();)
+        {
+            if (watchList_[i].owner != owner)
+            {
+                ++i;
+                continue;
+            }
+            released.push_back(watchList_[i].element);
+            watchList_.erase(watchList_.begin() + static_cast<std::ptrdiff_t>(i));
+        }
+        for (const Element& element : released) Release(element);
+    }
+
+    size_t ObjectService::WatchCount(uint32_t owner) const
+    {
+        return static_cast<size_t>(std::count_if(watchList_.begin(), watchList_.end(),
+                                                 [owner](const WatchEntry& w) { return w.owner == owner; }));
+    }
+
+    void ObjectService::Release(const Element& element)
+    {
+        Slot& slot = watches_[element.kind][element.index];
+        if (slot.watchers) --slot.watchers;
+        Refresh(element.kind, element.index);
+        // With the last watch the client's handler goes too, when the runtime can take it
+        // back; otherwise it stays, its reports find no watch, and the next watch reuses it.
+        if (slot.watchers == 0 && slot.installed &&
+            binding_.UnwatchElement(element.kind, element.index, element.dwords, element.local))
+            slot.installed = false;
+    }
+
+    void ObjectService::Refresh(wxl_object_type kind, uint32_t index)
+    {
+        uint16_t types = 0;
+        for (const WatchEntry& w : watchList_)
+            if (w.element.kind == kind && w.element.index == index) types |= uint16_t(1u << w.type);
+        watches_[kind][index].types = types;
     }
 
     bool ObjectService::Watched(wxl_object_type kind, uint32_t index, uint32_t type) const
@@ -468,10 +544,23 @@ namespace wxl::runtime
         const uint32_t k = static_cast<uint32_t>(kind);
         if (k > WXL_OBJECT_CORPSE || index >= watches_[k].size() || type > WXL_OBJECT_CORPSE) return false;
         // A watch for a type covers the types under it: one asked for every object reaches all.
-        const uint16_t slot = watches_[k][index];
+        const uint16_t types = watches_[k][index].types;
+        if (!types) return false;
         for (const field::Kind* at = field::KindOf(type); at;
              at = at->type == at->parent ? nullptr : field::KindOf(at->parent))
-            if (slot & (1u << static_cast<uint32_t>(at->type))) return true;
+            if (types & (1u << static_cast<uint32_t>(at->type))) return true;
+        return false;
+    }
+
+    bool ObjectService::Delivers(uint32_t owner, const wxl_object_field_args& args) const
+    {
+        const field::Kind* kind = field::OwnerOf(args.type, args.field);
+        if (!kind) return false;
+        for (const WatchEntry& w : watchList_)
+        {
+            if (w.owner != owner || w.element.kind != kind->type || w.element.index != args.field) continue;
+            if (field::Carries(args.type, w.type)) return true;
+        }
         return false;
     }
 

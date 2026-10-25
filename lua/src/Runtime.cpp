@@ -458,6 +458,10 @@ namespace wxl::lua
         {
             const Handler handler = slot.handlers[i];
             if (!handler.live || !handler.mod->Runs()) continue;
+            // A field's change goes to the mods that watch it, as the host does for native mods.
+            if (slot.event->id == WXL_EV_ObjectFieldChanged &&
+                !handler.mod->Watches().Covers(*static_cast<const wxl_object_field_args*>(args)))
+                continue;
 
             lua_State* L    = handler.mod->State();
             const int  base = lua_gettop(L);

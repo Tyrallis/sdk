@@ -633,4 +633,10 @@ namespace wxl::host
         if (disablesPending_.load(std::memory_order_relaxed)) SettleDisables();
         events_.Emit(event, args);
     }
+
+    void ModHost::RaiseTo(wxl_event event, const void* args, EventBus::AcceptFn accept, void* user)
+    {
+        if (disablesPending_.load(std::memory_order_relaxed)) SettleDisables();
+        events_.EmitTo(event, args, accept, user);
+    }
 } // namespace wxl::host

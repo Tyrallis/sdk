@@ -145,6 +145,10 @@ namespace wxl::host
         /// Dispatches an event. What the runtime calls at its own seams, from any thread.
         void Raise(wxl_event event, const void* args);
 
+        /// The same, to the handlers of the mods @p accept takes (by ModToken): an event that
+        /// concerns some mods only.
+        void RaiseTo(wxl_event event, const void* args, EventBus::AcceptFn accept, void* user);
+
         /**
          * @brief Disables a mod after it faulted: logs what it was doing, drops its
          *        subscriptions, skips its remaining entry points, tells the disable handler.

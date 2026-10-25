@@ -238,14 +238,23 @@ namespace wxl::lua
     {
         if (state_)
         {
-            // Its patches go back before its state does; its files close with the state.
+            // Its patches and its field watches go back before its state does; its files close
+            // with the state.
             CloseServiceResources(state_);
+            fieldWatches_.Release();
             shims::Forget(*this);
             lua_close(state_);
         }
         state_     = nullptr;
         traceback_ = LUA_NOREF;
         for (std::vector<int>& refs : callbacks_) refs.clear();
+    }
+
+    void ScriptMod::Disable()
+    {
+        disabled_ = true;
+        fieldWatches_.Release();
+        shims::ReleaseFolders(*this);
     }
 
     // --- calling in ------------------------------------------------------------------------
@@ -377,7 +386,7 @@ namespace wxl::lua
 
         PushClosure(&L_log);
         lua_setfield(L, -2, "log");
-        PushObjectModule(L);
+        PushObjectModule(L, fieldWatches_);
         lua_setfield(L, -2, "object");
         PushFieldModule(L);
         lua_setfield(L, -2, "field");
