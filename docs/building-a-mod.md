@@ -201,7 +201,8 @@ destructor that throws still ends the process: C++ makes destructors `noexcept`.
 ### Events
 
 Derive from a script family (`WorldScript`, `RenderScript`, `ObjectScript`, `AssetScript`,
-`NetScript`, `LuaScript`, `CombatScript`, `PlayerScript`, `GlueScript`, `ChatScript`), override
+`NetScript`, `LuaScript`, `CombatScript`, `PlayerScript`, `GlueScript`, `ChatScript`,
+`LootScript`, `ItemScript`, `QuestScript`, `GroupScript`, `SocialScript`), override
 the events you want,
 `wxl::ScriptMgr::Add(&script)`. `Add` subscribes only the events the script overrides, decided at
 compile time, so an event you leave alone costs nothing at all. That needs the script's own type:
@@ -281,6 +282,82 @@ void OnModelLoad(std::string_view path, wxl::Bytes data, const void** replacemen
 The bytes have to be a model the client can parse: a file of the same version, as the client's
 own tools write it. If the runtime cannot make the copy, the log says so and the client parses
 the file as it read it.
+
+### Gameplay events
+
+The families `LootScript`, `ItemScript`, `QuestScript`, `GroupScript` and `SocialScript`, and the
+aura, mount, death, reputation and achievement events of `ObjectScript` and `PlayerScript`, came
+with abi `0.1.17`: build against headers of that version or later. They tell what happens to the
+player's character and around it, raised where the client takes the fact in (the aura slot it
+fills, the loot window it opens, the inventory slot it updates), so a handler sees what the
+player sees, when the client knows it.
+
+A script that keeps what the player loots and joins any group a friend invites it to:
+
+```cpp
+class Companion final : public wxl::GroupScript
+{
+public:
+    void OnGroupInvite(std::string_view inviter, bool can_accept, wxl::Answer accept,
+                       wxl::Answer decline) override
+    {
+        if (can_accept && (inviter == "Jaina" || inviter == "Thrall")) accept.Set();
+        (void)decline; // left alone: the dialog shows as usual for anyone else
+    }
+};
+
+class Looter final : public wxl::LootScript
+{
+public:
+    void OnLootSlot(uint32_t index, uint32_t slot, uint32_t item_id, uint32_t quantity,
+                    uint32_t display_id, uint32_t random_suffix, int32_t random_property_id,
+                    wxl_loot_slot_type slot_type) override
+    {
+        if (slot_type == WXL_LOOT_SLOT_TAKE) wxl::Log("loot: item {} x{}", item_id, quantity);
+    }
+};
+```
+
+Three events are requests, with two answers each, `accept` and `decline`:
+`GroupScript::OnGroupInvite`, `SocialScript::OnDuelRequested` and
+`SocialScript::OnResurrectRequest`. Setting one makes the runtime do what the dialog's button would
+have done, and the client never shows the dialog; setting neither leaves the dialog to the player.
+When two handlers disagree, decline wins.
+
+| Family | Events | What they tell |
+|---|---|---|
+| `ObjectScript` | `OnUnitAuraApplied`, `OnUnitAuraRemoved`, `OnUnitAuraRefreshed` | an aura in a unit's aura slot: the slot, the spell, the caster (`wxl::Object` and guid), stacks and the count before, level, flags, `harmful`, the duration and what is left, in milliseconds |
+| | `OnUnitAuraChanged` | the coarse one, older than these: something about this unit's auras changed (an aura on, or off with `removed`); the three above say what |
+| | `OnUnitMountChanged` | a unit's mount display id before and after: on a mount, off it, another one |
+| `LootScript` | `OnLootOpened`, `OnLootSlot`, `OnLootSlotCleared`, `OnLootClosed` | the loot window: its source, its `wxl_loot_kind`, its money and item count, then one `OnLootSlot` per item; an item taken; the window closed |
+| | `OnLootMoney` | the player's share of looted money |
+| | `OnLootRollStart`, `OnLootRoll`, `OnLootRollWon`, `OnLootAllPassed` | a roll on a group's loot: started (with the `roll_id` the interface's `RollOnLoot` takes), someone's choice as `wxl_roll_type`, the winner, nobody |
+| `ItemScript` | `OnItemPushed` | an item looted, given or made, with its bag, slot, count and total |
+| | `OnInventorySlotChanged` | a slot of the player's bags or bank bags, or of one of its bags, got another item or none |
+| | `OnItemDurabilityChanged`, `OnItemStackChanged` | an item's durability (with its maximum) or stack count, before and after |
+| | `OnInventoryError` | the server refused an inventory change, with its result code |
+| `QuestScript` | `OnQuestAccepted`, `OnQuestRemoved`, `OnQuestObjectiveChanged`, `OnQuestCompleted`, `OnQuestFailed` | the quest log as the server writes it: a quest in or out of a slot, an objective's count, its state |
+| | `OnQuestTurnedIn` | a quest turned in, with xp, money, honor, talents and arena points |
+| | `OnQuestGiverGreeting`, `OnQuestGiverDetail`, `OnQuestGiverProgress`, `OnQuestGiverReward` | a quest giver's pages: the giver, the quest, its title and text |
+| `GroupScript` | `OnGroupInvite` | an invitation, answerable |
+| | `OnGroupUpdated`, `OnGroupMember`, `OnGroupLeft`, `OnGroupLootMethodChanged` | the group as the server lists it, one `OnGroupMember` per other member, leaving it, its loot rules as `wxl_loot_method` |
+| | `OnReadyCheck`, `OnReadyCheckResponse`, `OnReadyCheckFinished` | a ready check and its answers |
+| `SocialScript` | `OnDuelRequested`, `OnDuelCountdown`, `OnDuelWon`, `OnDuelFinished` | a duel challenge (answerable), its countdown, a winner, its end |
+| | `OnTradeStatus` | a trade's step as `wxl_trade_status`, with the proposer for a proposal |
+| | `OnEmote`, `OnTextEmote` | an emote's animation; a `/wave` or `/dance` |
+| | `OnResurrectRequest` | an offer to resurrect, answerable |
+| | `OnWindowOpened`, `OnWindowClosed` | a window on someone the player talks to, as `wxl_window_kind`: merchant, trainer, bank, quest, mail, taxi, trade, ... |
+| `PlayerScript` | `OnPlayerDied`, `OnPlayerReleased`, `OnPlayerResurrected` | the player's life: dead, a ghost, alive again |
+| | `OnReputationChanged` | a faction's standing before and after, counted as the reputation panel counts it |
+| | `OnAchievementEarned` | an achievement earned by the player or one near it |
+
+Each parameter list is the struct of [`fields.def`](../include/wxl/fields.def) the event names in
+[`events.def`](../include/wxl/events.def); `wxl::HandlerOf<WXL_EV_LootSlot>` spells it as a
+function type. A handle parameter is `WXL_HANDLE_NONE` when the client does not hold the object
+(out of view); its guid is there all the same. A unit's auras when it comes into view, and the
+equipped items (`ObjectScript::OnEquipmentChanged`'s), are not part of these events. `SocialScript::OnTextEmote` is
+raised as the server sent it, before the client consults the player's ignore list: a mod that
+should not react to an ignored player checks the sender itself.
 
 ### Reads that can fail
 

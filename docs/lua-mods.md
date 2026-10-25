@@ -30,7 +30,8 @@ What a mod does is react to **events**. An event is something the client is abou
 just done: a unit died, a file is being opened, a message arrived from the server. Every event
 belongs to a **family**, and the families have the names the C++ side uses for them:
 `WorldScript`, `RenderScript`, `ObjectScript`, `AssetScript`, `NetScript`, `LuaScript`,
-`CombatScript`, `PlayerScript`, `GlueScript` and `ChatScript`. An event is named `On` followed by what happened: `OnUnitDeath` of
+`CombatScript`, `PlayerScript`, `GlueScript`, `ChatScript`, `LootScript`, `ItemScript`,
+`QuestScript`, `GroupScript` and `SocialScript`. An event is named `On` followed by what happened: `OnUnitDeath` of
 `ObjectScript`, `OnMessageReceived` of `NetScript`.
 
 A function you give to an event is a **handler**. When the event happens, your handler is called
@@ -459,7 +460,9 @@ kept that way reads as `"gone"` once its subject has left.
 
 An event can be answered when its members include an `answer` or a `buffer`. An `Override` (or a
 family method on such an event) answers with its return values, one per such member, in member
-order. Every event of the contract has one such member today, so one return value:
+order. Most events that can be answered have one such member, so one return value; the three
+requests of [gameplay](#gameplay-events) (`OnGroupInvite`, `OnDuelRequested`,
+`OnResurrectRequest`) have two, `accept` then `decline`:
 
 - **an `answer`** (`suppressed`, `handled`, `refused`): `true` answers. `false` and `nil` leave it
   as it is: an answer is a request, and a later handler cannot take it back.
@@ -482,6 +485,9 @@ The events that can be answered, as the SDK stands:
 | `ObjectScript:OnSpellCastRequest` | `refused` | the player's cast does not go ahead |
 | `ObjectScript:OnItemUseRequest` | `refused` | the item is not used |
 | `ChatScript:OnChatSend` | `suppressed` | the chat or addon message is not sent (abi `0.1.6`) |
+| `GroupScript:OnGroupInvite` | `accept`, `decline` | `return true` joins the group, `return nil, true` turns it down, as the dialog's buttons do; the dialog never shows (abi `0.1.17`) |
+| `SocialScript:OnDuelRequested` | `accept`, `decline` | the same for a duel challenge (abi `0.1.17`) |
+| `SocialScript:OnResurrectRequest` | `accept`, `decline` | the same for an offer to resurrect you (abi `0.1.17`) |
 
 ### Loading and updates
 
@@ -1303,7 +1309,8 @@ id (it was already removed). Safe from inside the handler itself.
 #### The family tables
 
 `WorldScript`, `RenderScript`, `ObjectScript`, `AssetScript`, `NetScript`, `LuaScript`,
-`CombatScript`, `PlayerScript`, `GlueScript`, `ChatScript`. A function defined on one under an event's name is subscribed after the entry file
+`CombatScript`, `PlayerScript`, `GlueScript`, `ChatScript`, `LootScript`, `ItemScript`,
+`QuestScript`, `GroupScript`, `SocialScript`. A function defined on one under an event's name is subscribed after the entry file
 has run, as an `Override` on an event that can be answered and as an `Observe` otherwise, and is
 called with `self` first. Anything else on these tables, a method for an event newer than the
 manifest's `abi`, or replacing one with something that is not a table, stops the mod from
@@ -1433,6 +1440,93 @@ and answers `nil, "unsupported"` on an older runtime. `0.1.14` brought no event 
 a service module or function newer than the manifest's `abi` is refused as an event is, so a mod
 using `wxl.footprint` asks for `0.1.11` and one using `wxl.profile` for `0.1.12`. `0.1.15` brought
 no event: `wxl.storage.Redirect`, `wxl.storage.Unredirect` and `wxl.script.Live` came with it.
+The [gameplay events](#gameplay-events), with the families `LootScript`, `ItemScript`,
+`QuestScript`, `GroupScript` and `SocialScript`, came with `0.1.17`.
+
+### Gameplay events
+
+These tell what happens to your character and around it: auras, loot, items, quests, the group,
+the people you deal with. Each is raised where the client itself takes the fact in: an aura when
+it is put in one of the unit's aura slots, the loot window when the client fills it, an inventory
+slot when the server's update is applied. You see what the player sees, at the moment the client
+knows it. They need `"abi": "0.1.17"` in your `mod.json`.
+
+A small mod that writes down what you loot and joins any group a friend of yours invites you to:
+
+```lua
+local friends = { Jaina = true, Thrall = true }
+
+function LootScript:OnLootSlot(index, slot, item_id, quantity)
+    print("in the loot: item " .. item_id .. " x" .. quantity)
+end
+
+function GroupScript:OnGroupInvite(inviter, can_accept)
+    if friends[inviter] then return true end -- accept
+    return nil                               -- leave it to the dialog
+end
+```
+
+`OnGroupInvite` is a request: its first return value accepts, its second declines (`return nil,
+true`), and returning nothing shows the client's dialog as usual. When you answer, the client does
+not show the dialog at all, and does what its buttons would have done.
+
+Many of these come in pairs or runs, the way the client gets them: `OnLootOpened` says how many
+items the window holds, and one `OnLootSlot` per item follows; `OnGroupUpdated` gives the group,
+and one `OnGroupMember` per other member follows. The full parameter lists are in
+[`wxl.d.lua`](../lua/types/wxl.d.lua).
+
+| Family | Event | Parameters | Happens when |
+|---|---|---|---|
+| `ObjectScript` | `OnUnitAuraApplied`, `OnUnitAuraRemoved` | `unit`, `unit_guid`, `slot`, `spell_id`, `caster`, `caster_guid`, `stacks`, `previous_stacks`, `level`, `flags`, `harmful`, `duration`, `remaining` | an aura was put in a unit's aura slot, or left it (with what it was) |
+| | `OnUnitAuraRefreshed` | the same | an aura still on a unit gained or lost stacks (`previous_stacks` says how many it had), or its duration was renewed |
+| | `OnUnitAuraChanged` | `unit`, `spell_id`, `removed` | the coarse one, older than these: something about this unit's auras changed, an aura put on (`removed` false) or taken off; use it when you only need to know that, the three above when you need what |
+| | `OnUnitMountChanged` | `unit`, `unit_guid`, `previous_display_id`, `display_id` | a unit got on a mount (`display_id` not 0), off one (`0`) or changed mounts |
+| `LootScript` | `OnLootOpened` | `source`, `source_guid`, `kind`, `money`, `count` | the loot window opened on a corpse, a chest, a fish... (`kind`: `"corpse"`, `"fishing"`, `"skinning"`...) |
+| | `OnLootSlot` | `index`, `slot`, `item_id`, `quantity`, `display_id`, `random_suffix`, `random_property_id`, `slot_type` | one item of that window (`slot_type`: `"take"`, `"roll"`, `"master"`, `"locked"`, `"owner"`) |
+| | `OnLootSlotCleared` | the same | an item left the window: someone took it |
+| | `OnLootClosed` | like `OnLootOpened` | the window closed |
+| | `OnLootMoney` | `amount`, `alone` | you received your share of the money, in copper |
+| | `OnLootRollStart` | `source_guid`, `slot`, `item_id`, ..., `duration`, `vote_mask`, `roll_id` | a roll started on an item; `roll_id` is what the interface's `RollOnLoot` takes |
+| | `OnLootRoll`, `OnLootRollWon`, `OnLootAllPassed` | `source_guid`, `slot`, `item_id`, ..., `player_guid`, `roll`, `roll_type`, `auto_pass` | someone chose (`roll_type`: `"need"`, `"greed"`...), someone won, or everyone passed |
+| `ItemScript` | `OnItemPushed` | `player_guid`, `bag`, `slot`, `item_id`, ..., `count`, `total`, `received`, `created`, `announced` | an item was looted, given (`received`) or made (`created`) for you or a member of your group |
+| | `OnInventorySlotChanged` | `container`, `container_guid`, `slot`, `previous_guid`, `item`, `item_guid` | a slot of your bags got another item, or none: `container` is you for your backpack and bag slots, or the bag |
+| | `OnItemDurabilityChanged` | `item`, `item_guid`, `previous`, `current`, `maximum` | an item wore down or was repaired |
+| | `OnItemStackChanged` | `item`, `item_guid`, `previous`, `current` | a stack grew or shrank |
+| | `OnInventoryError` | `result`, `item_guid`, `other_guid`, `required_level` | the server refused an inventory change, with its reason code |
+| `QuestScript` | `OnQuestAccepted`, `OnQuestRemoved` | `quest_id`, `log_slot` | a quest entered your quest log, or left it (abandoned or turned in) |
+| | `OnQuestObjectiveChanged` | `quest_id`, `log_slot`, `objective`, `previous`, `current` | the count of a kill or object objective moved |
+| | `OnQuestCompleted`, `OnQuestFailed` | `quest_id`, `log_slot` | every objective is done, or the quest failed |
+| | `OnQuestTurnedIn` | `quest_id`, `xp`, `money`, `honor`, `talents`, `arena_points` | you turned a quest in, with its rewards |
+| | `OnQuestGiverGreeting`, `OnQuestGiverDetail`, `OnQuestGiverProgress`, `OnQuestGiverReward` | `giver`, `giver_guid`, `quest_id`, `title`, `text`, `count`, `shared_by` | a quest giver shows its list, a quest's details, what a quest still asks for, or its reward |
+| `GroupScript` | `OnGroupInvite` | `inviter`, `can_accept`, `accept`, `decline` | you are invited to a group; answer to accept or decline |
+| | `OnGroupUpdated` | `group_guid`, `raid`, `battleground`, `count`, `subgroup`, `leader_guid`, `loot_method`, `looter_guid`, `loot_threshold`, ... | the server listed your group |
+| | `OnGroupMember` | `index`, `count`, `member`, `member_guid`, `name`, `online`, `subgroup`, `flags`, `roles` | one other member of it |
+| | `OnGroupLeft` | `reason` | you are no longer in a group (`"removed"` or `"disbanded"`) |
+| | `OnGroupLootMethodChanged` | `loot_method`, `looter_guid`, `loot_threshold` | the loot rules changed (`loot_method`: `"group"`, `"need_before_greed"`, `"master"`...) |
+| | `OnReadyCheck`, `OnReadyCheckResponse`, `OnReadyCheckFinished` | `initiator`, `initiator_guid`, `duration`; `member`, `member_guid`, `ready`; `initiator_guid` | a ready check started, someone answered, it is over |
+| `SocialScript` | `OnDuelRequested` | `challenger`, `challenger_guid`, `arbiter_guid`, `accept`, `decline` | someone challenges you; answer to accept or decline |
+| | `OnDuelCountdown`, `OnDuelWon`, `OnDuelFinished` | `duration`; `winner`, `loser`, `fled`; `completed` | the duel counts down, someone won, your duel is over |
+| | `OnTradeStatus` | `status`, `partner_guid` | a trade moved a step (`"proposed"`, `"initiated"`, `"accepted"`, `"complete"`, `"cancelled"`...) |
+| | `OnEmote`, `OnTextEmote` | `unit`, `unit_guid`, `emote_id`; `sender`, `sender_guid`, `text_emote`, `emote_number`, `target_name` | a unit played an emote's animation; a player's `/wave` or `/dance` reached you |
+| | `OnResurrectRequest` | `offerer`, `offerer_guid`, `name`, `sickness`, `accept`, `decline` | someone offers to resurrect you; answer to accept or decline |
+| | `OnWindowOpened`, `OnWindowClosed` | `kind`, `npc`, `npc_guid` | a window opened on someone you talk to, or closed (`kind`: `"merchant"`, `"trainer"`, `"bank"`, `"quest"`, `"mail"`, `"taxi"`, `"trade"`...) |
+| `PlayerScript` | `OnPlayerDied`, `OnPlayerReleased`, `OnPlayerResurrected` | `unit` | you died, released your spirit, are alive again |
+| | `OnReputationChanged` | `faction_id`, `previous`, `current`, `bonus` | your standing with a faction moved, counted as the reputation panel counts it |
+| | `OnAchievementEarned` | `player`, `player_guid`, `achievement_id`, `date`, `silent` | you, or a player near you, earned an achievement |
+
+A few things to know:
+
+- **Who and what.** A handle (`unit`, `caster`, `item`, `npc`...) is `nil` when the client does not
+  hold that object, out of view for example; the guid next to it is there all the same.
+- **Auras a unit already has** when it comes into view are not announced one by one: read them
+  with `UnitAura` from the interface, or wait for their next change.
+- **Your equipped items** (head, chest, weapons...) are `ObjectScript:OnEquipmentChanged`'s;
+  `OnInventorySlotChanged` covers your bags, your bank's bags and the bags' own slots.
+- **Text emotes** come as the server sent them, before the client looks at your ignore list: a
+  `/wave` from someone you ignore still reaches `OnTextEmote`, though the chat does not show it. A
+  mod that cares checks the sender itself.
+- **Windows.** `OnWindowOpened` comes once when a window opens, not again for each page it shows;
+  the quest giver's pages have events of their own.
 
 Not every runtime raises every event. Subscribing to one that yours does not raise logs a warning
 naming it, and the handler never runs.
