@@ -148,6 +148,11 @@ the memory at that moment:
 [14:05:10.402] [INFO ] [wxl.probe] since the probe loaded (108.4 s): 31 events, 48210 raises: OnUpdate 6504, ...
 ```
 
+If someone else wrote the test, they can give you its steps as a `steps.txt` in the probe's
+folder, one step per line. When you enter the world, the chat box tells you how many steps there
+are. Then type `/mark` alone: the chat box shows the next step, and the log's mark says which step
+began (`==== MARK 4: step 4/19: ... ====`). `/step` shows the current step again.
+
 The probe also writes the first few times each event happens, with what it carries, a line of
 counts every minute, and, when the client closes, the events that never happened. That is a lot of
 information, and it costs: listening to every event makes the client do work it normally skips,

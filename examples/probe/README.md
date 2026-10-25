@@ -22,6 +22,12 @@ What it writes, each line tagged `[wxl.probe]`:
   mark is also a message on its timeline. `/run WxlProbeMark("text")` does the same;
 - when the client closes, the totals, and the events that never came.
 
+**A test plan in the game.** Put a `steps.txt` next to `init.lua`, one step per line (blank lines
+and lines starting with `#` are left out). On entering the world the chat box says how many steps
+there are; then `/mark` with nothing after it moves to the next step and shows it in the chat box,
+and the log's mark says which step began (`==== MARK 4: step 4/19: ... ====`). `/step` shows the
+current step again. `/mark <text>` still writes a mark of your own without moving.
+
 **What it costs.** The runtime skips the work of an event nobody listens to: some events are not
 even read out of the client until a mod subscribes. Listening to everything turns all of that on,
 for every event, for the whole session: the client runs slower, and a handler runs in Lua for each

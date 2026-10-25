@@ -1527,6 +1527,10 @@ print("later " .. tostring(s.Unredirect("Interface\\Nope.txt")) .. " " .. tostri
 
         const fs::path mods = MakeTree(scratch, "probe-example", binary, fs::path());
         fs::copy(fs::path(example).parent_path() / "probe", mods / "probe", fs::copy_options::recursive);
+        {
+            std::ofstream plan(mods / "probe" / "steps.txt");
+            plan << "# a test plan\n\nwalk to the bank\n  open it  \n";
+        }
         FakeScript::Live() = WXL_SCRIPT_CONTEXT_GAME;
         FakeScript::Functions().clear();
         FakeScript::Chunks().clear();
@@ -1584,14 +1588,32 @@ print("later " .. tostring(s.Unredirect("Interface\\Nope.txt")) .. " " .. tostri
         text.type      = WXL_VALUE_STRING;
         text.as.string = wxl_str{" opened the bank ", 17};
         wxl_script_call marked = ScriptCallOf({text});
-        Check(FakeScript::Invoke("WxlProbeMark", marked) && marked.results.size() == 1 &&
+        Check(FakeScript::Invoke("WxlProbeMark", marked) && marked.results.size() == 2 &&
                   marked.results[0].as.number == 1.0,
-              "WxlProbeMark answers the mark's number");
+              "WxlProbeMark answers the mark's number, and the text it marked");
         Check(sink.Has("[wxl.probe] ==== MARK 1: opened the bank ====") &&
                   sink.Has("[wxl.probe] since the probe loaded (80.0 s): 4 events, 11 raises: OnUiEvent 7, OnUpdate 2"),
               "a mark is a line of its own, followed by what came since the previous one");
         Check(sink.Has("[wxl.probe] memory at mark 1: no snapshot: unsupported"),
               "and the memory, or why there is none");
+
+        Check(sink.Has("[wxl.probe] 2 step(s) read from steps.txt"), "a steps.txt is read, comments and blank lines left out");
+        wxl_value empty{};
+        empty.type      = WXL_VALUE_STRING;
+        empty.as.string = wxl_str{"", 0};
+        wxl_script_call stepped = ScriptCallOf({empty});
+        Check(FakeScript::Invoke("WxlProbeMark", stepped) && stepped.results.size() == 2 &&
+                  stepped.results[0].as.number == 2.0 &&
+                  sink.Has("[wxl.probe] ==== MARK 2: step 1/2: walk to the bank ===="),
+              "/mark with no text moves to the next step and marks it");
+        wxl_script_call current = ScriptCallOf({});
+        Check(FakeScript::Invoke("WxlProbeStep", current) && current.results.size() == 1,
+              "/step answers the current step");
+        wxl_script_call last  = ScriptCallOf({empty});
+        wxl_script_call after = ScriptCallOf({empty});
+        Check(FakeScript::Invoke("WxlProbeMark", last) && sink.Has("MARK 3: step 2/2: open it ====") &&
+                  FakeScript::Invoke("WxlProbeMark", after) && sink.Has("MARK 4: after the last of 2 steps"),
+              "the steps' text is trimmed, and a mark past the last says so");
 
         host.Stage(WXL_STAGE_SHUTDOWN);
         Check(sink.Has("[wxl.probe] summary: 4 of ") && sink.Has("[wxl.probe] never seen: ") &&

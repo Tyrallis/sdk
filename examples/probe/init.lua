@@ -2,7 +2,7 @@
 -- session can be read back from Logs/WarcraftXL.log alone. The first few occurrences of each
 -- event are logged with their arguments, then a line of counts every minute, and at exit the
 -- events that never came. /mark <text> in the chat box writes a marker line between two steps
--- of a test.
+-- of a test; with a steps.txt next to it, /mark alone shows the next step of the plan.
 --
 -- A test tool, not a mod to keep installed: listening to everything makes the client do the work
 -- of every event, which it skips while nobody listens (see README.md).
@@ -208,9 +208,39 @@ local function memory()
     return table.concat(parts, "; ")
 end
 
+-- A test plan, when the probe's folder has one: steps.txt, one step per line, blank lines and
+-- lines starting with # left out. /mark with no text then moves to the next step and shows it in
+-- the chat box, so the person testing reads the plan in the game and the log says which step
+-- each mark began.
+local steps, step = {}, 0
+do
+    local file = io.open("steps.txt", "r")
+    if file then
+        for line in file:lines() do
+            line = line:gsub("^%s+", ""):gsub("%s+$", "")
+            if line ~= "" and line:sub(1, 1) ~= "#" then steps[#steps + 1] = line end
+        end
+        file:close()
+        print(string.format("%d step(s) read from steps.txt", #steps))
+    end
+end
+
+-- "step 3/19: <what to do>" for step n, or what comes after the last one.
+local function describe(n)
+    if #steps == 0 then return "no steps.txt: /mark <text> writes a mark" end
+    if n == 0 then return string.format("%d steps: /mark shows the first", #steps) end
+    if n > #steps then return string.format("after the last of %d steps", #steps) end
+    return string.format("step %d/%d: %s", n, #steps, steps[n])
+end
+
+-- Writes the mark and answers its number and the line the chat box shows.
 local function mark(note)
     marks = marks + 1
     note = tostring(note or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if note == "" and #steps > 0 then
+        step = step + 1
+        note = describe(step)
+    end
     print(string.format("==== MARK %d: %s ====", marks, note))
     -- The same mark on the profiler's timeline, when a Tracy viewer is connected.
     if wxl.profile then wxl.profile.Message(string.format("MARK %d: %s", marks, note)) end
@@ -219,20 +249,32 @@ local function mark(note)
     list(string.format("%s (%.1f s): %d events, %d raises", since, clock - markedAt, #items, raises), items)
     print("memory at mark " .. marks .. ": " .. memory())
     markedAt = clock
-    return marks
+    return marks, note
 end
 
--- From the client's own Lua: /mark <text>, or /run WxlProbeMark("text").
+-- From the client's own Lua: /mark [text], /step (the current step again), or
+-- /run WxlProbeMark("text").
 if wxl.script then
     local registered, why = wxl.script.RegisterFunction("WxlProbeMark", mark, "game")
     if not registered then print("no /mark: " .. tostring(why)) end
+    wxl.script.RegisterFunction("WxlProbeStep", function() return describe(step) end, "game")
 end
 
+-- The chat box treats | as the start of an escape: a step's text shows it doubled.
 local SLASH = [[
+local function show(text)
+    DEFAULT_CHAT_FRAME:AddMessage("|cffffd200wxl.probe|r " .. tostring(text):gsub("|", "||"))
+end
 SLASH_WXLPROBEMARK1 = "/mark"
 SlashCmdList["WXLPROBEMARK"] = function(text)
-    local n = WxlProbeMark(text)
-    DEFAULT_CHAT_FRAME:AddMessage("|cffffd200wxl.probe: mark " .. tostring(n) .. "|r " .. tostring(text))
+    local n, shown = WxlProbeMark(text)
+    show("mark " .. tostring(n) .. ": " .. tostring(shown))
+end
+SLASH_WXLPROBESTEP1 = "/step"
+SlashCmdList["WXLPROBESTEP"] = function() show(WxlProbeStep()) end
+if WXL_PROBE_GREETED == nil and WxlProbeStep():find("^%d+ steps") then
+    WXL_PROBE_GREETED = true
+    show(WxlProbeStep())
 end
 ]]
 
