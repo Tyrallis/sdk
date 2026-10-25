@@ -35,12 +35,16 @@ namespace wxl::host
         std::string text;  ///< as written in the manifest
     };
 
-    /// A contract version, "major.minor".
+    /// A contract version, "major.minor.feature": see abi.h for what each part means.
     struct AbiVersion
     {
-        uint32_t major = 0;
-        uint32_t minor = 0;
+        uint32_t major   = 0;
+        uint32_t minor   = 0;
+        uint32_t feature = 0;
     };
+
+    /// "0.1.5".
+    std::string AbiText(const AbiVersion& abi);
 
     /// One entry of "binaries": the file to load for a target.
     struct Binary
@@ -87,16 +91,16 @@ namespace wxl::host
     /// Parses "1.2.3" or "1.2.3-rc.1"; false when the text is not a semver.
     bool ParseSemver(std::string_view text, Semver& out);
 
-    /// Parses "major.minor"; false when the text is not that.
+    /// Parses "major.minor.feature"; false when the text is not that.
     bool ParseAbi(std::string_view text, AbiVersion& out);
 
     /**
      * @brief Reads a manifest from its text.
      *
      * Every rule of schema/mod.json is applied: required fields, types, patterns, lengths, no
-     * unknown fields. "binaries" may be absent when "lua" is present: a script mod. The one
-     * addition is "$schema", accepted so an editor can be pointed at the schema. The first
-     * problem found is reported with its line.
+     * unknown fields. A manifest names "binaries" (a native mod) or "lua" (a script mod), and
+     * never both. The one addition is "$schema", accepted so an editor can be pointed at the
+     * schema. The first problem found is reported with its line.
      * @return false with @p error set to a readable message, e.g. "line 4: 'abi' must be a string".
      */
     bool ParseManifest(std::string_view text, Manifest& out, std::string& error);

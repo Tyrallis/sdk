@@ -17,6 +17,11 @@ namespace wxl::host
     {
         uint32_t  code    = 0;
         uintptr_t address = 0;
+        /// For an access violation or an in-page error: what was touched, and how (0 a read,
+        /// 1 a write, 8 an execution). @ref has_target says whether the OS told.
+        uintptr_t target     = 0;
+        uint32_t  access     = 0;
+        bool      has_target = false;
     };
 
     /// What the guard calls, with the context it was handed.
@@ -39,8 +44,22 @@ namespace wxl::host
     /// "access violation", "stack overflow", ... or "exception" for a code without a name.
     const char* FaultName(uint32_t code);
 
-    /// Writes "<name> (0x<code>) at 0x<address>" into @p buffer and returns it.
+    /**
+     * @brief Writes "<name> (0x<code>) [reading 0x<target>] at <where>" into @p buffer and
+     *        returns it; <where> is as @ref DescribeAddress writes it.
+     */
     const char* DescribeFault(const Fault& fault, char* buffer, size_t capacity);
+
+    /**
+     * @brief Writes where an address lies: "<module>+0x<offset>" when a loaded module holds it
+     *        ("Wow.exe+0x1A2B3C", "scout.dll+0x1F00"), "0x<address>" otherwise.
+     *
+     * An offset from the module's base is the same at every launch, where the address is not:
+     * it is what a symbol file or a disassembler is searched for. Takes no lock of the host and
+     * allocates nothing, so a crash handler may call it. Elsewhere than on Windows, always the
+     * bare address.
+     */
+    const char* DescribeAddress(uintptr_t address, char* buffer, size_t capacity);
 } // namespace wxl::host
 
 #endif // WXL_HOST_GUARD_HPP

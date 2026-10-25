@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 WarcraftXL
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
 //
 // The service wxl.lua publishes: what a runtime, a console or a test may ask of the Lua mods.
 

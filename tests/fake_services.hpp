@@ -9,18 +9,27 @@
 #ifndef WXL_TEST_FAKE_SERVICES_HPP
 #define WXL_TEST_FAKE_SERVICES_HPP
 
+#include <cctype>
 #include <cstddef>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <functional>
 #include <iterator>
 #include <map>
 #include <set>
+#include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "wxl/services/data.h"
 #include "wxl/services/hook.h"
 #include "wxl/services/net.h"
 #include "wxl/services/object.h"
 #include "wxl/services/patch.h"
+#include "wxl/services/footprint.h"
+#include "wxl/services/profile.h"
 #include "wxl/services/script.h"
 #include "wxl/services/storage.h"
 #include "wxl/services/ui.h"
@@ -37,7 +46,8 @@ namespace wxltest
 {
     // --- wxl.object -------------------------------------------------------------------------
     //
-    // Three objects: 42 the local player (dead), 43 a boar, 44 a chest. Anything else is stale.
+    // Three objects: 42 the local player (dead), 43 a boar, 44 a chest. Anything else is stale,
+    // except the wolves a test spawns: units with a guid, one handle per visibility episode.
 
     struct FakeObjects
     {
@@ -46,8 +56,19 @@ namespace wxltest
         static constexpr wxl_handle kChest  = 44;
         static constexpr wxl_handle kStale  = 7;
 
-        static bool Live(wxl_handle h) { return h == kPlayer || h == kBoar || h == kChest; }
-        static bool IsUnit(wxl_handle h) { return h == kPlayer || h == kBoar; }
+        /// handle -> guid of the spawned units still in view.
+        static std::map<wxl_handle, wxl_guid>& Spawned()
+        {
+            static std::map<wxl_handle, wxl_guid> spawned;
+            return spawned;
+        }
+
+        static void Spawn(wxl_handle h, wxl_guid guid) { Spawned()[h] = guid; }
+        static void Despawn(wxl_handle h) { Spawned().erase(h); }
+
+        static bool IsSpawned(wxl_handle h) { return Spawned().count(h) != 0; }
+        static bool Live(wxl_handle h) { return h == kPlayer || h == kBoar || h == kChest || IsSpawned(h); }
+        static bool IsUnit(wxl_handle h) { return h == kPlayer || h == kBoar || IsSpawned(h); }
 
         static wxl_bool WXL_CALL Valid(wxl_handle h) { return Live(h) ? WXL_TRUE : WXL_FALSE; }
 
@@ -55,13 +76,14 @@ namespace wxltest
         {
             if (h == kPlayer) return 0x100;
             if (h == kBoar) return 0x200;
+            if (IsSpawned(h)) return Spawned()[h];
             return WXL_GUID_NONE;
         }
 
         static uint32_t WXL_CALL Type(wxl_handle h)
         {
             if (h == kPlayer) return WXL_OBJECT_PLAYER;
-            if (h == kBoar) return WXL_OBJECT_UNIT;
+            if (h == kBoar || IsSpawned(h)) return WXL_OBJECT_UNIT;
             if (h == kChest) return WXL_OBJECT_GAMEOBJECT;
             return WXL_OBJECT_UNKNOWN;
         }
@@ -70,7 +92,19 @@ namespace wxltest
         {
             if (guid == 0x100) return kPlayer;
             if (guid == 0x200) return kBoar;
+            for (const auto& spawned : Spawned())
+                if (spawned.second == guid) return spawned.first;
             return WXL_HANDLE_NONE;
+        }
+
+        /// A chest is a game object of type 3.
+        static wxl_result WXL_CALL GameObjectType(wxl_handle h, uint32_t* out)
+        {
+            if (!out) return WXL_E_INVALID;
+            if (!Live(h)) return WXL_E_NOT_FOUND;
+            if (h != kChest) return WXL_E_INVALID;
+            *out = 3;
+            return WXL_OK;
         }
 
         static wxl_handle WXL_CALL LocalPlayer() { return kPlayer; }
@@ -96,23 +130,24 @@ namespace wxltest
             if (!out) return WXL_E_INVALID;
             if (!Live(h)) return WXL_E_NOT_FOUND;
             static const char* names[] = {"Thorgrim", "Boar", "Chest"};
-            const char*        name    = names[h - kPlayer];
+            const char*        name    = IsSpawned(h) ? "Wolf" : names[h - kPlayer];
             *out                       = wxl_str{name, static_cast<uint32_t>(std::strlen(name))};
             return WXL_OK;
         }
 
-        static wxl_result UnitRead(wxl_handle h, uint32_t* out, uint32_t player, uint32_t boar)
+        template <class V>
+        static wxl_result UnitRead(wxl_handle h, V* out, V player, V boar)
         {
             if (!out) return WXL_E_INVALID;
             if (!Live(h)) return WXL_E_NOT_FOUND;
             if (!IsUnit(h)) return WXL_E_INVALID;
-            *out = h == kPlayer ? player : boar;
+            *out = h == kPlayer ? player : h == kBoar ? boar : V(50);
             return WXL_OK;
         }
 
-        static wxl_result WXL_CALL Health(wxl_handle h, uint32_t* out) { return UnitRead(h, out, 0, 90); }
-        static wxl_result WXL_CALL MaxHealth(wxl_handle h, uint32_t* out) { return UnitRead(h, out, 5000, 120); }
-        static wxl_result WXL_CALL Level(wxl_handle h, uint32_t* out) { return UnitRead(h, out, 80, 3); }
+        static wxl_result WXL_CALL Health(wxl_handle h, int32_t* out) { return UnitRead<int32_t>(h, out, 0, 90); }
+        static wxl_result WXL_CALL MaxHealth(wxl_handle h, uint32_t* out) { return UnitRead<uint32_t>(h, out, 5000, 120); }
+        static wxl_result WXL_CALL Level(wxl_handle h, uint32_t* out) { return UnitRead<uint32_t>(h, out, 80, 3); }
 
         static wxl_result WXL_CALL Target(wxl_handle h, wxl_handle* out)
         {
@@ -143,6 +178,108 @@ namespace wxltest
             return WXL_OK;
         }
 
+        // The descriptor blocks: the player's whole (it is the active player), a unit's for the
+        // boar and the wolves, a game object's for the chest. A few fields are seeded, by index:
+        // UNIT_FIELD_TARGET 0x12, UNIT_FIELD_BYTES_0 0x17, UNIT_FIELD_HEALTH 0x18,
+        // UNIT_FIELD_MAXHEALTH 0x20, UNIT_FIELD_BOUNDINGRADIUS 0x41, GAMEOBJECT_FLAGS 0x9.
+        static std::vector<uint32_t>* Block(wxl_handle h)
+        {
+            static std::map<wxl_handle, std::vector<uint32_t>> blocks;
+            if (!Live(h)) return nullptr;
+            auto found = blocks.find(h);
+            if (found != blocks.end()) return &found->second;
+            std::vector<uint32_t> block(h == kPlayer ? 0x52E : h == kChest ? 0x12 : 0x94, 0u);
+            if (IsUnit(h))
+            {
+                const float radius = 1.5f;
+                std::memcpy(&block[0x41], &radius, sizeof radius);
+                block[0x18] = h == kPlayer ? 0 : 90;
+                block[0x20] = h == kPlayer ? 5000 : 120;
+            }
+            if (h == kPlayer)
+            {
+                block[0x12] = 0x200; // the boar, as a guid of two dwords
+                block[0x17] = 0x01000201u; // race 1, class 2, sex 0, power 1
+            }
+            if (h == kChest) block[0x9] = 32;
+            return &blocks.emplace(h, std::move(block)).first->second;
+        }
+
+        static uint32_t WXL_CALL FieldCount(wxl_handle h)
+        {
+            const std::vector<uint32_t>* block = Block(h);
+            return block ? static_cast<uint32_t>(block->size()) : 0;
+        }
+
+        static wxl_result WXL_CALL ReadFields(wxl_handle h, uint32_t first, uint32_t count, uint32_t* out)
+        {
+            if (!out) return WXL_E_INVALID;
+            const std::vector<uint32_t>* block = Block(h);
+            if (!block) return WXL_E_NOT_FOUND;
+            if (!count || first >= block->size() || count > block->size() - first) return WXL_E_INVALID;
+            std::memcpy(out, block->data() + first, count * sizeof(uint32_t));
+            return WXL_OK;
+        }
+
+        static wxl_result WXL_CALL ReadFieldMany(const wxl_handle* objects, uint32_t count, uint32_t field,
+                                                 uint32_t dwords, uint32_t* out, wxl_result* results)
+        {
+            if ((!objects || !out) && count) return WXL_E_INVALID;
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                const wxl_result result = ReadFields(objects[i], field, dwords, out + i * dwords);
+                if (result != WXL_OK) std::memset(out + i * dwords, 0, dwords * sizeof(uint32_t));
+                if (results) results[i] = result;
+            }
+            return WXL_OK;
+        }
+
+        static wxl_result WXL_CALL WriteFields(wxl_handle h, uint32_t first, uint32_t count, const uint32_t* in,
+                                               uint32_t flags)
+        {
+            if (!in || flags) return WXL_E_INVALID;
+            std::vector<uint32_t>* block = Block(h);
+            if (!block) return WXL_E_NOT_FOUND;
+            if (!count || first < 3 || first >= block->size() || count > block->size() - first) return WXL_E_INVALID;
+            std::memcpy(block->data() + first, in, count * sizeof(uint32_t));
+            return WXL_OK;
+        }
+
+        /// What watch_field was asked, in order. UNIT_FIELD_CREATEDBY (0x10) is refused, as a
+        /// field the client keeps no copy of.
+        struct Watch
+        {
+            uint32_t type;
+            uint32_t first;
+            uint32_t count;
+        };
+
+        static std::vector<Watch>& Watches()
+        {
+            static std::vector<Watch> watches;
+            return watches;
+        }
+
+        static wxl_result WXL_CALL WatchField(uint32_t type, uint32_t first, uint32_t count)
+        {
+            if (first == 0x10) return WXL_E_UNSUPPORTED;
+            Watches().push_back(Watch{type, first, count});
+            return WXL_OK;
+        }
+
+        /// unwatch_field takes back the first watch it matches, as a runtime does.
+        static wxl_result WXL_CALL UnwatchField(uint32_t type, uint32_t first, uint32_t count)
+        {
+            std::vector<Watch>& watches = Watches();
+            for (auto it = watches.begin(); it != watches.end(); ++it)
+            {
+                if (it->type != type || it->first != first || it->count != count) continue;
+                watches.erase(it);
+                break;
+            }
+            return WXL_OK;
+        }
+
         static const wxl_object_api* Table()
         {
             static wxl_object_api api = [] {
@@ -162,6 +299,13 @@ namespace wxltest
                 t.unit_target     = &Target;
                 t.enumerate       = &Enumerate;
                 t.positions       = &Positions;
+                t.gameobject_type = &GameObjectType;
+                t.field_count     = &FieldCount;
+                t.read_fields     = &ReadFields;
+                t.read_field_many = &ReadFieldMany;
+                t.write_fields    = &WriteFields;
+                t.watch_field     = &WatchField;
+                t.unwatch_field   = &UnwatchField;
                 return t;
             }();
             return &api;
@@ -169,9 +313,55 @@ namespace wxltest
     };
 
     // --- wxl.script -------------------------------------------------------------------------
+    //
+    // A context is live from the start, the game's, so a test that only registers needs nothing
+    // more. Open and Close drive the lifecycle a runtime has: Open raises ScriptVmReady for a new,
+    // empty context; Close raises ScriptVmClosing while the context still holds what was
+    // registered, then forgets it all. With no context live, every call that needs one answers
+    // WXL_E_FAILED, as script.h says.
 
     struct FakeScript
     {
+        /// How a test hands an event to the mods: its host's Raise.
+        using Raise = std::function<void(wxl_event event, const void* args)>;
+
+        static constexpr int kNone = -1;
+
+        /// The live context, a wxl_script_context value, or kNone between two of them.
+        static int& Live()
+        {
+            static int live = WXL_SCRIPT_CONTEXT_GAME;
+            return live;
+        }
+
+        /// The event names declared on the live context.
+        static std::set<std::string>& Declared()
+        {
+            static std::set<std::string> declared;
+            return declared;
+        }
+
+        /// Opens a new context: empty, live, then announced with ScriptVmReady.
+        static void Open(wxl_script_context context, const Raise& raise)
+        {
+            Functions().clear();
+            Declared().clear();
+            Live() = context;
+            const wxl_script_vm_args args{static_cast<uint32_t>(context), nullptr};
+            if (raise) raise(WXL_EV_ScriptVmReady, &args);
+        }
+
+        /// Closes the live context: ScriptVmClosing first, then everything registered goes.
+        static void Close(const Raise& raise)
+        {
+            if (Live() == kNone) return;
+            const wxl_script_vm_args args{static_cast<uint32_t>(Live()), nullptr};
+            if (raise) raise(WXL_EV_ScriptVmClosing, &args);
+            Functions().clear();
+            Declared().clear();
+            Live() = kNone;
+        }
+
         struct Registered
         {
             wxl_script_fn fn;
@@ -196,10 +386,25 @@ namespace wxltest
             return chunks;
         }
 
-        static uint32_t WXL_CALL Context() { return WXL_SCRIPT_CONTEXT_GAME; }
+        /// The live context; the glue's between two, where live() tells it from a live one.
+        static uint32_t WXL_CALL Context()
+        {
+            return Live() == kNone ? WXL_SCRIPT_CONTEXT_GLUE : static_cast<uint32_t>(Live());
+        }
+
+        /// Every call that needs a context and came while none was live, which a well-behaved
+        /// caller never makes.
+        static int& Refused()
+        {
+            static int refused = 0;
+            return refused;
+        }
+
+        static wxl_bool WXL_CALL IsLive() { return Live() == kNone ? WXL_FALSE : WXL_TRUE; }
 
         static wxl_result WXL_CALL RegisterFunction(const char* name, wxl_script_fn fn, void* user)
         {
+            if (Live() == kNone) return ++Refused(), WXL_E_FAILED;
             if (!name || !fn) return WXL_E_INVALID;
             if (Functions().count(name)) return WXL_E_INVALID;
             Functions()[name] = Registered{fn, user};
@@ -208,12 +413,16 @@ namespace wxltest
 
         static wxl_result WXL_CALL RegisterEvent(const char* name)
         {
+            if (Live() == kNone) return ++Refused(), WXL_E_FAILED;
+            Declared().insert(name);
             Events().push_back(name);
             return WXL_OK;
         }
 
         static wxl_result WXL_CALL FireEvent(const char* name, const wxl_value* args, uint32_t count)
         {
+            if (Live() == kNone) return WXL_E_FAILED;
+            if (!Declared().count(name)) return WXL_E_NOT_FOUND;
             std::string line = name;
             for (uint32_t i = 0; i < count; ++i)
             {
@@ -227,6 +436,7 @@ namespace wxltest
 
         static wxl_result WXL_CALL Run(wxl_str chunk, const char* name)
         {
+            if (Live() == kNone) return WXL_E_FAILED;
             Chunks().push_back(std::string(name) + ": " + std::string(chunk.data, chunk.size));
             return WXL_OK;
         }
@@ -336,6 +546,7 @@ namespace wxltest
                 t.push_bool         = &PushBool;
                 t.push_nil          = &PushNil;
                 t.fail              = &Fail;
+                t.live              = &IsLive;
                 return t;
             }();
             return &api;
@@ -343,9 +554,91 @@ namespace wxltest
     };
 
     // --- wxl.storage ------------------------------------------------------------------------
+    //
+    // Two files of the client's own, and the folders a mod adds, read from the disk: a name found
+    // in a folder of a priority above 0 wins over the client's, one below only fills a gap.
 
     struct FakeStorage
     {
+        /// The folders added, in the order they were.
+        static std::vector<std::pair<std::string, int32_t>>& SearchPaths()
+        {
+            static std::vector<std::pair<std::string, int32_t>> paths;
+            return paths;
+        }
+
+        /// Files opened from a folder, by handle; their handles start above the client's.
+        static std::map<wxl_handle, std::string>& OpenFromDisk()
+        {
+            static std::map<wxl_handle, std::string> open;
+            return open;
+        }
+
+        static constexpr wxl_handle kDiskHandles = 1000;
+
+        static bool Slurp(const std::filesystem::path& file, std::string& out)
+        {
+            std::error_code ec;
+            if (!std::filesystem::is_regular_file(file, ec)) return false;
+            std::ifstream      stream(file, std::ios::binary);
+            std::ostringstream text;
+            text << stream.rdbuf();
+            out = text.str();
+            return true;
+        }
+
+        /// The file a folder serves for a client name, the highest priority first: above 0
+        /// when @p winning, otherwise any.
+        static bool FromFolder(const std::string& name, bool winning, std::string& out)
+        {
+            std::string relative = name;
+            for (char& c : relative)
+                if (c == '\\') c = '/';
+            const std::pair<std::string, int32_t>* best = nullptr;
+            for (const auto& folder : SearchPaths())
+            {
+                if (winning && folder.second <= 0) continue;
+                std::error_code ec;
+                if (!std::filesystem::is_regular_file(std::filesystem::path(folder.first) / relative, ec)) continue;
+                if (!best || folder.second > best->second) best = &folder;
+            }
+            return best && Slurp(std::filesystem::path(best->first) / relative, out);
+        }
+
+        /// The names redirected, as the runtime holds them: one target per name, by its key.
+        static std::map<std::string, std::string>& Redirects()
+        {
+            static std::map<std::string, std::string> redirects;
+            return redirects;
+        }
+
+        static std::string NameKey(std::string name)
+        {
+            for (char& c : name) c = c == '/' ? '\\' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            return name;
+        }
+
+        /// The name an open of @p name reaches: its redirect, or itself.
+        static std::string Redirected(const std::string& name)
+        {
+            const auto found = Redirects().find(NameKey(name));
+            return found != Redirects().end() ? found->second : name;
+        }
+
+        /// What a name reads as: a winning folder's file, the client's, or a folder's.
+        static bool Contents(const std::string& asked, std::string& out)
+        {
+            const std::string name = Redirected(asked);
+            if (FromFolder(name, true, out)) return true;
+            const auto found = Files().find(name);
+            if (found != Files().end())
+            {
+                out = found->second;
+                return true;
+            }
+            return FromFolder(name, false, out);
+        }
+
         static std::map<std::string, std::string>& Files()
         {
             static std::map<std::string, std::string> files = {
@@ -371,29 +664,41 @@ namespace wxltest
 
         static wxl_bool WXL_CALL Exists(wxl_str path)
         {
-            return Files().count(Key(path)) ? WXL_TRUE : WXL_FALSE;
+            std::string ignored;
+            return Contents(Key(path), ignored) ? WXL_TRUE : WXL_FALSE;
         }
 
         static wxl_result WXL_CALL Size(wxl_str path, uint64_t* out)
         {
-            const auto found = Files().find(Key(path));
-            if (found == Files().end()) return WXL_E_NOT_FOUND;
-            *out = found->second.size();
+            std::string data;
+            if (!Contents(Key(path), data)) return WXL_E_NOT_FOUND;
+            *out = data.size();
             return WXL_OK;
         }
 
         static wxl_result WXL_CALL Read(wxl_str path, void* buffer, uint64_t capacity, uint64_t* out_read)
         {
-            const auto found = Files().find(Key(path));
-            if (found == Files().end()) return WXL_E_NOT_FOUND;
-            *out_read = found->second.size();
-            if (capacity < found->second.size()) return WXL_E_INVALID;
-            std::memcpy(buffer, found->second.data(), found->second.size());
+            std::string data;
+            if (!Contents(Key(path), data)) return WXL_E_NOT_FOUND;
+            *out_read = data.size();
+            if (capacity < data.size()) return WXL_E_INVALID;
+            if (!data.empty()) std::memcpy(buffer, data.data(), data.size());
             return WXL_OK;
         }
 
-        static wxl_handle WXL_CALL Open(wxl_str path)
+        static wxl_handle WXL_CALL Open(wxl_str asked)
         {
+            const std::string redirected = Redirected(Key(asked));
+            const wxl_str     path{redirected.c_str(), static_cast<uint32_t>(redirected.size())};
+            std::string       data;
+            if (FromFolder(Key(path), true, data) ||
+                (!Files().count(Key(path)) && FromFolder(Key(path), false, data)))
+            {
+                ++Opens();
+                const wxl_handle handle = kDiskHandles + OpenFromDisk().size() + 1;
+                OpenFromDisk()[handle]  = data;
+                return handle;
+            }
             const auto found = Files().find(Key(path));
             if (found == Files().end()) return WXL_HANDLE_NONE;
             ++Opens();
@@ -403,10 +708,12 @@ namespace wxltest
         static wxl_result WXL_CALL ReadAt(wxl_handle file, uint64_t offset, void* buffer, uint64_t size,
                                           uint64_t* out_read)
         {
-            if (file == WXL_HANDLE_NONE || file > Files().size()) return WXL_E_NOT_FOUND;
+            const auto disk = OpenFromDisk().find(file);
+            if (file == WXL_HANDLE_NONE || (disk == OpenFromDisk().end() && file > Files().size()))
+                return WXL_E_NOT_FOUND;
             auto it = Files().begin();
-            std::advance(it, static_cast<std::ptrdiff_t>(file - 1));
-            const std::string& data = it->second;
+            if (disk == OpenFromDisk().end()) std::advance(it, static_cast<std::ptrdiff_t>(file - 1));
+            const std::string& data = disk != OpenFromDisk().end() ? disk->second : it->second;
             if (offset >= data.size())
             {
                 *out_read = 0;
@@ -418,10 +725,62 @@ namespace wxltest
             return WXL_OK;
         }
 
-        static void WXL_CALL Close(wxl_handle) { ++Closes(); }
+        static void WXL_CALL Close(wxl_handle file)
+        {
+            ++Closes();
+            OpenFromDisk().erase(file);
+        }
 
-        static wxl_result WXL_CALL AddSearchPath(wxl_str, int32_t) { return WXL_OK; }
+        /// A folder as this system writes it: a Windows path also works where '/' separates.
+        static std::string Native(std::string path)
+        {
+#ifndef _WIN32
+            for (char& c : path)
+                if (c == '\\') c = '/';
+#endif
+            return path;
+        }
+
+        static wxl_result WXL_CALL AddSearchPath(wxl_str directory, int32_t priority)
+        {
+            const std::string folder = Native(Key(directory));
+            std::error_code   ec;
+            if (!std::filesystem::is_directory(folder, ec)) return WXL_E_NOT_FOUND;
+            for (auto& known : SearchPaths())
+                if (known.first == folder)
+                {
+                    known.second = priority;
+                    return WXL_OK;
+                }
+            SearchPaths().emplace_back(folder, priority);
+            return WXL_OK;
+        }
+
+        static wxl_result WXL_CALL RemoveSearchPath(wxl_str directory)
+        {
+            const std::string folder = Native(Key(directory));
+            for (auto it = SearchPaths().begin(); it != SearchPaths().end(); ++it)
+                if (it->first == folder)
+                {
+                    SearchPaths().erase(it);
+                    return WXL_OK;
+                }
+            return WXL_E_NOT_FOUND;
+        }
+
         static wxl_result WXL_CALL MountArchive(wxl_str, int32_t) { return WXL_OK; }
+
+        static wxl_result WXL_CALL Redirect(wxl_str from, wxl_str to)
+        {
+            if (!from.size || !to.size) return WXL_E_INVALID;
+            Redirects()[NameKey(Key(from))] = Key(to);
+            return WXL_OK;
+        }
+
+        static wxl_result WXL_CALL Unredirect(wxl_str from)
+        {
+            return Redirects().erase(NameKey(Key(from))) ? WXL_OK : WXL_E_NOT_FOUND;
+        }
 
         static uint32_t WXL_CALL Find(wxl_str pattern, wxl_str* out, uint32_t capacity)
         {
@@ -450,7 +809,271 @@ namespace wxltest
                 t.close           = &Close;
                 t.add_search_path = &AddSearchPath;
                 t.mount_archive   = &MountArchive;
+                t.remove_search_path = &RemoveSearchPath;
                 t.find            = &Find;
+                t.redirect        = &Redirect;
+                t.unredirect      = &Unredirect;
+                return t;
+            }();
+            return &api;
+        }
+    };
+
+    // --- wxl.data ---------------------------------------------------------------------------
+    //
+    // Spell.dbc is read already, every other table is not; a table is served from a path the
+    // storage fake can read.
+
+    struct FakeData
+    {
+        static std::map<std::string, std::string>& Served()
+        {
+            static std::map<std::string, std::string> served;
+            return served;
+        }
+
+        static std::string Key(wxl_str table)
+        {
+            std::string key(table.data ? table.data : "", table.size);
+            const size_t slash = key.find_last_of('\\');
+            if (slash != std::string::npos) key = key.substr(slash + 1);
+            for (char& c : key) c = static_cast<char>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c);
+            return key;
+        }
+
+        static wxl_result WXL_CALL ServeTable(wxl_str table, wxl_str path)
+        {
+            if (!table.size || !path.size) return WXL_E_INVALID;
+            if (FakeStorage::Exists(path) != WXL_TRUE) return WXL_E_NOT_FOUND;
+            if (Served().count(Key(table))) return WXL_E_FAILED;
+            Served()[Key(table)] = std::string(path.data, path.size);
+            return WXL_OK;
+        }
+
+        static wxl_result WXL_CALL RestoreTable(wxl_str table)
+        {
+            return Served().erase(Key(table)) ? WXL_OK : WXL_E_NOT_FOUND;
+        }
+
+        static wxl_str WXL_CALL ServedFrom(wxl_str table)
+        {
+            const auto found = Served().find(Key(table));
+            if (found == Served().end()) return wxl_str{nullptr, 0};
+            return wxl_str{found->second.c_str(), static_cast<uint32_t>(found->second.size())};
+        }
+
+        static wxl_bool WXL_CALL IsLoaded(wxl_str table)
+        {
+            return Key(table) == "spell.dbc" ? WXL_TRUE : WXL_FALSE;
+        }
+
+        static const wxl_data_api* Table()
+        {
+            static wxl_data_api api = [] {
+                wxl_data_api t{};
+                t.struct_size   = sizeof(wxl_data_api);
+                t.serve_table   = &ServeTable;
+                t.restore_table = &RestoreTable;
+                t.served_from   = &ServedFrom;
+                t.is_loaded     = &IsLoaded;
+                return t;
+            }();
+            return &api;
+        }
+    };
+
+    // --- wxl.footprint ----------------------------------------------------------------------
+    //
+    // A fixed picture of a client: two Storm sources, a few consumers, two archives, a database,
+    // the address space of a 32-bit process running short. What mods report joins the
+    // categories; the last threshold asked for is kept.
+
+    struct FakeFootprint
+    {
+        struct Reported
+        {
+            uint64_t bytes;
+            uint64_t count;
+        };
+
+        static bool&     Running() { static bool running = false; return running; }
+        static uint32_t& Snapshots() { static uint32_t snapshots = 0; return snapshots; }
+        static uint64_t& Threshold() { static uint64_t threshold = 0; return threshold; }
+        static std::map<std::string, Reported>& Reports()
+        {
+            static std::map<std::string, Reported> reports;
+            return reports;
+        }
+
+        static wxl_str S(const char* text) { return wxl_str{text, static_cast<uint32_t>(std::strlen(text))}; }
+
+        static wxl_result WXL_CALL Start() { Running() = true; return WXL_OK; }
+        static void WXL_CALL Stop() { Running() = false; }
+        static wxl_bool WXL_CALL IsRunning() { return Running() ? WXL_TRUE : WXL_FALSE; }
+        static wxl_result WXL_CALL Snapshot() { ++Snapshots(); return WXL_OK; }
+
+        static uint32_t WXL_CALL Categories(wxl_footprint_category* out, uint32_t capacity)
+        {
+            static const struct { const char* name; uint64_t bytes, count, peak; } kFixed[] = {
+                {"storm", 900u << 20, 1500000, 950u << 20},
+                {"textures.managed", 400u << 20, 6000, 400u << 20},
+                {"sound", 40u << 20, 0, 48u << 20},
+            };
+            const uint32_t fixed = 3;
+            const uint32_t total = fixed + static_cast<uint32_t>(Reports().size());
+            uint32_t       i     = 0;
+            for (; out && i < capacity && i < fixed; ++i)
+                out[i] = wxl_footprint_category{sizeof(wxl_footprint_category), S(kFixed[i].name), S("client"),
+                                                kFixed[i].bytes, kFixed[i].count, kFixed[i].peak};
+            for (const auto& [name, reported] : Reports())
+            {
+                if (!out || i >= capacity) break;
+                out[i++] = wxl_footprint_category{sizeof(wxl_footprint_category), S(name.c_str()), S("wxl.lua"),
+                                                  reported.bytes, reported.count, reported.bytes};
+            }
+            return total;
+        }
+
+        static uint32_t WXL_CALL Sources(wxl_footprint_source* out, uint32_t capacity)
+        {
+            static const wxl_footprint_source kRows[] = {
+                {sizeof(wxl_footprint_source), S("new"), 500u << 20, 1000000, 520u << 20, 9000000},
+                {sizeof(wxl_footprint_source), S(".\\WowClientDB.cpp"), 60u << 20, 900, 60u << 20, 900},
+            };
+            for (uint32_t i = 0; out && i < capacity && i < 2; ++i) out[i] = kRows[i];
+            return 2;
+        }
+
+        static uint32_t WXL_CALL Archives(wxl_footprint_archive* out, uint32_t capacity)
+        {
+            static const wxl_footprint_archive kRows[] = {
+                {sizeof(wxl_footprint_archive), S("Data\\common.MPQ"), 0, 65536, 40000, 3u << 20},
+                {sizeof(wxl_footprint_archive), S("Data\\patch-3.MPQ"), 30, 16384, 9000, 1u << 20},
+            };
+            for (uint32_t i = 0; out && i < capacity && i < 2; ++i) out[i] = kRows[i];
+            return 2;
+        }
+
+        static uint32_t WXL_CALL Tables(wxl_footprint_table* out, uint32_t capacity)
+        {
+            if (out && capacity)
+                out[0] = wxl_footprint_table{sizeof(wxl_footprint_table), S("DBFilesClient\\Spell.dbc"), 49839, 680,
+                                             40u << 20};
+            return 1;
+        }
+
+        static uint32_t WXL_CALL Regions(wxl_footprint_region* out, uint32_t capacity)
+        {
+            static const wxl_footprint_region kRows[] = {
+                {sizeof(wxl_footprint_region), S("committed"), S("private"), 2600ull << 20, 9000, 64u << 20},
+                {sizeof(wxl_footprint_region), S("committed"), S("image"), 120u << 20, 400, 16u << 20},
+                {sizeof(wxl_footprint_region), S("free"), S(""), 700u << 20, 3000, 90u << 20},
+            };
+            for (uint32_t i = 0; out && i < capacity && i < 3; ++i) out[i] = kRows[i];
+            return 3;
+        }
+
+        static wxl_result WXL_CALL Report(wxl_str name, uint64_t bytes, uint64_t count)
+        {
+            if (!name.size) return WXL_E_INVALID;
+            const std::string key(name.data, name.size);
+            if (bytes == 0 && count == 0)
+                Reports().erase(key);
+            else
+                Reports()[key] = Reported{bytes, count};
+            return WXL_OK;
+        }
+
+        static wxl_result WXL_CALL WatchPressure(uint64_t bytes)
+        {
+            Threshold() = bytes;
+            return WXL_OK;
+        }
+
+        static const wxl_footprint_api* Table()
+        {
+            static wxl_footprint_api api = [] {
+                wxl_footprint_api t{};
+                t.struct_size    = sizeof(wxl_footprint_api);
+                t.start          = &Start;
+                t.stop           = &Stop;
+                t.running        = &IsRunning;
+                t.snapshot       = &Snapshot;
+                t.categories     = &Categories;
+                t.sources        = &Sources;
+                t.archives       = &Archives;
+                t.tables         = &Tables;
+                t.regions        = &Regions;
+                t.report         = &Report;
+                t.watch_pressure = &WatchPressure;
+                return t;
+            }();
+            return &api;
+        }
+    };
+
+    // --- wxl.profile -------------------------------------------------------------------------
+    //
+    // A viewer that is connected when the test says, and a trace of what was opened and closed:
+    // "+name", "-name", "text:..." in order.
+
+    struct FakeProfile
+    {
+        static bool& Connected() { static bool connected = false; return connected; }
+        static std::vector<std::string>& Names() { static std::vector<std::string> names; return names; }
+        static std::vector<std::string>& Trace() { static std::vector<std::string> trace; return trace; }
+
+        static std::string Text(wxl_str text) { return std::string(text.data ? text.data : "", text.size); }
+
+        static wxl_bool WXL_CALL IsConnected() { return Connected() ? WXL_TRUE : WXL_FALSE; }
+        static uintptr_t WXL_CALL Location(wxl_str name, wxl_str, wxl_str, uint32_t, uint32_t)
+        {
+            if (!name.size) return 0;
+            for (size_t i = 0; i < Names().size(); ++i)
+                if (Names()[i] == Text(name)) return i + 1;
+            Names().push_back(Text(name));
+            return Names().size();
+        }
+        static uintptr_t WXL_CALL Begin(uintptr_t location)
+        {
+            if (!Connected() || !location) return 0;
+            Trace().push_back("+" + Names()[location - 1]);
+            return location;
+        }
+        static void WXL_CALL End(uintptr_t zone)
+        {
+            if (zone) Trace().push_back("-" + Names()[zone - 1]);
+        }
+        static void WXL_CALL ZoneText(uintptr_t zone, wxl_str text)
+        {
+            if (zone) Trace().push_back("text:" + Text(text));
+        }
+        static void WXL_CALL Plot(wxl_str name, double value)
+        {
+            if (Connected()) Trace().push_back("plot:" + Text(name) + "=" + std::to_string(static_cast<int>(value)));
+        }
+        static void WXL_CALL Message(wxl_str text)
+        {
+            if (Connected()) Trace().push_back("message:" + Text(text));
+        }
+        static void WXL_CALL FrameMark(wxl_str name)
+        {
+            if (Connected()) Trace().push_back("frame:" + Text(name));
+        }
+
+        static const wxl_profile_api* Table()
+        {
+            static wxl_profile_api api = [] {
+                wxl_profile_api t{};
+                t.struct_size = sizeof(wxl_profile_api);
+                t.connected   = &IsConnected;
+                t.location    = &Location;
+                t.zone_begin  = &Begin;
+                t.zone_end    = &End;
+                t.zone_text   = &ZoneText;
+                t.plot        = &Plot;
+                t.message     = &Message;
+                t.frame_mark  = &FrameMark;
                 return t;
             }();
             return &api;

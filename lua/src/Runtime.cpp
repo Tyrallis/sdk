@@ -1,8 +1,13 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 WarcraftXL
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
 
 #include "Runtime.hpp"
 
+#include "Objects.hpp"
+#include "Profile.hpp"
+#include "Shims.hpp"
+
+#include "wxl/host/admission.hpp"
 #include "wxl/host/manifest.hpp"
 
 #include <algorithm>
@@ -25,10 +30,11 @@ namespace wxl::lua
 
     namespace
     {
-        constexpr int kWarnOffThread  = 0;
-        constexpr int kWarnUnraised   = 1;
-        constexpr int kWarnBadReturn  = 2;
-        constexpr int kWarnNoAnswer   = 3;
+        constexpr int kWarnOffThread   = 0;
+        constexpr int kWarnUnraised    = 1;
+        constexpr int kWarnBadReturn   = 2;
+        constexpr int kWarnNoAnswer    = 3;
+        constexpr int kWarnExtraReturn = 4;
 
         /// A path a manifest may name: relative, and never leaving the folder.
         bool StaysInside(const std::string& path)
@@ -38,11 +44,6 @@ namespace wxl::lua
             for (const auto& component : p)
                 if (component == "..") return false;
             return true;
-        }
-
-        std::string AbiText(uint32_t major, uint32_t minor)
-        {
-            return std::to_string(major) + "." + std::to_string(minor);
         }
     } // namespace
 
@@ -55,16 +56,45 @@ namespace wxl::lua
         {
             slots_[i].runtime = this;
             slots_[i].event   = reflect::Find(static_cast<wxl_event>(i));
+            if (slots_[i].event) slots_[i].writable = WritableOf(*slots_[i].event);
         }
         // Update drives the queue, the reload poll and onUpdate; UiRenderEnd drives onDraw.
         EnsureNative(slots_[WXL_EV_Update], nullptr);
         EnsureNative(slots_[WXL_EV_UiRenderEnd], nullptr);
+        // An object's Lua identity and the fields stored on it end with it, once every handler
+        // of every mod, Lua or not, has seen it leave.
+        objectGone_ = wxl::Subscribe(WXL_EV_ObjectDestroy, &Runtime::OnObjectGone, this, INT32_MAX);
+        // What the mods registered with the client's script is registered again in each context.
+        shims::Start();
+    }
+
+    void WXL_CALL Runtime::OnObjectGone(void* user, const void* args)
+    {
+        Runtime* self = static_cast<Runtime*>(user);
+        // Objects belong to the main thread; a runtime raising this elsewhere broke that first.
+        if (!args || std::this_thread::get_id() != self->mainThread_) return;
+        const wxl_handle handle = static_cast<const wxl_object_args*>(args)->object;
+        for (const std::unique_ptr<ScriptMod>& mod : self->mods_)
+            if (mod->Loaded()) ForgetObject(mod->State(), handle);
     }
 
     Runtime::~Runtime()
     {
         Stop();
         if (instance_ == this) instance_ = nullptr;
+    }
+
+    host::AbiVersion Runtime::Abi() const
+    {
+        const size_t     needed  = offsetof(wxl_host, abi_feature) + sizeof(host_->abi_feature);
+        host::AbiVersion runtime = {host_->abi_major, host_->abi_minor,
+                                    host_->struct_size >= needed ? host_->abi_feature : 0};
+        const host::AbiVersion built = {WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
+                                        WXL_ABI_VERSION_FEATURE};
+        // The host admitted this binary, so the majors agree: the lower of the two is served.
+        if (runtime.major != built.major) return runtime;
+        if (runtime.minor != built.minor) return runtime.minor < built.minor ? runtime : built;
+        return runtime.feature < built.feature ? runtime : built;
     }
 
     void Runtime::Log(wxl_log_level level, std::string_view message) const
@@ -97,29 +127,25 @@ namespace wxl::lua
         return binary.parent_path().parent_path().parent_path().parent_path();
     }
 
-    void Runtime::Admit(const host::ModCandidate& candidate)
+    std::string Runtime::Refusal(const host::Manifest& manifest) const
     {
-        const host::Manifest& manifest = candidate.manifest;
-        const auto refuse = [&](const std::string& reason) {
-            Log(WXL_LOG_WARN, "refused " + manifest.id + ": " + reason);
-        };
-
-        if (!StaysInside(manifest.lua))
-            return refuse("entry '" + manifest.lua + "' leaves the mod folder");
-        if (manifest.abi.major != host_->abi_major)
-            return refuse("written against abi " + AbiText(manifest.abi.major, manifest.abi.minor) +
-                          "; this runtime implements " + AbiText(host_->abi_major, host_->abi_minor) +
-                          " and a different major cannot be reconciled");
-        if (manifest.abi.minor > host_->abi_minor)
-            return refuse("written against abi " + AbiText(manifest.abi.major, manifest.abi.minor) +
-                          ", newer than this runtime's " +
-                          AbiText(host_->abi_major, host_->abi_minor));
+        if (!StaysInside(manifest.lua)) return "entry '" + manifest.lua + "' leaves the mod folder";
+        if (std::string reason = host::AbiRefusal(manifest.abi, Abi()); !reason.empty()) return reason;
         for (const host::ServiceRef& ref : manifest.required)
             if (!host_->has_service(ref.service.c_str(), ref.version))
-                return refuse("requires service " + ref.service + " version " +
-                              std::to_string(ref.version) + ", which this runtime does not have");
+                return "requires service " + ref.service + " version " + std::to_string(ref.version) +
+                       ", which this runtime does not have";
+        return std::string();
+    }
 
-        mods_.push_back(std::make_unique<ScriptMod>(*this, candidate));
+    void Runtime::Admit(const host::ModCandidate& candidate)
+    {
+        if (const std::string reason = Refusal(candidate.manifest); !reason.empty())
+        {
+            Log(WXL_LOG_WARN, "refused " + candidate.manifest.id + ": " + reason);
+            return;
+        }
+        mods_.push_back(std::make_unique<ScriptMod>(*this, candidate, static_cast<uint32_t>(mods_.size())));
     }
 
     namespace
@@ -201,7 +227,7 @@ namespace wxl::lua
             candidate.manifest.id          = id;
             candidate.manifest.name        = name;
             candidate.manifest.version.text = "0.0.0";
-            candidate.manifest.abi         = host::AbiVersion{host_->abi_major, host_->abi_minor};
+            candidate.manifest.abi         = Abi();
             candidate.manifest.lua         = "init.lua";
             Log(WXL_LOG_INFO, "found " + id + " in folder '" + name + "' (no manifest)");
             candidates.push_back(std::move(candidate));
@@ -230,10 +256,7 @@ namespace wxl::lua
 
         uint32_t loaded = 0;
         for (std::unique_ptr<ScriptMod>& mod : mods_)
-        {
-            mod->Mark();
             if (mod->Load()) ++loaded;
-        }
         Log(WXL_LOG_INFO, std::to_string(loaded) + " script mod(s) loaded, " +
                               std::to_string(mods_.size() - loaded) + " not");
     }
@@ -253,6 +276,8 @@ namespace wxl::lua
 
     void Runtime::Stop()
     {
+        objectGone_.Reset();
+        shims::Stop();
         for (size_t i = mods_.size(); i-- > 0;)
         {
             DropHandlers(*mods_[i]);
@@ -262,6 +287,7 @@ namespace wxl::lua
         for (Slot& slot : slots_)
         {
             slot.handlers.clear();
+            slot.arriving.clear();
             slot.native.Reset();
         }
         std::lock_guard<std::mutex> lock(queueLock_);
@@ -285,21 +311,43 @@ namespace wxl::lua
     {
         Slot& slot = slots_[event.id];
         EnsureNative(slot, &mod);
-        slot.handlers.push_back(Handler{&mod, ref, self, override, ++nextId_, true});
+        const Handler handler{&mod, ref, self, override, ++nextId_, true,
+                              profile::Location(mod, std::string("On") + event.name)};
+        // A dispatch walks `handlers` by index: one subscribed meanwhile waits beside it.
+        if (slot.depth == 0)
+        {
+            Place(slot, handler);
+        }
+        else
+        {
+            slot.arriving.push_back(handler);
+            slot.dirty = true;
+        }
         return nextId_;
+    }
+
+    void Runtime::Place(Slot& slot, const Handler& handler)
+    {
+        const uint32_t rank = handler.mod->Rank();
+        const auto     at   = std::upper_bound(slot.handlers.begin(), slot.handlers.end(), rank,
+                                               [](uint32_t r, const Handler& h) { return r < h.mod->Rank(); });
+        slot.handlers.insert(at, handler);
     }
 
     bool Runtime::Unobserve(ScriptMod& mod, uint32_t id)
     {
         for (Slot& slot : slots_)
         {
-            for (Handler& handler : slot.handlers)
+            for (std::vector<Handler>* list : {&slot.handlers, &slot.arriving})
             {
-                if (handler.id != id || handler.mod != &mod || !handler.live) continue;
-                handler.live = false;
-                slot.dirty   = true;
-                if (slot.depth == 0) Compact(slot);
-                return true;
+                for (Handler& handler : *list)
+                {
+                    if (handler.id != id || handler.mod != &mod || !handler.live) continue;
+                    handler.live = false;
+                    slot.dirty   = true;
+                    if (slot.depth == 0) Compact(slot);
+                    return true;
+                }
             }
         }
         return false;
@@ -309,11 +357,14 @@ namespace wxl::lua
     {
         for (Slot& slot : slots_)
         {
-            for (Handler& handler : slot.handlers)
+            for (std::vector<Handler>* list : {&slot.handlers, &slot.arriving})
             {
-                if (handler.mod != &mod) continue;
-                handler.live = false;
-                slot.dirty   = true;
+                for (Handler& handler : *list)
+                {
+                    if (handler.mod != &mod) continue;
+                    handler.live = false;
+                    slot.dirty   = true;
+                }
             }
             if (slot.dirty && slot.depth == 0) Compact(slot);
         }
@@ -321,9 +372,12 @@ namespace wxl::lua
 
     void Runtime::Compact(Slot& slot)
     {
-        slot.handlers.erase(std::remove_if(slot.handlers.begin(), slot.handlers.end(),
-                                           [](const Handler& h) { return !h.live; }),
+        const auto dead = [](const Handler& h) { return !h.live; };
+        slot.handlers.erase(std::remove_if(slot.handlers.begin(), slot.handlers.end(), dead),
                             slot.handlers.end());
+        for (const Handler& handler : slot.arriving)
+            if (handler.live) Place(slot, handler);
+        slot.arriving.clear();
         slot.dirty = false;
         // The two slots the runtime itself works from stay subscribed.
         const bool own = slot.event && (slot.event->id == WXL_EV_Update || slot.event->id == WXL_EV_UiRenderEnd);
@@ -343,7 +397,8 @@ namespace wxl::lua
     {
         for (const Slot& slot : slots_)
             if (slot.depth != 0) return true;
-        return false;
+        // A script function a mod registered is running, called by the client's own script.
+        return shims::Calling();
     }
 
     void Runtime::WarnOnce(const ScriptMod& mod, const reflect::Event& event, int what,
@@ -405,22 +460,34 @@ namespace wxl::lua
         {
             const Handler handler = slot.handlers[i];
             if (!handler.live || !handler.mod->Runs()) continue;
+            // A field's change goes to the mods that watch it, as the host does for native mods.
+            if (slot.event->id == WXL_EV_ObjectFieldChanged &&
+                !handler.mod->Watches().Covers(*static_cast<const wxl_object_field_args*>(args)))
+                continue;
 
             lua_State* L    = handler.mod->State();
             const int  base = lua_gettop(L);
+            // The traceback, the function, self, a value per member: never more than this.
+            if (!lua_checkstack(L, static_cast<int>(slot.event->field_count) + 3))
+            {
+                handler.mod->ReportError(std::string("in its handler for On") + slot.event->name,
+                                         "the Lua stack cannot take the event's parameters");
+                continue;
+            }
             lua_rawgeti(L, LUA_REGISTRYINDEX, handler.mod->TracebackRef());
-            // The args userdata is kept at base+2 so it outlives the call, and nulled after.
-            ArgsBox* box = PushArgs(L, *slot.event, args, handler.override && answerable);
             lua_rawgeti(L, LUA_REGISTRYINDEX, handler.ref);
-            int nargs = 1;
+            int nargs = 0;
             if (handler.self != LUA_NOREF)
             {
                 lua_rawgeti(L, LUA_REGISTRYINDEX, handler.self);
-                nargs = 2;
+                nargs = 1;
             }
-            lua_pushvalue(L, base + 2);
-            const int status = lua_pcall(L, nargs, 1, base + 1);
-            box->args        = nullptr;
+            nargs += PushParameters(L, *slot.event, args);
+            int status = 0;
+            {
+                const profile::Call zone(handler.zone);
+                status = lua_pcall(L, nargs, LUA_MULTRET, base + 1);
+            }
 
             if (status != 0)
             {
@@ -431,7 +498,8 @@ namespace wxl::lua
             }
             else if (handler.override)
             {
-                if (answerable) TakeAnswer(L, *handler.mod, *slot.event, args);
+                if (answerable)
+                    TakeAnswers(L, *handler.mod, slot, args, base + 2, lua_gettop(L) - (base + 1));
                 else
                     WarnOnce(*handler.mod, *slot.event, kWarnOffThread,
                              "mod " + handler.mod->Id() + ": On" + slot.event->name +
@@ -445,51 +513,62 @@ namespace wxl::lua
         if (slot.depth == 0 && slot.dirty) Compact(slot);
     }
 
-    void Runtime::TakeAnswer(lua_State* L, ScriptMod& mod, const reflect::Event& event, const void* args)
+    void Runtime::TakeAnswers(lua_State* L, ScriptMod& mod, const Slot& slot, const void* args,
+                              int first, int count)
     {
-        switch (lua_type(L, -1))
+        const reflect::Event& event = *slot.event;
+        const std::string     where = "mod " + mod.Id() + ": the Override of On" + event.name;
+
+        if (count > static_cast<int>(slot.writable.size()))
         {
-        case LUA_TNIL:
-        case LUA_TNONE: return;
-        case LUA_TBOOLEAN:
-        {
-            if (!lua_toboolean(L, -1)) return;
-            const reflect::Field* field = AnswerOf(event);
-            if (!field)
-                return WarnOnce(mod, event, kWarnBadReturn,
-                                "mod " + mod.Id() + ": the Override of On" + event.name +
-                                    " returned true, but its args have no answer member; return "
-                                    "a string for its buffer");
-            if (!WriteAnswer(*field, args))
-                WarnOnce(mod, event, kWarnNoAnswer,
-                         "mod " + mod.Id() + ": the runtime passed no '" + field->name +
-                             "' flag with On" + event.name + "; the answer is not taken");
-            return;
+            std::string members;
+            for (const reflect::Field* field : slot.writable)
+                members += (members.empty() ? "'" : ", '") + std::string(field->name) + "'";
+            WarnOnce(mod, event, kWarnExtraReturn,
+                     where + " returned " + std::to_string(count) + " values; it answers through " +
+                         members + ", one value each, and the rest are not taken");
         }
-        case LUA_TSTRING:
+
+        for (int i = 0; i < count && i < static_cast<int>(slot.writable.size()); ++i)
         {
-            const reflect::Field* field = BufferOf(event);
-            if (!field)
-                return WarnOnce(mod, event, kWarnBadReturn,
-                                "mod " + mod.Id() + ": the Override of On" + event.name +
-                                    " returned a string, but its args have no buffer member; "
-                                    "return true for its answer");
-            size_t      size = 0;
-            const char* text = lua_tolstring(L, -1, &size);
+            const reflect::Field& field = *slot.writable[i];
+            const int             index = first + i;
+            const int             type  = lua_type(L, index);
+            if (type == LUA_TNIL) continue;
+
+            if (field.kind == reflect::Kind::answer)
+            {
+                if (type != LUA_TBOOLEAN)
+                {
+                    WarnOnce(mod, event, kWarnBadReturn,
+                             where + " returned a " + lua_typename(L, type) + " for '" + field.name +
+                                 "'; it takes true to answer, or false or nil to leave it");
+                    continue;
+                }
+                // WXL_TRUE is a request, honoured unless another handler already decided;
+                // false is never written back.
+                if (lua_toboolean(L, index) && !WriteAnswer(field, args))
+                    WarnOnce(mod, event, kWarnNoAnswer,
+                             "mod " + mod.Id() + ": the runtime passed no '" + field.name +
+                                 "' flag with On" + event.name + "; the answer is not taken");
+                continue;
+            }
+
+            if (type != LUA_TSTRING)
+            {
+                WarnOnce(mod, event, kWarnBadReturn,
+                         where + " returned a " + lua_typename(L, type) + " for '" + field.name +
+                             "'; it takes a string, or nil to leave it");
+                continue;
+            }
+            size_t      size     = 0;
+            const char* text     = lua_tolstring(L, index, &size);
             uint32_t    capacity = 0;
-            if (!WriteBuffer(*field, args, std::string_view(text, size), capacity))
-                Log(WXL_LOG_WARN, "mod " + mod.Id() + ": the string returned for On" + event.name +
-                                      " is " + std::to_string(size) + " bytes; '" + field->name +
-                                      "' takes at most " + std::to_string(capacity ? capacity - 1 : 0) +
+            if (!WriteBuffer(field, args, std::string_view(text, size), capacity))
+                Log(WXL_LOG_WARN, where + " returned " + std::to_string(size) + " bytes for '" +
+                                      field.name + "', which takes at most " +
+                                      std::to_string(capacity ? capacity - 1 : 0) +
                                       "; it is not taken");
-            return;
-        }
-        default:
-            WarnOnce(mod, event, kWarnBadReturn,
-                     "mod " + mod.Id() + ": the Override of On" + event.name + " returned a " +
-                         lua_typename(L, lua_type(L, -1)) +
-                         "; an Override returns true, a string, or nothing");
-            return;
         }
     }
 
@@ -531,7 +610,18 @@ namespace wxl::lua
         if (mod.Runs()) mod.Call(ScriptMod::Callback::Shutdown);
         DropHandlers(mod);
         mod.Close();
-        mod.Mark();
+
+        // A changed mod.json is read again and checked as at the start.
+        std::string problem;
+        if (mod.Reread(problem)) problem = Refusal(mod.Manifest());
+        if (!problem.empty())
+        {
+            // Watched as they are now, so that the next change to either tries again.
+            mod.Rewatch();
+            Log(WXL_LOG_ERROR, "mod " + mod.Id() + " stays unloaded: " + problem +
+                                   "; it loads again when its files change");
+            return;
+        }
         if (mod.Load() && ready_) mod.Call(ScriptMod::Callback::Init);
     }
 
@@ -540,8 +630,9 @@ namespace wxl::lua
         uint32_t reloaded = 0;
         for (std::unique_ptr<ScriptMod>& mod : mods_)
         {
-            if (!mod->Changed()) continue;
-            Log(WXL_LOG_INFO, "mod " + mod->Id() + ": its files changed");
+            const std::filesystem::path changed = mod->Changed();
+            if (changed.empty()) continue;
+            Log(WXL_LOG_INFO, "mod " + mod->Id() + ": " + changed.generic_u8string() + " changed");
             ReloadMod(*mod);
             ++reloaded;
         }

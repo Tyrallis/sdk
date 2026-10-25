@@ -8,6 +8,7 @@
 #define WXL_HOST_MOD_HOST_HPP
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <mutex>
@@ -44,7 +45,9 @@ namespace wxl::host
         LogSink*      log_sink    = nullptr; ///< not owned; null drops every line
         wxl_log_level log_minimum = WXL_LOG_TRACE;
 
-        /// The events this runtime raises. A subscribe to any other gets WXL_SUBSCRIPTION_NONE.
+        /// The events this runtime raises. A subscribe to any other gets WXL_SUBSCRIPTION_NONE,
+        /// and so does one from a mod whose binary was built against headers older than the
+        /// event (wxl_mod_info's abi against events.def's WXL_EVENTS_SINCE rows).
         std::vector<wxl_event> events;
 
         /// Published before any mod loads, so a manifest's `requires` can be answered.
@@ -59,15 +62,15 @@ namespace wxl::host
     {
         std::string           id;
         std::string           name;
-        uint32_t              version = 0;
         std::string           directory_name;
         std::filesystem::path directory;
         std::filesystem::path binary;
         Manifest              manifest;
+        AbiVersion            built_abi;          ///< what wxl_mod_info reports: the headers it was built against
         bool                  has_stage  = false; ///< exports wxl_mod_stage
         bool                  has_unload = false; ///< exports wxl_mod_unload
-        bool                  disabled   = false; ///< faulted; no more of its code is called
-        std::string           fault;              ///< what it was doing when it faulted
+        bool                  disabled   = false; ///< faulted or disabled itself; no more of its code is called
+        std::string           fault;              ///< what it was doing when it faulted, or the reason it gave
     };
 
     /// A folder that did not become a loaded mod, and why.
@@ -92,7 +95,9 @@ namespace wxl::host
      * crash guard. A mod that faults is logged with what it was doing and disabled: its
      * subscriptions are dropped, its later stages and its unload are skipped, its binary stays
      * mapped, and the host goes on. The services it published stay published, since another mod
-     * may hold the pointer.
+     * may hold the pointer. A mod that fails in a way the guard cannot see, such as a C++
+     * exception reaching its entry point, disables itself the same way through the table's
+     * `disable`.
      *
      * Threads. The host is built, loads, reports stages and unloads on one thread, the main
      * one: the thread that constructs it. Events may be raised and handlers may subscribe from
@@ -142,6 +147,48 @@ namespace wxl::host
         void Raise(wxl_event event, const void* args);
 
         /**
+         * @brief Whether a @ref Raise of @p event would reach any handler.
+         *
+         * One atomic load and no lock, from any thread: a seam asks it before reading the
+         * client for the event's args, so an event nobody listens to costs only the question.
+         * See EventBus::Listening.
+         */
+        bool Listening(wxl_event event) const { return events_.Listening(event); }
+
+        /// Has @p handler told when an event gains its first handler or loses its last; see
+        /// EventBus::SetListenHandler.
+        void SetListenHandler(EventBus::ListenFn handler, void* user)
+        {
+            events_.SetListenHandler(handler, user);
+        }
+
+        /// The same, to the handlers of the mods @p accept takes (by ModToken): an event that
+        /// concerns some mods only.
+        void RaiseTo(wxl_event event, const void* args, EventBus::AcceptFn accept, void* user);
+
+        /// One of the last events raised while someone listened, as @ref Recent reports it.
+        struct RecentEvent
+        {
+            wxl_event event;
+            bool      main_thread; ///< raised on the thread that built the host
+            uint32_t  ms_ago;      ///< how long before the call to Recent
+        };
+
+        /// How many raises @ref Recent remembers.
+        static constexpr size_t kRecentEvents = 32;
+
+        /**
+         * @brief The last events raised to at least one handler, oldest first; returns how many
+         *        were written.
+         *
+         * What a crash report says the mods were doing. Lock-free and allocation-free, safe from
+         * an exception filter on any thread; a raise racing the read may be missed or shown
+         * twice. An event nobody listens to is not remembered: the record costs only a raise
+         * that dispatches.
+         */
+        size_t Recent(RecentEvent* out, size_t capacity) const;
+
+        /**
          * @brief Disables a mod after it faulted: logs what it was doing, drops its
          *        subscriptions, skips its remaining entry points, tells the disable handler.
          *
@@ -150,6 +197,24 @@ namespace wxl::host
          * @param what  what the mod was doing, for the log: "in wxl_mod_stage(early)".
          */
         void Disable(ModToken token, std::string_view what);
+
+        /**
+         * @brief Disables a mod at its own request (wxl_host.disable), as @ref Disable does
+         *        after a fault.
+         * @param reason  what the mod says went wrong: "OnReady threw an exception: ...".
+         */
+        void DisableOnRequest(ModToken token, std::string_view reason);
+
+        /**
+         * @brief Gives the host a profiler: every dispatch and every handler becomes a zone, the
+         *        handler's named after its mod, while @ref SetProfiling is on.
+         *
+         * Before @ref LoadAll; copied. A runtime without a profiler never calls it.
+         */
+        void SetProfiler(const Profiler& profiler);
+
+        /// Whether a viewer is watching. The runtime says so as it learns it, once a frame.
+        void SetProfiling(bool on) { events_.SetProfiling(on); }
 
         /// Called after a mod is disabled. A runtime uses it to withdraw what the mod registered
         /// with its services.
@@ -205,20 +270,39 @@ namespace wxl::host
                                                         void* user, int32_t priority);
         static void WXL_CALL             ThunkUnsubscribe(wxl_subscription subscription);
         static void WXL_CALL             ThunkEmit(wxl_event event, const void* args);
+        static void WXL_CALL             ThunkDisable(wxl_str reason);
+        static wxl_bool WXL_CALL         ThunkRaises(wxl_event event);
 
+        /// Remembers a raise for @ref Recent when it reaches a handler.
+        void NoteRaise(wxl_event event);
+
+        static std::string NameOwner(void* user, uint32_t owner);
         static void     OnHandlerFault(void* user, uint32_t owner, wxl_event event, const Fault& fault);
         static uint32_t SwapOwner(void* user, uint32_t owner);
 
         /// Finishes, on the main thread, the disables a fault on another thread left pending.
         void SettleDisables();
-        void FinishDisable(ModToken token, const std::string& what);
+
+        /// Drops the mod's handlers now and the rest on the main thread. @p headline is what the
+        /// log says happened, after the mod's id: "faulted in ...", "disabled itself: ...".
+        void DisableWith(ModToken token, std::string headline, std::string fault);
+        void FinishDisable(ModToken token, const std::string& headline, const std::string& fault);
 
         /// Logs, once per mod and event, a subscription the runtime refused because it never
         /// raises that event: the handler is real code that will never run.
         void WarnUnraised(ModToken token, wxl_event event);
 
+        /// Logs, once per mod and event, a subscription refused because the event is newer than
+        /// the headers the mod's binary was built against.
+        void WarnNewer(ModToken token, wxl_event event, const AbiVersion& built,
+                       const AbiVersion& since);
+
         /// The id of a loaded mod, or of the one loading; empty for nobody.
         std::string IdOf(ModToken token) const;
+
+        /// The abi a loaded mod's binary, or the loading one's once its query answered, was built
+        /// against. False for nobody, and for a mod still inside wxl_mod_query.
+        bool BuiltAbiOf(ModToken token, AbiVersion& out) const;
 
         void Refuse(const std::string& id, const std::string& directoryName,
                     const std::filesystem::path& directory, Verdict verdict,
@@ -231,6 +315,7 @@ namespace wxl::host
                        size_t capacity);
 
         HostConfig       config_;
+        Profiler         profiler_;
         std::string      modsDirectoryText_; ///< what info_.mods_directory points into
         Logger           logger_;
         ServiceRegistry  services_;
@@ -238,19 +323,37 @@ namespace wxl::host
         wxl_runtime_info info_{};
         wxl_host         table_{};
 
-        std::vector<LoadedMod>  loaded_;
+        std::vector<LoadedMod>  loaded_;   ///< reserved before the first load: entries never move
+        std::atomic<size_t>     loadedCount_{0}; ///< loaded_.size(), for a reader on another thread
         std::vector<ModBinary>  binaries_; ///< index-aligned with loaded_
         std::vector<RefusedMod> refused_;
         bool                    loadedAll_   = false;
         std::string             loadingId_;  ///< the mod inside wxl_mod_query or wxl_mod_load
+        AbiVersion              loadingAbi_;           ///< its built abi, once wxl_mod_query answered
+        bool                    loadingAbiKnown_ = false;
+        std::string             loadingDisabled_;      ///< the reason, when it disabled itself while loading
+        bool                    loadingDisabledSet_ = false;
         DisableFn               disableFn_   = nullptr;
         void*                   disableUser_ = nullptr;
         std::thread::id         mainThread_;
 
-        mutable std::mutex                              stateLock_; ///< guards the two below
-        std::vector<std::pair<ModToken, std::string>>   pendingDisables_;
+        mutable std::mutex                              stateLock_; ///< guards the three below
+        struct PendingDisable
+        {
+            ModToken    token;
+            std::string headline;
+            std::string fault;
+        };
+        std::vector<PendingDisable>                     pendingDisables_;
         std::set<std::pair<ModToken, uint32_t>>         warnedUnraised_;
+        std::set<std::pair<ModToken, uint32_t>>         warnedNewer_;
         std::atomic<bool>                               disablesPending_{false};
+
+        /// event + 1 (0 is an empty slot), main-thread bit << 16, milliseconds since the host
+        /// was built << 32. One store per raise, read without a lock.
+        std::atomic<uint64_t>                           recent_[kRecentEvents] = {};
+        std::atomic<uint32_t>                           recentNext_{0};
+        std::chrono::steady_clock::time_point           builtAt_ = std::chrono::steady_clock::now();
     };
 } // namespace wxl::host
 

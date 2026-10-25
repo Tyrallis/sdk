@@ -41,11 +41,27 @@ namespace wxl::host
     AbiVersion RuntimeAbi();
 
     /**
+     * @brief Whether a runtime serving @p served can take a mod that needs @p needed.
+     *
+     * The rule of abi.h: the same major; while the major is 0 the same minor, after it a minor no
+     * higher; within the same major.minor a feature no higher.
+     * @return empty when it can, otherwise the reason, e.g. "needs abi 0.1.7, newer than this
+     *         runtime's 0.1.5: it uses what was appended after 0.1.5".
+     */
+    std::string AbiRefusal(const AbiVersion& needed, const AbiVersion& served);
+
+    /// Whether @p version is @p floor or comes after it, in the order versions follow each other.
+    bool AtLeast(const AbiVersion& version, const AbiVersion& floor);
+
+    /// The version of the contract that brought an event, from events.def's WXL_EVENTS_SINCE rows.
+    AbiVersion EventSince(wxl_event event);
+
+    /**
      * @brief The checks a manifest alone can answer.
      *
      * In order: a binary for @p target (none: skip; a manifest with "lua" and no binary is a
-     * script mod, skipped with a reason naming wxl.lua), the abi major equal to this runtime's
-     * and the minor no higher, every required service published. The binary path must stay
+     * script mod, skipped with a reason naming wxl.lua), the abi the manifest needs served by
+     * this runtime (AbiRefusal), every required service published. The binary path must stay
      * inside the mod folder: no absolute path, no ".." component.
      */
     Decision AdmitManifest(const Manifest& manifest, std::string_view target,
@@ -54,9 +70,11 @@ namespace wxl::host
     /**
      * @brief The checks that need what wxl_mod_query returned.
      *
-     * A null @p info declines the load. Otherwise the struct must be the size this runtime knows,
-     * and its id and abi must say what the manifest says: a binary and a manifest that disagree
-     * are not the same mod.
+     * A null @p info declines the load. Otherwise the struct must reach at least as far as this
+     * runtime reads, its id must be the manifest's, its major.minor the manifest's, and its feature
+     * no lower than the one the manifest asks for: a binary and a manifest that disagree are not
+     * the same mod. A binary built before the three-part numbering is refused with a reason that
+     * says so.
      */
     Decision AdmitInfo(const Manifest& manifest, const wxl_mod_info* info);
 } // namespace wxl::host

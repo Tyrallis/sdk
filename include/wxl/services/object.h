@@ -16,6 +16,9 @@
 #define WXL_OBJECT_SERVICE         "wxl.object"
 #define WXL_OBJECT_SERVICE_VERSION 1
 
+/// write_fields' flags: none is defined yet, so 0 is the only value a runtime accepts.
+#define WXL_FIELD_WRITE_PLAIN 0u
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -26,6 +29,11 @@ extern "C" {
  * A getter writes its out-parameter and returns WXL_OK, or leaves it untouched and returns
  * WXL_E_NOT_FOUND for a handle that no longer resolves, or WXL_E_INVALID for a handle of the
  * wrong kind -- asking a game object for its health is a mistake, not a missing value.
+ *
+ * A handle names one visibility episode of an object: from the ObjectCreate that announces it to
+ * the ObjectDestroy that sees it leave. An object that leaves view and comes back -- even the same
+ * client object, revived before the client freed it -- is announced again with a new handle, and
+ * the old one stays stale. The guid is what lasts across episodes.
  *
  * Main thread only: the objects behind the handles belong to the client's object manager, which
  * lives on the thread that runs the game. A read from another thread is a data race.
@@ -45,7 +53,8 @@ typedef struct wxl_object_api
     /// A wxl_object_type value, or WXL_OBJECT_UNKNOWN.
     uint32_t(WXL_CALL* type)(wxl_handle object);
 
-    /// The handle for a guid, or WXL_HANDLE_NONE when that object is not in view.
+    /// The handle for a guid, or WXL_HANDLE_NONE when that object is not in view. Any object the
+    /// client holds resolves, announced or not.
     wxl_handle(WXL_CALL* from_guid)(wxl_guid guid);
 
     /// The handle of the object the local player controls.
@@ -61,7 +70,8 @@ typedef struct wxl_object_api
 
     // --- units ------------------------------------------------------------------------------
 
-    wxl_result(WXL_CALL* unit_health)(wxl_handle unit, uint32_t* out);
+    /// Signed, as the client holds UNIT_FIELD_HEALTH and tests it (`<= 0` is dead).
+    wxl_result(WXL_CALL* unit_health)(wxl_handle unit, int32_t* out);
     wxl_result(WXL_CALL* unit_max_health)(wxl_handle unit, uint32_t* out);
     wxl_result(WXL_CALL* unit_level)(wxl_handle unit, uint32_t* out);
 
@@ -84,7 +94,7 @@ typedef struct wxl_object_api
     /// Positions for many handles at once. Writes WXL_HANDLE_NONE entries as the origin.
     wxl_result(WXL_CALL* positions)(const wxl_handle* objects, uint32_t count, wxl_vec3* out);
 
-    // --- appended in 0.2: the client's own object taxonomy ------------------------------------
+    // --- appended in 0.1.2: the client's own object taxonomy----------------------------------
     //
     // The client knows eight kinds of object (wxl_object_type), and each kind carries its own
     // descriptor block. One getter per field a mod can use, gated like the unit getters above:
@@ -136,7 +146,9 @@ typedef struct wxl_object_api
     wxl_result(WXL_CALL* player_guild_id)(wxl_handle player, uint32_t* out);
     wxl_result(WXL_CALL* player_guild_rank)(wxl_handle player, uint32_t* out);
     wxl_result(WXL_CALL* player_chosen_title)(wxl_handle player, uint32_t* out);
-    /// The item shown in an equipment slot (0 head .. 18 tabard); 0 when the slot is empty.
+    /// The item shown in an equipment slot (0 head .. 18 tabard); 0 when the slot is empty. The
+    /// client keeps a disarmed weapon's id negated in PLAYER_VISIBLE_ITEM_n_ENTRYID; this answers
+    /// the item, without the sign, which the field itself still carries.
     wxl_result(WXL_CALL* player_visible_item)(wxl_handle player, uint32_t slot, uint32_t* out);
 
     // --- items, containers included ---------------------------------------------------------
@@ -145,7 +157,8 @@ typedef struct wxl_object_api
     /// The bag holding the item, or 0 when it sits in the backpack or is equipped.
     wxl_result(WXL_CALL* item_contained_in)(wxl_handle item, wxl_guid* out);
     wxl_result(WXL_CALL* item_creator)(wxl_handle item, wxl_guid* out);
-    wxl_result(WXL_CALL* item_stack_count)(wxl_handle item, uint32_t* out);
+    /// Signed, as the client holds ITEM_FIELD_STACK_COUNT.
+    wxl_result(WXL_CALL* item_stack_count)(wxl_handle item, int32_t* out);
     /// Seconds left before the item expires; 0 when it does not.
     wxl_result(WXL_CALL* item_duration)(wxl_handle item, uint32_t* out);
     wxl_result(WXL_CALL* item_flags)(wxl_handle item, uint32_t* out);
@@ -187,6 +200,103 @@ typedef struct wxl_object_api
     wxl_result(WXL_CALL* corpse_guild)(wxl_handle corpse, uint32_t* out);
     wxl_result(WXL_CALL* corpse_flags)(wxl_handle corpse, uint32_t* out);
     wxl_result(WXL_CALL* corpse_dynamic_flags)(wxl_handle corpse, uint32_t* out);
+
+    // --- appended in 0.1.9: the descriptor fields, by dword index ---------------------------
+    //
+    // Every object carries a block of dwords the server fills through update packets: its
+    // descriptor fields, OBJECT_FIELD_GUID at dword 0 and each kind's own fields after its
+    // parent's. wxl/update_fields.def names every one of them with its dword index, its size and
+    // what it holds; the getters above read a few of them by name, these reach all of them by
+    // index. A table from a runtime older than this header ends before these members: the typed
+    // facades read struct_size and answer WXL_E_UNSUPPORTED.
+    //
+    // Each of them refuses what it cannot do with WXL_E_INVALID -- a range past the object's
+    // block, a null pointer, a flag it does not know -- and says why in the runtime's log
+    // ("write_fields: dword 0x95 is past a Unit's 0x94").
+
+    /**
+     * @brief The size of the object's descriptor block, in dwords; 0 for a handle that does not
+     *        resolve.
+     *
+     * Each kind's end in update_fields.def (a Unit's 0x94), except for a player other than the
+     * active one: the client keeps the fields past PLAYER_FIELD_PAD_0 -- inventory, skills,
+     * money, experience -- for the player it controls only, so another player's block ends at
+     * 0x144.
+     */
+    uint32_t(WXL_CALL* field_count)(wxl_handle object);
+
+    /// Dwords [first, first + count) of the object's block into @p out, as the client holds them.
+    wxl_result(WXL_CALL* read_fields)(wxl_handle object, uint32_t first, uint32_t count, uint32_t* out);
+
+    /**
+     * @brief The same dwords of many objects at once.
+     *
+     * Writes @p dwords dwords from @p field for each of @p count objects, one after the other,
+     * into @p out, which holds count * dwords. An object that does not answer -- a stale handle,
+     * a block too short for the range -- is written as zeros, and @p results, when not null,
+     * receives each object's result in order: what read_fields would have answered for it.
+     * Returns WXL_OK when the call itself was well formed, whatever each object answered.
+     */
+    wxl_result(WXL_CALL* read_field_many)(const wxl_handle* objects, uint32_t count, uint32_t field,
+                                          uint32_t dwords, uint32_t* out, wxl_result* results);
+
+    /**
+     * @brief Writes dwords [first, first + count) of the object's block in the client.
+     *
+     * A client-side write: the client's copy of the field holds the value from here on, and the
+     * next update of the server that carries the field replaces it, as it replaces anything the
+     * client holds. Nothing else happens -- no handler of the client runs, no model is rebuilt,
+     * the server is not told, and no ObjectFieldChanged is raised -- so a field the client reads
+     * each frame shows the value at once and one it reads on change shows it when it next looks.
+     * OBJECT_FIELD_GUID and OBJECT_FIELD_TYPE, dwords 0 to 2, are the keys the client finds the
+     * object by and are refused.
+     *
+     * @param flags  WXL_FIELD_WRITE_PLAIN. A flag this runtime does not know is refused, so that
+     *               a later one -- a write the runtime keeps re-applying over the server's -- is
+     *               never taken for a plain write.
+     */
+    wxl_result(WXL_CALL* write_fields)(wxl_handle object, uint32_t first, uint32_t count,
+                                       const uint32_t* in, uint32_t flags);
+
+    /**
+     * @brief Asks for ObjectFieldChanged when a field of objects of a type changes.
+     *
+     * Nothing is raised for a field nobody asked for. From this call on, each update of the
+     * server that changes an element of dwords [first, first + count) on an object of @p type --
+     * a wxl_object_type, or WXL_OBJECT_UNKNOWN for every object -- raises one ObjectFieldChanged
+     * per element that changed, with the element's old and new value, once the client has
+     * applied the update: where the client runs its own reactions to a field's change. A field
+     * of a parent kind is watched on the type asked for only: watching UNIT_FIELD_HEALTH for
+     * WXL_OBJECT_PLAYER raises nothing for a creature.
+     *
+     * The range starts and ends on elements (a guid is one element of two dwords) of fields the
+     * client sees change: update_fields.def's watch column. The client finds a change by
+     * comparing an element with the copy it keeps from before the update, and keeps one only for
+     * some fields; the others are refused with WXL_E_UNSUPPORTED and named in the log. The
+     * player's fields past PLAYER_FIELD_PAD_0 (scope local) are seen on the active player only.
+     *
+     * A watch belongs to the mod that asked for it, and the event goes to that mod's handlers
+     * only: a mod receives the changes it watches and no other mod's, whatever it subscribed
+     * to. A watch lasts, across worlds, until the mod gives it back with unwatch_field or goes
+     * -- disabled or unloaded -- which gives back all of its watches. Each call is one watch:
+     * two parts of a mod that each ask for a field each give it back, and the mod receives the
+     * field's changes, once each, until the last one does.
+     */
+    wxl_result(WXL_CALL* watch_field)(uint32_t type, uint32_t first, uint32_t count);
+
+    // --- appended in 0.1.10 -----------------------------------------------------------------
+
+    /**
+     * @brief Gives back one of the calling mod's watches of dwords [first, first + count) on
+     *        objects of @p type, as watch_field took it.
+     *
+     * For each element of the range, one watch the mod holds for that type goes; with its last
+     * one the mod stops receiving the element's changes. An element it does not watch is left
+     * as it is, so giving back more than was asked for is not a mistake. Another mod's watch of
+     * the same field goes on. The range is checked as watch_field checks it -- elements, the
+     * kind's block -- and refused with WXL_E_INVALID when it is wrong.
+     */
+    wxl_result(WXL_CALL* unwatch_field)(uint32_t type, uint32_t first, uint32_t count);
 } wxl_object_api;
 
 #ifdef __cplusplus

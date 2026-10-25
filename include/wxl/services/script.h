@@ -9,7 +9,9 @@
 // wxl_script_vm_args of the ScriptVmReady event, for a mod that accepts being tied to one VM.
 //
 // Registrations do not survive a context: both the glue and the game context are created and
-// destroyed more than once in a session, so a mod registers again on every ScriptVmReady. The
+// destroyed more than once in a session, so a mod registers again on every ScriptVmReady (one per
+// interface that comes up; a context the client throws away before any interface is never
+// announced, and takes nothing). The
 // state is closed with the context, which takes every global and every listener with it; the
 // runtime forgets what it was told at ScriptVmClosing, and until the next ScriptVmReady every
 // call below that needs a context answers WXL_E_FAILED. Nothing kept from one context -- a
@@ -124,6 +126,17 @@ typedef struct wxl_script_api
      * call unwinds, so no exception crosses the boundary.
      */
     void(WXL_CALL* fail)(wxl_script_call* call, wxl_str message);
+
+    // --- appended in 0.1.15 -----------------------------------------------------------------
+
+    /**
+     * @brief Whether a context is live, the one ScriptVmReady announced last.
+     *
+     * WXL_FALSE before the first ScriptVmReady and from ScriptVmClosing to the next, when
+     * every call above that needs a context answers WXL_E_FAILED. context() cannot tell: it
+     * keeps answering the last context's value.
+     */
+    wxl_bool(WXL_CALL* live)(void);
 } wxl_script_api;
 
 #ifdef __cplusplus

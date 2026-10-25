@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 WarcraftXL
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
 //
 // The mod itself: builds the runtime at load, hands it the stages, publishes wxl.lua.
 
@@ -57,4 +57,4 @@ namespace
     };
 } // namespace
 
-WXL_MOD(LuaMod, "wxl.lua", "Lua", 1)
+WXL_MOD(LuaMod, "wxl.lua", "Lua")

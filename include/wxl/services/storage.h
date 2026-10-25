@@ -57,7 +57,13 @@ typedef struct wxl_storage_api
     // A mod that ships assets makes them findable here rather than by writing into the client's
     // own data folder. Higher priority wins a name collision; the client's own data is 0.
 
-    /// Adds a directory to the search path.
+    /**
+     * @brief Adds a directory to the search path, for the calling mod.
+     *
+     * The folder is the mod's: adding it again changes its priority, and it leaves the search
+     * when the mod removes it (remove_search_path) or goes -- disabled or unloaded. Another mod
+     * may add the same folder; each holds its own.
+     */
     wxl_result(WXL_CALL* add_search_path)(wxl_str directory, int32_t priority);
 
     /// Adds an archive to the search path.
@@ -73,6 +79,39 @@ typedef struct wxl_storage_api
      * @return how many matched, which may exceed @p capacity.
      */
     uint32_t(WXL_CALL* find)(wxl_str pattern, wxl_str* out, uint32_t capacity);
+
+    // --- appended in 0.1.10 -----------------------------------------------------------------
+
+    /**
+     * @brief Takes a folder the calling mod added back out of the search path.
+     *
+     * Named as add_search_path was given it, or by any spelling of the same folder. From here on
+     * no name is answered from it; a file opened from it already stays open. WXL_E_NOT_FOUND
+     * when the mod holds no such folder -- another mod's stays.
+     */
+    wxl_result(WXL_CALL* remove_search_path)(wxl_str directory);
+
+    // --- appended in 0.1.15 -----------------------------------------------------------------
+
+    /**
+     * @brief Opens one name in place of another, for the calling mod, on every thread.
+     *
+     * From here on, whatever opens @p from -- the client on any of its threads, or a mod --
+     * opens @p to instead, found as any name is: in a folder of the search path or in an
+     * archive. Names are compared as the client compares them, in any case and with either
+     * slash. This is the way to answer an open that happens off the main thread, where a
+     * FileOpen handler that runs later cannot answer it.
+     *
+     * The redirect is the mod's: redirecting the same name again changes where it leads, and
+     * it lasts until the mod takes it back (unredirect) or goes -- disabled or unloaded. When
+     * two mods redirect one name, the latest wins, and taking it back uncovers the earlier
+     * one. A FileOpen handler that answers still has the last word. WXL_E_INVALID for an empty
+     * name or one longer than 511 bytes.
+     */
+    wxl_result(WXL_CALL* redirect)(wxl_str from, wxl_str to);
+
+    /// Takes back the calling mod's redirect of a name: WXL_E_NOT_FOUND when it holds none.
+    wxl_result(WXL_CALL* unredirect)(wxl_str from);
 } wxl_storage_api;
 
 #ifdef __cplusplus

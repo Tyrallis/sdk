@@ -3,8 +3,8 @@
   "id": "wxl.lua-hello",
   "name": "Lua hello",
   "version": "1.0.0",
-  "abi": "0.5",
-  "description": "A Lua mod: it watches the world, answers two events and reloads when edited.",
+  "abi": "0.1.15",
+  "description": "A Lua mod: it counts deaths, reports targets, hides a message, swaps an icon and reloads when edited.",
   "lua": "init.lua",
   "optional": [
     { "service": "wxl.object", "version": 1 }

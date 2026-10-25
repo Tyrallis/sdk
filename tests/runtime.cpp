@@ -1,13 +1,49 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 WarcraftXL
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
 //
 // The shared runtime scaffolding, checked against a binding backed by plain structs.
 
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <type_traits>
+#include <vector>
 
+#include "wxl/objects/fields.hpp"
 #include "wxl/runtime/object_service.hpp"
+
+namespace getters
+{
+    // A getter answers a field as the client holds it in the type update_fields.def gives it:
+    // getter_fields.def pairs them, and the build fails on a pair that disagrees.
+    template <class F>
+    struct OutOf;
+    template <class V>
+    struct OutOf<wxl_result(WXL_CALL*)(wxl_handle, V*)>
+    {
+        using type = V;
+    };
+    template <class V>
+    struct OutOf<wxl_result(WXL_CALL*)(wxl_handle, uint32_t, V*)>
+    {
+        using type = V;
+    };
+
+    template <class T>
+    struct ElementOf;
+    template <class T>
+    struct ElementOf<const wxl::field::Field<T>>
+    {
+        using type = T;
+    };
+
+#define WXL_GETTER_FIELD(member, Kind, Name)                                                  \
+    static_assert(std::is_same_v<OutOf<decltype(wxl_object_api::member)>::type,               \
+                                 ElementOf<decltype(wxl::field::Kind::Name)>::type>,           \
+                  #member " answers another type than " #Kind "::" #Name " holds");
+#include "getter_fields.def"
+#undef WXL_GETTER_FIELD
+} // namespace getters
 
 namespace
 {
@@ -32,7 +68,7 @@ namespace
         float           facing = 0.0f;
         std::string     name;
         uint32_t        entry = 0;
-        uint32_t        health    = 0;
+        int32_t         health    = 0;
         uint32_t        maxHealth = 0;
         uint32_t        level     = 0;
         wxl_guid        target    = 0;
@@ -40,12 +76,13 @@ namespace
         uint32_t        maxPower[7]{};
         uint32_t        powerType = 0;
         uint32_t        visibleItem[19]{};
-        uint32_t        stackCount = 0;
+        int32_t         stackCount = 0;
         uint32_t        numSlots   = 0;
         wxl_guid        slots[36]{};
         uint32_t        goType = 0;
         uint32_t        spellId = 0;
         wxl_guid        owner   = 0;
+        std::vector<uint32_t> block; ///< the descriptor block; empty for none
     };
 
     /// Every read of the table answering zero, so a row added to it needs nothing here.
@@ -75,6 +112,8 @@ namespace
     public:
         FakeObject*  localPlayer = nullptr;
         mutable int  typeReads   = 0;
+        /// What the client holds, tracked or not: what FindByGuid looks through.
+        std::vector<FakeObject*> held;
 
         static FakeObject* As(void* object) { return static_cast<FakeObject*>(object); }
 
@@ -100,12 +139,18 @@ namespace
         }
         bool  UnitTarget(void* o, wxl_guid& out) const override { return Give(out, As(o)->target); }
         void* LocalPlayer() const override { return localPlayer; }
+        void* FindByGuid(wxl_guid guid) const override
+        {
+            for (FakeObject* object : held)
+                if (object->guid == guid) return object;
+            return nullptr;
+        }
 
         bool Entry(void* o, uint32_t& out) const override { return Give(out, As(o)->entry); }
         bool Position(void* o, wxl_vec3& out) const override { return Give(out, As(o)->position); }
         bool Facing(void* o, float& out) const override { return Give(out, As(o)->facing); }
 
-        bool UnitHealth(void* o, uint32_t& out) const override { return Give(out, As(o)->health); }
+        bool UnitHealth(void* o, int32_t& out) const override { return Give(out, As(o)->health); }
         bool UnitMaxHealth(void* o, uint32_t& out) const override { return Give(out, As(o)->maxHealth); }
         bool UnitLevel(void* o, uint32_t& out) const override { return Give(out, As(o)->level); }
         bool UnitPower(void* o, uint32_t index, uint32_t& out) const override
@@ -124,12 +169,56 @@ namespace
         }
 
         bool ItemOwner(void* o, wxl_guid& out) const override { return Give(out, As(o)->owner); }
-        bool ItemStackCount(void* o, uint32_t& out) const override { return Give(out, As(o)->stackCount); }
+        bool ItemStackCount(void* o, int32_t& out) const override { return Give(out, As(o)->stackCount); }
 
         bool ContainerNumSlots(void* o, uint32_t& out) const override { return Give(out, As(o)->numSlots); }
         bool ContainerSlot(void* o, uint32_t index, wxl_guid& out) const override
         {
             return index < As(o)->numSlots && Give(out, As(o)->slots[index]);
+        }
+
+        uint32_t* Descriptor(void* o) const override
+        {
+            std::vector<uint32_t>& block = As(o)->block;
+            return block.empty() ? nullptr : block.data();
+        }
+
+        /// What the service asked the client to watch, and whether this client can.
+        struct Watched
+        {
+            wxl_object_type kind;
+            uint32_t        first;
+            uint32_t        dwords;
+            bool            local;
+        };
+        mutable std::vector<Watched>     watched;
+        bool                             canWatch = true;
+        mutable std::vector<std::string> reports;
+
+        bool WatchElement(wxl_object_type kind, uint32_t first, uint32_t dwords, bool local) const override
+        {
+            if (!canWatch) return false;
+            watched.push_back(Watched{kind, first, dwords, local});
+            return true;
+        }
+
+        /// What the service let go of, and whether this client can take a handler back.
+        mutable std::vector<Watched> unwatched;
+        bool                         canUnwatch = true;
+
+        bool UnwatchElement(wxl_object_type kind, uint32_t first, uint32_t dwords, bool local) const override
+        {
+            if (!canUnwatch) return false;
+            unwatched.push_back(Watched{kind, first, dwords, local});
+            return true;
+        }
+        void Report(const char* line) const override { reports.emplace_back(line); }
+
+        bool Reported(const char* line) const
+        {
+            for (const std::string& report : reports)
+                if (report == line) return true;
+            return false;
         }
 
         bool GameObjectType(void* o, uint32_t& out) const override { return Give(out, As(o)->goType); }
@@ -140,6 +229,9 @@ namespace
 
 int main()
 {
+    // Unbuffered, so the last line printed before a crash is never held back in a buffer.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+
     FakeObject player;
     player.guid      = 0x100;
     player.type      = WXL_OBJECT_PLAYER;
@@ -230,7 +322,7 @@ int main()
 
     Section("type gating");
     {
-        uint32_t health = 0;
+        int32_t health = 0;
         Check(api->unit_health(boarHandle, &health) == WXL_OK && health == 90, "a unit has health");
         Check(api->unit_health(chestHandle, &health) == WXL_E_INVALID,
               "a game object asked for health is a mistake, not a missing value");
@@ -251,7 +343,8 @@ int main()
               "a player's visible item reads");
         Check(api->player_visible_item(boarHandle, 15, &value) == WXL_E_INVALID,
               "a creature has no equipment slots");
-        Check(api->item_stack_count(bagHandle, &value) == WXL_OK && value == 1,
+        int32_t stack = 0;
+        Check(api->item_stack_count(bagHandle, &stack) == WXL_OK && stack == 1,
               "a container answers the item reads");
         Check(api->container_num_slots(bagHandle, &value) == WXL_OK && value == 2,
               "and its own");
@@ -270,8 +363,9 @@ int main()
     {
         const int reads = binding.typeReads;
         uint32_t  value = 0;
-        api->unit_health(boarHandle, &value);
-        api->unit_health(chestHandle, &value);
+        int32_t   health = 0;
+        api->unit_health(boarHandle, &health);
+        api->unit_health(chestHandle, &health);
         api->type(chestHandle);
         api->enumerate(WXL_OBJECT_UNIT, nullptr, 0);
         Check(reads == 5 && binding.typeReads == reads,
@@ -324,7 +418,7 @@ int main()
         Check(api->valid(boarHandle) == WXL_FALSE, "and the old handle stays dead");
         Check(api->valid(wolfHandle) == WXL_TRUE, "while the new one lives");
 
-        uint32_t health = 0;
+        int32_t health = 0;
         Check(api->unit_health(boarHandle, &health) == WXL_E_NOT_FOUND,
               "reading through a stale handle finds nothing rather than the wrong unit");
 
@@ -354,9 +448,200 @@ int main()
         Check(api->from_guid(0x400) == WXL_HANDLE_NONE, "retiring a stale handle changes nothing");
 
         service.Clear();
-        Check(api->valid(wolfHandle) == WXL_FALSE, "clearing retires everything");
-        Check(api->local_player() == WXL_HANDLE_NONE, "including the local player");
-        Check(api->from_guid(0x100) == WXL_HANDLE_NONE, "and empties the guid index with it");
+        Check(api->valid(wolfHandle) == WXL_FALSE && api->valid(playerHandle) == WXL_FALSE,
+              "clearing retires everything, the local player included");
+        binding.localPlayer = nullptr;
+        Check(api->local_player() == WXL_HANDLE_NONE, "with no local player there is none");
+        Check(api->from_guid(0x100) == WXL_HANDLE_NONE, "and the guid index is empty with it");
+    }
+
+    Section("what the client holds and no seam announced");
+    {
+        // The client revived the boar by a path no seam sees: it holds it, nothing tracks it.
+        binding.held = {&boar, &player};
+        const wxl_handle found = api->from_guid(0x200);
+        Check(found != WXL_HANDLE_NONE && found != boarHandle,
+              "a guid the client holds resolves, with a handle of its own episode");
+        Check(api->valid(found) == WXL_TRUE && api->type(found) == WXL_OBJECT_UNIT,
+              "the object is tracked from there, its kind read once");
+        Check(api->from_guid(0x200) == found && service.HandleOf(&boar) == found,
+              "and looked up again it is the same handle, from the index");
+        Check(api->from_guid(0x999) == WXL_HANDLE_NONE, "a guid the client does not hold is nothing");
+
+        binding.localPlayer = &player;
+        const wxl_handle me = api->local_player();
+        Check(me != WXL_HANDLE_NONE && me != playerHandle && api->from_guid(0x100) == me,
+              "the local player is tracked on demand too, under its guid");
+
+        int32_t    health = 0;
+        wxl_handle target = WXL_HANDLE_NONE;
+        Check(api->unit_target(me, &target) == WXL_OK && target == found && api->unit_health(target, &health) == WXL_OK &&
+                  health == 90,
+              "a target resolves through the same lookup");
+        service.Untrack(found);
+        binding.held.clear();
+        Check(api->from_guid(0x200) == WXL_HANDLE_NONE, "once the client lets it go, nothing resolves");
+    }
+
+    Section("descriptor fields");
+    {
+        FakeObject me;
+        me.guid = 0x700;
+        me.type = WXL_OBJECT_PLAYER;
+        me.block.assign(0x52E, 0u);
+        me.block[0x18] = 4200;
+        FakeObject other;
+        other.guid = 0x710;
+        other.type = WXL_OBJECT_PLAYER;
+        other.block.assign(0x52E, 0u);
+        FakeObject wolf;
+        wolf.guid = 0x720;
+        wolf.type = WXL_OBJECT_UNIT;
+        wolf.block.assign(0x94, 0u);
+        wolf.block[0x18] = 77;
+        FakeObject rock;
+        rock.guid = 0x730;
+        rock.type = WXL_OBJECT_GAMEOBJECT; // no block the runtime can reach
+        binding.localPlayer = &me;
+        binding.held        = {&me, &other, &wolf};
+        const wxl_handle hMe = service.Track(&me), hOther = service.Track(&other);
+        const wxl_handle hWolf = service.Track(&wolf), hRock = service.Track(&rock);
+
+        Check(api->field_count(hMe) == 0x52E && api->field_count(hOther) == 0x144 &&
+                  api->field_count(hWolf) == 0x94 && api->field_count(hRock) == 0 && api->field_count(0xDEAD) == 0,
+              "field_count is the kind's block, a player other than the active one's shorter");
+
+        uint32_t two[2] = {0, 0};
+        Check(api->read_fields(hWolf, 0x18, 1, two) == WXL_OK && two[0] == 77, "read_fields reads by index");
+        Check(api->read_fields(hWolf, 0x93, 2, two) == WXL_E_INVALID &&
+                  binding.Reported("read_fields: dwords 0x93..0x94 run past a Unit's 0x94"),
+              "a range past the block is refused and named");
+        Check(api->read_fields(hOther, 0x27A, 1, two) == WXL_E_INVALID &&
+                  binding.Reported("read_fields: dword 0x27A is past a Player's 0x144: a player other than the "
+                                   "active one has no fields past PLAYER_FIELD_PAD_0"),
+              "and another player's local fields say why they are not there");
+        Check(api->read_fields(hRock, 0, 1, two) == WXL_E_UNSUPPORTED, "an object the runtime cannot reach is unsupported");
+        Check(api->read_fields(0xDEAD, 0, 1, two) == WXL_E_NOT_FOUND, "a stale handle is not found");
+
+        const uint32_t ninety = 90;
+        Check(api->write_fields(hWolf, 0x18, 1, &ninety, WXL_FIELD_WRITE_PLAIN) == WXL_OK && wolf.block[0x18] == 90,
+              "write_fields writes the client's dword");
+        Check(api->write_fields(hWolf, 0x95, 1, &ninety, 0) == WXL_E_INVALID &&
+                  binding.Reported("write_fields: dword 0x95 is past a Unit's 0x94"),
+              "past the block it is refused, as the log says");
+        Check(api->write_fields(hWolf, 0x18, 1, &ninety, 0x1) == WXL_E_INVALID &&
+                  binding.Reported("write_fields: flags 0x1 are not known to this runtime; 0 is a plain write"),
+              "an unknown flag is refused");
+        Check(api->write_fields(hWolf, 0x2, 1, &ninety, 0) == WXL_E_INVALID && wolf.block[0x2] == 0,
+              "the guid and the type are not written");
+
+        const wxl_handle many[] = {hMe, hWolf, 0xDEAD, hOther};
+        uint32_t         out[4] = {1, 1, 1, 1};
+        wxl_result       results[4];
+        Check(api->read_field_many(many, 4, 0x18, 1, out, results) == WXL_OK && out[0] == 4200 && out[1] == 90 &&
+                  out[2] == 0 && results[2] == WXL_E_NOT_FOUND && results[3] == WXL_OK,
+              "read_field_many reads each object, zeros and a result for one that does not answer");
+
+        Check(api->watch_field(WXL_OBJECT_UNIT, 0x18, 1) == WXL_OK && binding.watched.size() == 1 &&
+                  binding.watched[0].kind == WXL_OBJECT_UNIT && binding.watched[0].first == 0x18 &&
+                  !binding.watched[0].local,
+              "watching UNIT_FIELD_HEALTH asks the client once, on the unit's fields");
+        Check(api->watch_field(WXL_OBJECT_PLAYER, 0x18, 1) == WXL_OK && binding.watched.size() == 1,
+              "watching it again for players asks nothing more");
+        Check(api->watch_field(WXL_OBJECT_PLAYER, 0x27A, 1) == WXL_OK && binding.watched.size() == 2 &&
+                  binding.watched[1].kind == WXL_OBJECT_PLAYER && binding.watched[1].local,
+              "PLAYER_XP is watched on the active player");
+        Check(api->watch_field(WXL_OBJECT_UNIT, 0x12, 2) == WXL_OK && binding.watched.size() == 3 &&
+                  binding.watched[2].dwords == 2,
+              "a guid is one element of two dwords");
+        Check(api->watch_field(WXL_OBJECT_UNIT, 0x13, 1) == WXL_E_INVALID &&
+                  binding.Reported("watch_field: dword 0x13 is the second half of an element of UNIT_FIELD_TARGET "
+                                   "(from 0x12); start the range at 0x12"),
+              "half a guid is refused");
+        Check(api->watch_field(WXL_OBJECT_UNIT, 0x10, 2) == WXL_E_UNSUPPORTED &&
+                  binding.Reported("watch_field: UNIT_FIELD_CREATEDBY (dword 0x10) is not one the client sees "
+                                   "change: it keeps no copy of it from before an update"),
+              "a field the client keeps no copy of is unsupported, and named");
+        Check(api->watch_field(WXL_OBJECT_UNIT, 0x95, 1) == WXL_E_INVALID &&
+                  binding.Reported("watch_field: dword 0x95 is past a Unit's 0x94"),
+              "past a kind's block is invalid");
+        Check(api->watch_field(9, 0, 1) == WXL_E_INVALID, "a type past the client's is invalid");
+
+        wxl_object_field_args args{};
+        const uint32_t        was = 80;
+        Check(service.FieldChange(0x720, WXL_OBJECT_UNIT, 0x18, 1, &was, args) && args.object == hWolf &&
+                  args.type == WXL_OBJECT_UNIT && args.field == 0x18 && args.count == 1 && args.old_value == 80 &&
+                  args.new_value == 90,
+              "a reported change becomes the event, the new value read from the block");
+        const uint32_t xp = 5;
+        me.block[0x27A] = 6;
+        Check(service.FieldChange(0x700, WXL_OBJECT_PLAYER, 0x27A, 1, &xp, args) && args.old_value == 5 &&
+                  args.new_value == 6,
+              "the active player's local field too");
+        Check(!service.FieldChange(0x720, WXL_OBJECT_UNIT, 0x3B, 1, &was, args),
+              "a field no watch asked for raises nothing");
+        Check(!service.FieldChange(0x999, WXL_OBJECT_UNIT, 0x18, 1, &was, args),
+              "nor an object the client does not hold");
+
+        api->watch_field(WXL_OBJECT_PLAYER, 0x16, 1);
+        Check(service.FieldChange(0x700, WXL_OBJECT_UNIT, 0x16, 1, &was, args) &&
+                  !service.FieldChange(0x720, WXL_OBJECT_UNIT, 0x16, 1, &was, args),
+              "a unit field watched for players raises for a player and not for a creature");
+
+        // A watch is its caller's: the runtime says who calls, and asks Delivers who receives.
+        uint32_t caller = 5;
+        service.SetCaller([](void* user) { return *static_cast<uint32_t*>(user); }, &caller);
+        const size_t asked = binding.watched.size();
+        Check(api->watch_field(WXL_OBJECT_UNIT, 0x20, 1) == WXL_OK && binding.watched.size() == asked + 1,
+              "a mod's first watch of UNIT_FIELD_MAXHEALTH asks the client");
+        Check(service.FieldChange(0x720, WXL_OBJECT_UNIT, 0x20, 1, &was, args) && service.Delivers(5, args) &&
+                  !service.Delivers(0, args) && !service.Delivers(6, args),
+              "its changes are delivered to that mod only");
+        caller = 6;
+        Check(api->watch_field(WXL_OBJECT_PLAYER, 0x20, 1) == WXL_OK && binding.watched.size() == asked + 1,
+              "another mod's watch of it, for players, asks nothing more");
+        Check(!service.Delivers(6, args), "and receives no creature's change");
+        Check(service.FieldChange(0x700, WXL_OBJECT_UNIT, 0x20, 1, &was, args) && service.Delivers(6, args) &&
+                  service.Delivers(5, args),
+              "a player's reaches both: a watch for units covers players");
+        caller = 5;
+        Check(api->unwatch_field(WXL_OBJECT_UNIT, 0x20, 1) == WXL_OK && binding.unwatched.empty() &&
+                  !service.Delivers(5, args) && service.Delivers(6, args),
+              "giving one back stops that mod's changes and keeps the client's handler for the other");
+        Check(api->unwatch_field(WXL_OBJECT_UNIT, 0x20, 1) == WXL_OK, "giving back twice is no mistake");
+        Check(service.WatchCount(6) == 1, "the other holds its one watch");
+        service.DropWatches(6);
+        Check(service.WatchCount(6) == 0 && binding.unwatched.size() == 1 && binding.unwatched[0].first == 0x20 &&
+                  !service.FieldChange(0x700, WXL_OBJECT_UNIT, 0x20, 1, &was, args),
+              "a mod that goes gives back its watches, the last one lets the client's handler go");
+
+        Check(api->watch_field(WXL_OBJECT_UNIT, 0x18, 1) == WXL_OK && api->watch_field(WXL_OBJECT_UNIT, 0x18, 1) == WXL_OK &&
+                  api->unwatch_field(WXL_OBJECT_UNIT, 0x18, 1) == WXL_OK &&
+                  service.FieldChange(0x720, WXL_OBJECT_UNIT, 0x18, 1, &was, args) && service.Delivers(5, args),
+              "each watch is given back on its own: two asked, one given back, the field still comes");
+        Check(api->unwatch_field(WXL_OBJECT_UNIT, 0x18, 1) == WXL_OK && !service.Delivers(5, args) &&
+                  service.Delivers(0, args) && binding.unwatched.size() == 1,
+              "the second given back ends it, while the watch of nobody's code goes on");
+        Check(api->unwatch_field(WXL_OBJECT_UNIT, 0x13, 1) == WXL_E_INVALID &&
+                  binding.Reported("unwatch_field: dword 0x13 is the second half of an element of UNIT_FIELD_TARGET "
+                                   "(from 0x12); start the range at 0x12"),
+              "unwatch_field checks the range as watch_field does");
+
+        binding.canUnwatch = false;
+        Check(api->watch_field(WXL_OBJECT_UNIT, 0x3B, 1) == WXL_OK && api->unwatch_field(WXL_OBJECT_UNIT, 0x3B, 1) == WXL_OK &&
+                  !service.FieldChange(0x720, WXL_OBJECT_UNIT, 0x3B, 1, &was, args),
+              "a client that keeps its handler reports into nothing once no watch is left");
+        const size_t kept = binding.watched.size();
+        Check(api->watch_field(WXL_OBJECT_UNIT, 0x3B, 1) == WXL_OK && binding.watched.size() == kept &&
+                  service.FieldChange(0x720, WXL_OBJECT_UNIT, 0x3B, 1, &was, args),
+              "and the next watch reuses the handler it kept");
+        service.SetCaller(nullptr, nullptr);
+
+        binding.canWatch = false;
+        Check(api->watch_field(WXL_OBJECT_UNIT, 0x19, 1) == WXL_E_UNSUPPORTED &&
+                  binding.Reported("watch_field: this runtime cannot watch fields"),
+              "a runtime that cannot watch says so");
+        binding.held.clear();
     }
 
     if (g_failures == 0)

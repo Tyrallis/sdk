@@ -1,0 +1,15 @@
+{
+  "$schema": "../../schema/mod.json",
+  "id": "wxl.lua-services",
+  "name": "Lua services",
+  "version": "1.0.0",
+  "abi": "0.1.5",
+  "description": "A Lua mod: it reads the client's files and its own, asks about a database, lists the hook points, and adds a function and an event to the client's script.",
+  "lua": "init.lua",
+  "optional": [
+    { "service": "wxl.storage", "version": 1 },
+    { "service": "wxl.data", "version": 1 },
+    { "service": "wxl.script", "version": 1 },
+    { "service": "wxl.hook", "version": 1 }
+  ]
+}

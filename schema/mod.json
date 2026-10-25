@@ -5,7 +5,7 @@
   "description": "Sits next to a mod's binaries as mod.json. Read before anything of the mod runs, so that a mod whose needs cannot be met is refused with a readable reason rather than failing on its first call.",
   "type": "object",
   "required": ["id", "name", "version", "abi"],
-  "anyOf": [
+  "oneOf": [
     { "required": ["binaries"] },
     { "required": ["lua"] }
   ],
@@ -30,12 +30,12 @@
       "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?$"
     },
     "abi": {
-      "description": "The contract version the binaries were built against, major.minor. A runtime refuses a different major, and a minor higher than its own.",
+      "description": "The lowest contract version the mod needs, major.minor.feature, e.g. \"0.1.5\". A runtime refuses a different major; while the major is 0, a different minor; and within the same major.minor, a feature higher than its own. A binary must be built against headers of this major.minor and at least this feature. A Lua mod may use only what this version has: subscribing to an event a later feature brought is refused.",
       "type": "string",
-      "pattern": "^\\d+\\.\\d+$"
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
     },
     "binaries": {
-      "description": "One binary per target, by platform and architecture. A runtime loads the entry matching its own; a mod with no entry for it is skipped, not failed. A script mod leaves it out and names \"lua\" instead.",
+      "description": "One binary per target, by platform and architecture. A runtime loads the entry matching its own; a mod with no entry for it is skipped, not failed. A script mod leaves it out and names \"lua\" instead: a manifest has one or the other, never both.",
       "type": "object",
       "minProperties": 1,
       "propertyNames": { "enum": ["win-x86", "win-x64", "linux-x64"] },
@@ -63,7 +63,7 @@
       "default": []
     },
     "lua": {
-      "description": "The Lua entry file, relative to the mod folder, run by wxl.lua in a state of its own. A manifest with \"lua\" and no binary for the runtime is a script mod: the same folder runs on every runtime, with nothing to build.",
+      "description": "The Lua entry file, relative to the mod folder, run by wxl.lua in a state of its own. A manifest with \"lua\" is a script mod: the same folder runs on every runtime, with nothing to build. It names no \"binaries\": a manifest with both is refused.",
       "type": "string",
       "minLength": 1
     },

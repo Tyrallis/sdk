@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <exception>
 #include <string>
+#include <string_view>
 #include <thread>
 
 namespace wxl::host
@@ -90,6 +91,45 @@ namespace wxl::host
 
     EventBus::~EventBus() = default;
 
+    void EventBus::SetProfiler(const Profiler* profiler, OwnerNameFn name, void* nameUser)
+    {
+#if WXL_HOST_PROFILE
+        std::lock_guard<std::mutex> lock(writeLock_);
+        profiling_.store(false, std::memory_order_relaxed);
+        profiler_      = profiler && profiler->location && profiler->begin && profiler->end ? profiler : nullptr;
+        ownerName_     = name;
+        ownerNameUser_ = nameUser;
+        eventZones_.assign(WXL_EV_COUNT, nullptr);
+        handlerZones_.clear();
+        if (!profiler_) return;
+        for (uint32_t i = 0; i < static_cast<uint32_t>(WXL_EV_COUNT); ++i)
+            eventZones_[i] = profiler_->location(profiler_->user,
+                                                 std::string("On") + EventName(static_cast<wxl_event>(i)),
+                                                 "event", kEventZoneColor);
+        for (uint32_t i = 0; i < static_cast<uint32_t>(WXL_EV_COUNT); ++i)
+            if (current_[i])
+                for (Entry* entry : *current_[i]) entry->zone = HandlerZone(static_cast<wxl_event>(i), entry->owner);
+#else
+        (void)profiler;
+        (void)name;
+        (void)nameUser;
+#endif
+    }
+
+    const void* EventBus::HandlerZone(wxl_event event, uint32_t owner)
+    {
+        if (!profiler_) return nullptr;
+        const uint64_t key = (static_cast<uint64_t>(owner) << 32) | static_cast<uint32_t>(event);
+        for (const std::pair<uint64_t, const void*>& known : handlerZones_)
+            if (known.first == key) return known.second;
+        std::string who = ownerName_ ? ownerName_(ownerNameUser_, owner) : std::string();
+        if (who.empty()) who = owner ? "mod " + std::to_string(owner) : "runtime";
+        const void* zone = profiler_->location(profiler_->user,
+                                               who + ": On" + EventName(event), who, ModZoneColor(who));
+        handlerZones_.emplace_back(key, zone);
+        return zone;
+    }
+
     void EventBus::SetRaisable(wxl_event event, bool raisable)
     {
         if (Known(event)) raisable_[event] = raisable;
@@ -105,10 +145,23 @@ namespace wxl::host
         if (next && next->empty()) next.reset();
 
         std::unique_ptr<Snapshot> old = std::move(current_[event]);
+        const bool                was = old != nullptr;
         current_[event]               = std::move(next);
         lists_[event].store(current_[event].get(), std::memory_order_seq_cst);
+        const bool is = current_[event] != nullptr;
+        if (listenFn_ && was != is) listenFn_(listenUser_, event, is);
         if (old) retiredSnapshots_.push_back(std::move(old));
         Reclaim();
+    }
+
+    void EventBus::SetListenHandler(ListenFn handler, void* user)
+    {
+        std::lock_guard<std::mutex> lock(writeLock_);
+        listenFn_   = handler;
+        listenUser_ = user;
+        if (!handler) return;
+        for (uint32_t i = 0; i < static_cast<uint32_t>(WXL_EV_COUNT); ++i)
+            if (current_[i]) handler(user, static_cast<wxl_event>(i), true);
     }
 
     void EventBus::Reclaim()
@@ -129,6 +182,9 @@ namespace wxl::host
 
         std::unique_ptr<Entry> entry(new Entry{++next_, handler, user, priority, owner});
         Entry* const           added = entry.get();
+#if WXL_HOST_PROFILE
+        added->zone = HandlerZone(event, owner);
+#endif
         entries_.push_back(std::move(entry));
 
         std::unique_ptr<Snapshot> next(current_[event] ? new Snapshot(*current_[event]) : new Snapshot);
@@ -207,7 +263,9 @@ namespace wxl::host
         Reclaim();
     }
 
-    void EventBus::Emit(wxl_event event, const void* args)
+    void EventBus::Emit(wxl_event event, const void* args) { EmitTo(event, args, nullptr, nullptr); }
+
+    void EventBus::EmitTo(wxl_event event, const void* args, AcceptFn accept, void* user)
     {
         if (!Known(event)) return;
 
@@ -234,18 +292,32 @@ namespace wxl::host
         {
             const Dispatch  dispatch(*this);
             const Snapshot* list = slot.load(std::memory_order_seq_cst);
+#if WXL_HOST_PROFILE
+            // Read once: a viewer that connects mid-dispatch is seen from the next one, and a
+            // zone open when it leaves is closed by the profiler's own check.
+            const Profiler* const profiler = profiling_.load(std::memory_order_relaxed) ? profiler_ : nullptr;
+            const uint64_t        eventZone =
+                profiler && list ? profiler->begin(profiler->user, eventZones_[event]) : 0;
+#endif
             if (list)
             {
                 for (Entry* entry : *list)
                 {
                     if (!entry->live.load(std::memory_order_acquire)) continue;
+                    if (accept && !accept(user, entry->owner)) continue;
 
                     HandlerCall    call{entry->handler, entry->user, args, event, logger_};
                     const uint32_t owner = entry->owner;
 
                     const uint32_t saved = ownerFn_ ? ownerFn_(ownerUser_, owner) : 0;
+#if WXL_HOST_PROFILE
+                    const uint64_t zone = profiler && entry->zone ? profiler->begin(profiler->user, entry->zone) : 0;
+#endif
                     Fault          fault;
                     const bool     returned = CallGuarded(&InvokeHandler, &call, &fault);
+#if WXL_HOST_PROFILE
+                    if (zone) profiler->end(profiler->user, zone);
+#endif
                     if (ownerFn_) ownerFn_(ownerUser_, saved);
 
                     if (returned) continue;
@@ -260,6 +332,9 @@ namespace wxl::host
                     if (faultFn_) faultFn_(faultUser_, owner, event, fault);
                 }
             }
+#if WXL_HOST_PROFILE
+            if (eventZone) profiler->end(profiler->user, eventZone);
+#endif
         }
 
         // The last dispatch out frees what changes made while it ran left behind, unless a

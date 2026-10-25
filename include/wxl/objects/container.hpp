@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 WarcraftXL
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
 //
 // wxl::Container: a bag, which is an item that holds items.
 
@@ -15,7 +15,7 @@ namespace wxl
     {
     public:
         static constexpr wxl_object_type kKinds[] = {WXL_OBJECT_CONTAINER};
-        static constexpr bool Accepts(wxl_object_type type) { return type == WXL_OBJECT_CONTAINER; }
+        static constexpr bool Accepts(uint32_t type) { return type == WXL_OBJECT_CONTAINER; }
 
         using Item::Item;
 

@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 WarcraftXL
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
 //
 // The shared half of wxl.object: handles, type gating, enumeration, over a runtime's leaf reads.
 
@@ -7,6 +7,7 @@
 #define WXL_RUNTIME_OBJECT_SERVICE_HPP
 
 #include <cstdint>
+#include <vector>
 
 #include "wxl/abi.h"
 #include "wxl/events.h"
@@ -46,6 +47,57 @@ namespace wxl::runtime
 
         /// The object the local player controls, or nullptr while out of the world.
         virtual void* LocalPlayer() const = 0;
+
+        /// The object the client holds under a guid, asked of the client itself rather than of
+        /// what the runtime tracks; nullptr when it holds none, or when the runtime cannot ask.
+        virtual void* FindByGuid(wxl_guid guid) const
+        {
+            (void)guid;
+            return nullptr;
+        }
+
+        // --- the descriptor fields --------------------------------------------------------------
+
+        /// The object's descriptor block, its dwords as the client holds them (CGObject_C's
+        /// m_obj); nullptr when the runtime cannot reach them, which makes the field calls
+        /// answer WXL_E_UNSUPPORTED.
+        virtual uint32_t* Descriptor(void* object) const
+        {
+            (void)object;
+            return nullptr;
+        }
+
+        /**
+         * @brief Asks the client to report the changes of one element: dwords [first, first +
+         *        dwords) of the fields of `kind`, on every object carrying them, or on the
+         *        active player only when `local`.
+         *
+         * The service asks once per element, when a first watch covers it. The runtime keeps
+         * asking the client until UnwatchElement -- again whenever the client drops its
+         * handlers or the active player comes back -- and hands each report to
+         * ObjectService::FieldChange. False when it cannot.
+         */
+        virtual bool WatchElement(wxl_object_type kind, uint32_t first, uint32_t dwords, bool local) const
+        {
+            (void)kind, (void)first, (void)dwords, (void)local;
+            return false;
+        }
+
+        /**
+         * @brief Stops asking the client about an element WatchElement asked for, once no watch
+         *        covers it any more.
+         *
+         * False when the runtime cannot take its handler back: the client goes on reporting the
+         * element, the service drops the reports, and a later watch of it does not ask again.
+         */
+        virtual bool UnwatchElement(wxl_object_type kind, uint32_t first, uint32_t dwords, bool local) const
+        {
+            (void)kind, (void)first, (void)dwords, (void)local;
+            return false;
+        }
+
+        /// Why a field call was refused, one line for the runtime's log.
+        virtual void Report(const char* line) const { (void)line; }
 
 #define WXL_OBJECT_READ(kinds, member, Method, type) \
     virtual bool Method(void* object, type& out) const = 0;
@@ -101,10 +153,56 @@ namespace wxl::runtime
         /// The handle an object already has, for a runtime filling in an event's args.
         wxl_handle HandleOf(void* object) const { return handles_.HandleOf(object); }
 
-        /// The handle of the tracked object carrying a guid, or WXL_HANDLE_NONE.
-        wxl_handle FromGuid(wxl_guid guid) const;
+        /**
+         * @brief The handle of the object carrying a guid, or WXL_HANDLE_NONE.
+         *
+         * The tracked objects first. A guid the client holds but no seam announced -- an object
+         * the client brought back by a path the runtime does not see -- is looked up through the
+         * binding and tracked from here on, so a guid in view always resolves. Tracking it this
+         * way raises nothing: the service has no host to raise through.
+         */
+        wxl_handle FromGuid(wxl_guid guid);
 
         const HandleTable& Handles() const { return handles_; }
+
+        /**
+         * @brief What the client reported of a watched element, as the event to raise.
+         *
+         * The runtime calls it from the client's mirror handler: the object's guid, the kind
+         * whose fields hold the element, its first dword and size, and the copy of it the
+         * client kept from before the update. Fills @p out and answers true when a watch asked
+         * for that element on the object's type; false otherwise, and nothing is raised.
+         */
+        bool FieldChange(wxl_guid guid, wxl_object_type kind, uint32_t index, uint32_t dwords,
+                         const void* old_value, wxl_object_field_args& out);
+
+        /// Whether a watch asked for dword `index` of `kind` on objects of `type`.
+        bool Watched(wxl_object_type kind, uint32_t index, uint32_t type) const;
+
+        // --- who watches -----------------------------------------------------------------------
+        //
+        // A watch belongs to the mod that asked for it: the runtime says who is calling, and
+        // delivers each ObjectFieldChanged to the owners Delivers() accepts.
+
+        /// Answers the token of the mod whose code is running, 0 for nobody (the host's
+        /// ModHost::CurrentMod).
+        using CallerFn = uint32_t (*)(void* user);
+
+        /// Who calls watch_field and unwatch_field. Without it every watch belongs to 0.
+        void SetCaller(CallerFn caller, void* user)
+        {
+            caller_     = caller;
+            callerUser_ = user;
+        }
+
+        /// Whether `owner` watches the element an event carries, on that object's type.
+        bool Delivers(uint32_t owner, const wxl_object_field_args& args) const;
+
+        /// Gives back every watch of an owner: the mod is disabled or unloaded.
+        void DropWatches(uint32_t owner);
+
+        /// How many watches an owner holds: one per element of each watch_field call.
+        size_t WatchCount(uint32_t owner) const;
 
     private:
         static ObjectService* instance_;
@@ -150,6 +248,73 @@ namespace wxl::runtime
         static wxl_result WXL_CALL UnitTargetThunk(wxl_handle unit, wxl_handle* out);
         static uint32_t   WXL_CALL EnumerateThunk(uint32_t type, wxl_handle* out, uint32_t cap);
         static wxl_result WXL_CALL PositionsThunk(const wxl_handle* objects, uint32_t count, wxl_vec3* out);
+
+        static uint32_t   WXL_CALL FieldCountThunk(wxl_handle object);
+        static wxl_result WXL_CALL ReadFieldsThunk(wxl_handle object, uint32_t first, uint32_t count, uint32_t* out);
+        static wxl_result WXL_CALL ReadFieldManyThunk(const wxl_handle* objects, uint32_t count, uint32_t field,
+                                                      uint32_t dwords, uint32_t* out, wxl_result* results);
+        static wxl_result WXL_CALL WriteFieldsThunk(wxl_handle object, uint32_t first, uint32_t count,
+                                                    const uint32_t* in, uint32_t flags);
+        static wxl_result WXL_CALL WatchFieldThunk(uint32_t type, uint32_t first, uint32_t count);
+        static wxl_result WXL_CALL UnwatchFieldThunk(uint32_t type, uint32_t first, uint32_t count);
+
+        /// The block of a resolved object and its end, or WXL_E_UNSUPPORTED.
+        wxl_result Block(void* native, uint32_t kind, uint32_t*& dwords, uint32_t& end) const;
+
+        /// Checks [first, first + count) against an object's block, naming what is wrong.
+        wxl_result InBlock(const char* call, void* native, uint32_t kind, uint32_t first,
+                           uint32_t count, uint32_t*& dwords, bool report) const;
+
+        /// One element a range covers: the kind whose fields hold it, its first dword, its size.
+        struct Element
+        {
+            wxl_object_type kind;
+            uint32_t        index;
+            uint32_t        dwords;
+            bool            local;
+        };
+
+        /// The elements of [first, first + count) on objects of `type`, checked whole; logs and
+        /// answers why not. `watchable` also refuses an element the client does not see change.
+        wxl_result Elements(const char* call, uint32_t type, uint32_t first, uint32_t count,
+                            bool watchable, std::vector<Element>& out) const;
+
+        wxl_result Watch(uint32_t type, uint32_t first, uint32_t count);
+        wxl_result Unwatch(uint32_t type, uint32_t first, uint32_t count);
+
+        uint32_t Caller() const { return caller_ ? caller_(callerUser_) : 0; }
+
+        /// One element less watched; the binding lets it go with the last watch.
+        void Release(const Element& element);
+
+        /// Recomputes the types an element is watched for, from the watches.
+        void Refresh(wxl_object_type kind, uint32_t index);
+
+        /// One line for the log, through the binding.
+        void Refuse(const char* format, ...) const;
+
+        /// One watch: an owner, the type it asked for, and the element.
+        struct WatchEntry
+        {
+            uint32_t owner;
+            uint32_t type;
+            Element  element;
+        };
+        std::vector<WatchEntry> watchList_;
+
+        /// Per kind (by wxl_object_type), per dword of the whole block: the types some watch
+        /// asks for, one bit each, whether the binding watches the element, and how
+        /// many watches cover it.
+        struct Slot
+        {
+            uint16_t types     = 0;
+            bool     installed = false;
+            uint32_t watchers  = 0;
+        };
+        std::vector<Slot> watches_[WXL_OBJECT_CORPSE + 1];
+
+        CallerFn caller_     = nullptr;
+        void*    callerUser_ = nullptr;
 
         ObjectBinding& binding_;
         HandleTable    handles_;

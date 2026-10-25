@@ -9,13 +9,16 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "wxl/host/admission.hpp"
@@ -28,6 +31,7 @@
 #include "wxl/host/manifest.hpp"
 #include "wxl/host/mod_host.hpp"
 #include "wxl/host/registry.hpp"
+#include "wxl/reflect.hpp"
 
 namespace fs = std::filesystem;
 using namespace wxl::host;
@@ -82,7 +86,8 @@ namespace
 #define WXL_TEST_STR(x)  WXL_TEST_STR_(x)
 
     /// The ABI the host under test speaks, as a manifest spells it.
-    constexpr const char* kAbi = WXL_TEST_STR(WXL_ABI_VERSION_MAJOR) "." WXL_TEST_STR(WXL_ABI_VERSION_MINOR);
+    constexpr const char* kAbi = WXL_TEST_STR(WXL_ABI_VERSION_MAJOR) "." WXL_TEST_STR(WXL_ABI_VERSION_MINOR) "."
+        WXL_TEST_STR(WXL_ABI_VERSION_FEATURE);
 
     /// A manifest with the required fields filled and @p extra spliced in before the brace.
     std::string ManifestText(const char* id, const std::string& extra = std::string(),
@@ -232,15 +237,15 @@ namespace
     std::vector<std::string> g_trace;
 
     wxl_mod_info g_goodInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
-                            "wxl.good", "Good", 1};
+                            "wxl.good", "Good", 1, WXL_ABI_VERSION_FEATURE};
     wxl_mod_info g_secondInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
-                              "wxl.second", "Second", 2};
+                              "wxl.second", "Second", 2, WXL_ABI_VERSION_FEATURE};
     wxl_mod_info g_nostageInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
-                               "wxl.nostage", "No stage", 3};
+                               "wxl.nostage", "No stage", 3, WXL_ABI_VERSION_FEATURE};
     wxl_mod_info g_badloadInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
-                               "wxl.badload", "Bad load", 4};
+                               "wxl.badload", "Bad load", 4, WXL_ABI_VERSION_FEATURE};
     wxl_mod_info g_liarInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
-                            "wxl.someone-else", "Liar", 5};
+                            "wxl.someone-else", "Liar", 5, WXL_ABI_VERSION_FEATURE};
 
     const wxl_mod_info* WXL_CALL GoodQuery(void) { return &g_goodInfo; }
     wxl_result WXL_CALL GoodLoad(const wxl_host* host)
@@ -296,16 +301,35 @@ namespace
     }
 
 
+    // --- a binary built against older headers -------------------------------------------------
+
+    /// What the headers before the newest event's version carried, as wxl_mod_info reports it.
+    constexpr uint32_t kOlderFeature = wxl::reflect::SinceOf(WXL_EV_ChatMessage).feature - 1;
+
+    wxl_mod_info g_olderInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
+                             "wxl.older", "Older", 1, kOlderFeature};
+    wxl_subscription g_olderNew = WXL_SUBSCRIPTION_NONE;
+    wxl_subscription g_olderOld = WXL_SUBSCRIPTION_NONE;
+
+    const wxl_mod_info* WXL_CALL OlderQuery(void) { return &g_olderInfo; }
+    wxl_result WXL_CALL OlderLoad(const wxl_host* host)
+    {
+        g_olderNew = host->subscribe(WXL_EV_ChatMessage, &Record, nullptr, 0);
+        host->subscribe(WXL_EV_ChatMessage, &Record, nullptr, 0);
+        g_olderOld = host->subscribe(WXL_EV_Update, &Record, nullptr, 0);
+        return WXL_OK;
+    }
+
     // --- mods that fault, for the crash guard ----------------------------------------------
 
     wxl_mod_info g_steadyInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
-                              "wxl.steady", "Steady", 10};
+                              "wxl.steady", "Steady", 10, WXL_ABI_VERSION_FEATURE};
     wxl_mod_info g_faultyInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
-                              "wxl.faulty", "Faulty", 11};
+                              "wxl.faulty", "Faulty", 11, WXL_ABI_VERSION_FEATURE};
     wxl_mod_info g_stagecrashInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
-                                  "wxl.stagecrash", "Stage crash", 12};
+                                  "wxl.stagecrash", "Stage crash", 12, WXL_ABI_VERSION_FEATURE};
     wxl_mod_info g_loadcrashInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
-                                 "wxl.loadcrash", "Load crash", 13};
+                                 "wxl.loadcrash", "Load crash", 13, WXL_ABI_VERSION_FEATURE};
 
     /// Writes through a null pointer. The pointer is volatile so the store is emitted as written.
     void Crash()
@@ -371,6 +395,50 @@ namespace
     {
         Crash();
         return nullptr;
+    }
+
+    // --- mods that disable themselves, as WXL_MOD does after a C++ exception ----------------
+
+    const wxl_host* g_quitHost = nullptr;
+    int             g_quitTag  = 200;
+
+    wxl_mod_info g_quitterInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
+                               "wxl.quitter", "Quitter", 0, WXL_ABI_VERSION_FEATURE};
+    wxl_mod_info g_loadquitInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
+                                "wxl.loadquit", "Load quit", 0, WXL_ABI_VERSION_FEATURE};
+    wxl_mod_info g_unloadquitInfo{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
+                                  "wxl.unloadquit", "Unload quit", 0, WXL_ABI_VERSION_FEATURE};
+
+    wxl_str Text(const char* text) { return wxl_str{text, static_cast<uint32_t>(std::strlen(text))}; }
+
+    const wxl_mod_info* WXL_CALL QuitterQuery(void) { return &g_quitterInfo; }
+    wxl_result WXL_CALL QuitterLoad(const wxl_host* host)
+    {
+        g_quitHost = host;
+        host->subscribe(WXL_EV_Update, &Record, &g_quitTag, 0);
+        return WXL_OK;
+    }
+    void WXL_CALL QuitterStage(wxl_stage stage)
+    {
+        g_trace.push_back("quitter:stage" + std::to_string(static_cast<int>(stage)));
+        if (stage == WXL_STAGE_READY) g_quitHost->disable(Text("OnReady threw an exception: boom"));
+    }
+    void WXL_CALL QuitterUnload(void) { g_trace.push_back("quitter:unload"); }
+
+    const wxl_mod_info* WXL_CALL LoadQuitQuery(void) { return &g_loadquitInfo; }
+    wxl_result WXL_CALL LoadQuitLoad(const wxl_host* host)
+    {
+        host->subscribe(WXL_EV_Update, &Record, &g_quitTag, 0);
+        host->disable(Text("gave up"));
+        return WXL_OK;
+    }
+
+    const wxl_mod_info* WXL_CALL UnloadQuitQuery(void) { return &g_unloadquitInfo; }
+    wxl_result WXL_CALL UnloadQuitLoad(const wxl_host*) { return WXL_OK; }
+    void WXL_CALL UnloadQuitUnload(void)
+    {
+        g_trace.push_back("unloadquit:unload");
+        g_quitHost->disable(Text("OnUnload threw an exception: late"));
     }
 
     void GuardedCrash(void*) { Crash(); }
@@ -442,6 +510,9 @@ namespace
 
 int main(int argc, char** argv)
 {
+    // Unbuffered, so the last line printed before a crash is never held back in a buffer.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+
     const fs::path fixture = argc > 1 ? fs::path(argv[1]) : fs::path();
     const fs::path scratch = argc > 2 ? fs::path(argv[2]) : fs::path();
 
@@ -508,7 +579,6 @@ int main(int argc, char** argv)
             "\"requires\": [ { \"service\": \"wxl.object\", \"version\": 1 } ],\n"
             "  \"optional\": [ { \"service\": \"wxl.script\", \"version\": 2 } ],\n"
             "  \"loadAfter\": [ \"wxl.base\", \"wxl.other\" ],\n"
-            "  \"lua\": \"main.lua\",\n"
             "  \"description\": \"An example.\",\n"
             "  \"authors\": [ \"a\", \"b\" ],\n"
             "  \"homepage\": \"https://example.test\",\n"
@@ -520,7 +590,8 @@ int main(int argc, char** argv)
         Check(manifest.version.major == 1 && manifest.version.minor == 0 &&
                   manifest.version.patch == 0 && manifest.version.text == "1.0.0",
               "the version is parsed and kept as written");
-        Check(manifest.abi.major == WXL_ABI_VERSION_MAJOR && manifest.abi.minor == WXL_ABI_VERSION_MINOR,
+        Check(manifest.abi.major == WXL_ABI_VERSION_MAJOR && manifest.abi.minor == WXL_ABI_VERSION_MINOR &&
+                  manifest.abi.feature == WXL_ABI_VERSION_FEATURE,
               "the abi is parsed");
         Check(manifest.binaries.size() == 1 && manifest.BinaryFor(CurrentTarget()) &&
                   *manifest.BinaryFor(CurrentTarget()) == "bin/mod.dll",
@@ -533,20 +604,25 @@ int main(int argc, char** argv)
         Check(manifest.optional.size() == 1 && manifest.optional[0].version == 2, "optional is read");
         Check(manifest.load_after.size() == 2 && manifest.load_after[1] == "wxl.other",
               "loadAfter is read");
-        Check(manifest.lua == "main.lua" && manifest.description == "An example." &&
+        Check(manifest.lua.empty() && manifest.description == "An example." &&
                   manifest.authors.size() == 2 && manifest.homepage == "https://example.test",
               "the descriptive fields are read");
 
         Manifest script;
         Check(ParseManifest("{ \"id\": \"wxl.s\", \"name\": \"S\", \"version\": \"1.0.0\", \"abi\": "
-                            "\"0.1\", \"lua\": \"init.lua\" }",
+                            "\"0.1.0\", \"lua\": \"init.lua\" }",
                             script, error) &&
                   script.binaries.empty() && script.lua == "init.lua",
               "a manifest with lua and no binaries is a script mod and parses");
-        Check(Rejects("{ \"id\": \"wxl.s\", \"name\": \"S\", \"version\": \"1.0.0\", \"abi\": \"0.1\" }",
+        Check(Rejects("{ \"id\": \"wxl.s\", \"name\": \"S\", \"version\": \"1.0.0\", \"abi\": \"0.1.0\" }",
                       "'binaries' is missing"),
               "without either, binaries is still required");
         Check(Rejects(ManifestText("wxl.x", "\"lua\": \"\""), "at least 1"), "an empty lua entry is refused");
+        std::string both;
+        Check(Rejects(ManifestText("wxl.x", "\"lua\": \"init.lua\""), "'binaries' and 'lua' cannot both be given",
+                      &both) &&
+                  Contains(both, "line 6") && Contains(both, "would run twice"),
+              "a manifest with both binaries and lua is refused, at the binaries' line, saying why");
 
         Manifest minimal;
         Check(ParseManifest(ManifestText("wxl.min"), minimal, error), "a minimal manifest parses");
@@ -566,9 +642,12 @@ int main(int argc, char** argv)
             Check(!ParseSemver("1.0.0-a b", semver), "a space in the label is not");
             Check(!ParseSemver("v1.0.0", semver), "a prefix is not");
             AbiVersion abi;
-            Check(ParseAbi("12.34", abi) && abi.major == 12 && abi.minor == 34, "an abi parses");
-            Check(!ParseAbi("1", abi) && !ParseAbi("1.2.3", abi) && !ParseAbi("1.x", abi),
-                  "anything but major.minor is refused");
+            Check(ParseAbi("12.34.56", abi) && abi.major == 12 && abi.minor == 34 && abi.feature == 56,
+                  "an abi parses");
+            Check(AbiText(abi) == "12.34.56", "and prints as written");
+            Check(!ParseAbi("1", abi) && !ParseAbi("1.2", abi) && !ParseAbi("1.2.3.4", abi) &&
+                      !ParseAbi("1.2.x", abi) && !ParseAbi("1..3", abi),
+                  "anything but major.minor.feature is refused");
         }
 
         Check(IsValidModId("wxl.example") && IsValidModId("a-b.c-1") && IsValidModId("abc"),
@@ -579,7 +658,7 @@ int main(int argc, char** argv)
               "ill-formed ids fail");
 
         std::string message;
-        Check(Rejects("{ \"name\": \"x\", \"version\": \"1.0.0\", \"abi\": \"0.1\", "
+        Check(Rejects("{ \"name\": \"x\", \"version\": \"1.0.0\", \"abi\": \"0.1.0\", "
                       "\"binaries\": { \"win-x64\": \"a\" } }",
                       "'id' is missing"),
               "a missing required field is named");
@@ -589,19 +668,22 @@ int main(int argc, char** argv)
         std::string badVersion = ManifestText("wxl.x");
         badVersion.replace(badVersion.find("1.0.0"), 5, "1.0");
         Check(Rejects(badVersion, "semver"), "a bad version is refused");
-        Check(Rejects(ManifestText("wxl.x", "", "0"), "major.minor"), "a bad abi is refused");
-        Check(Rejects(ManifestText("wxl.x", "", "0.1", ""), "at least 1"),
+        Check(Rejects(ManifestText("wxl.x", "", "0"), "major.minor.feature"), "a bad abi is refused");
+        Check(Rejects(ManifestText("wxl.x", "", "0.5"), "two-part numbering", &message) &&
+                  Contains(message, ("\"" + std::string(kAbi) + "\"").c_str()),
+              "a two-part abi is refused as the old numbering, naming the one to write");
+        Check(Rejects(ManifestText("wxl.x", "", "0.1.0", ""), "at least 1"),
               "an empty binary path is refused");
         Check(Rejects("{ \"id\": \"wxl.x\", \"name\": \"x\", \"version\": \"1.0.0\", \"abi\": "
-                      "\"0.1\", \"binaries\": {} }",
+                      "\"0.1.0\", \"binaries\": {} }",
                       "at least one target"),
               "empty binaries are refused");
         Check(Rejects("{ \"id\": \"wxl.x\", \"name\": \"x\", \"version\": \"1.0.0\", \"abi\": "
-                      "\"0.1\", \"binaries\": { \"mac-arm64\": \"a\" } }",
+                      "\"0.1.0\", \"binaries\": { \"mac-arm64\": \"a\" } }",
                       "unknown target"),
               "an unknown target is refused");
         Check(Rejects("{ \"id\": \"wxl.x\", \"name\": \"x\", \"version\": \"1.0.0\", \"abi\": "
-                      "\"0.1\", \"binaries\": { \"win-x64\": 1 } }",
+                      "\"0.1.0\", \"binaries\": { \"win-x64\": 1 } }",
                       "must be a string"),
               "a non-string binary is refused");
         Check(Rejects(ManifestText("wxl.x", "\"name\": \"\""), "duplicate"),
@@ -762,8 +844,20 @@ int main(int argc, char** argv)
         Manifest minor  = manifest;
         minor.abi.minor = WXL_ABI_VERSION_MINOR + 1;
         decision        = AdmitManifest(minor, CurrentTarget(), services);
-        Check(decision.verdict == Verdict::Refuse && Contains(decision.reason, "newer"),
+        Check(decision.verdict == Verdict::Refuse && Contains(decision.reason, "minor"),
               "a higher abi minor is refused");
+
+        Manifest feature    = manifest;
+        feature.abi.feature = WXL_ABI_VERSION_FEATURE + 1;
+        decision            = AdmitManifest(feature, CurrentTarget(), services);
+        Check(decision.verdict == Verdict::Refuse && Contains(decision.reason, "newer") &&
+                  Contains(decision.reason, AbiText(feature.abi).c_str()) && Contains(decision.reason, kAbi),
+              "a higher abi feature is refused, naming both versions");
+
+        Manifest older    = manifest;
+        older.abi.feature = 0;
+        Check(AdmitManifest(older, CurrentTarget(), services).verdict == Verdict::Load,
+              "a lower abi feature is admitted");
 
         Manifest needs = manifest;
         needs.required.push_back(ServiceRef{"wxl.object", 1});
@@ -788,11 +882,24 @@ int main(int argc, char** argv)
                   Contains(AdmitInfo(manifest, nullptr).reason, "NULL"),
               "a NULL from wxl_mod_query is refused");
         wxl_mod_info info{sizeof(wxl_mod_info), WXL_ABI_VERSION_MAJOR, WXL_ABI_VERSION_MINOR,
-                          "wxl.x", "X", 1};
+                          "wxl.x", "X", 1, WXL_ABI_VERSION_FEATURE};
         Check(AdmitInfo(manifest, &info).verdict == Verdict::Load, "a matching info is accepted");
-        info.struct_size = sizeof(wxl_mod_info) - 4;
-        Check(Contains(AdmitInfo(manifest, &info).reason, "struct_size"), "a wrong struct_size is refused");
+        info.struct_size = static_cast<uint32_t>(offsetof(wxl_mod_info, abi_feature));
+        Check(Contains(AdmitInfo(manifest, &info).reason, "two-part"),
+              "an info without abi_feature is refused as the old numbering");
+        info.struct_size = 8;
+        Check(Contains(AdmitInfo(manifest, &info).reason, "struct_size is 8"), "a short struct_size is refused");
+        info.struct_size = sizeof(wxl_mod_info) + 8;
+        Check(AdmitInfo(manifest, &info).verdict == Verdict::Load,
+              "a longer info, from later headers, is accepted");
         info.struct_size = sizeof(wxl_mod_info);
+        info.abi_feature = WXL_ABI_VERSION_FEATURE + 1;
+        Check(AdmitInfo(manifest, &info).verdict == Verdict::Load,
+              "a binary built against a later feature than its manifest needs is accepted");
+        info.abi_feature = 0;
+        Check(Contains(AdmitInfo(manifest, &info).reason, ("asks for " + std::string(kAbi)).c_str()),
+              "a binary built against less than its manifest asks for is refused");
+        info.abi_feature = WXL_ABI_VERSION_FEATURE;
         info.id          = "wxl.y";
         Check(Contains(AdmitInfo(manifest, &info).reason, "'wxl.y'"), "an id mismatch is refused");
         info.id = nullptr;
@@ -800,6 +907,25 @@ int main(int argc, char** argv)
         info.id        = "wxl.x";
         info.abi_minor = WXL_ABI_VERSION_MINOR + 1;
         Check(Contains(AdmitInfo(manifest, &info).reason, "abi"), "an abi mismatch is refused");
+    }
+
+    Section("the abi rule");
+    {
+        const auto refusal = [](AbiVersion needed, AbiVersion served) { return AbiRefusal(needed, served); };
+        Check(refusal({0, 1, 5}, {0, 1, 5}).empty() && refusal({0, 1, 3}, {0, 1, 5}).empty(),
+              "the same or a lower feature is served");
+        Check(refusal({0, 1, 7}, {0, 1, 5}) ==
+                  "needs abi 0.1.7, newer than this runtime's 0.1.5: it uses what was appended after 0.1.5",
+              "a higher feature is refused, saying both versions");
+        Check(Contains(refusal({1, 0, 0}, {0, 1, 5}), "different major cannot be reconciled") &&
+                  Contains(refusal({0, 1, 5}, {1, 0, 0}), "different major"),
+              "another major is refused either way");
+        Check(Contains(refusal({0, 2, 0}, {0, 1, 5}), "while the major is 0 a different minor") &&
+                  Contains(refusal({0, 1, 0}, {0, 2, 0}), "while the major is 0 a different minor"),
+              "under major 0, another minor is refused either way");
+        Check(refusal({1, 1, 9}, {1, 2, 0}).empty(), "after major 0, an earlier stage is served");
+        Check(refusal({1, 3, 0}, {1, 2, 4}) == "needs abi 1.3.0, a later stage than this runtime's 1.2.4",
+              "and a later one is refused");
     }
 
     Section("service registry");
@@ -818,6 +944,79 @@ int main(int argc, char** argv)
         Check(registry.Publish("", 1, &one) == WXL_E_INVALID, "an empty name is refused");
         Check(registry.Publish("x", 1, nullptr) == WXL_E_INVALID, "a null interface is refused");
         Check(registry.Entries().size() == 2, "the entries can be listed");
+    }
+
+    Section("listening");
+    {
+        EventBus bus({WXL_EV_Update, WXL_EV_FrameBegin}, nullptr);
+        struct Seen
+        {
+            std::vector<std::pair<wxl_event, bool>> changes;
+        } seen;
+        auto record = [](void* user, wxl_event event, bool listening) {
+            static_cast<Seen*>(user)->changes.emplace_back(event, listening);
+        };
+        int one = 1, two = 2;
+        Check(!bus.Listening(WXL_EV_Update), "nobody listens to an event before a subscription");
+        const wxl_subscription early = bus.Subscribe(WXL_EV_FrameBegin, &Record, &one, 0);
+        bus.SetListenHandler(record, &seen);
+        Check(seen.changes.size() == 1 && seen.changes[0].first == WXL_EV_FrameBegin && seen.changes[0].second,
+              "the handler is told at once of an event already listened to");
+        const wxl_subscription a = bus.Subscribe(WXL_EV_Update, &Record, &one, 0);
+        const wxl_subscription b = bus.Subscribe(WXL_EV_Update, &Record, &two, 0);
+        Check(bus.Listening(WXL_EV_Update), "a subscription makes its event listened to");
+        Check(seen.changes.size() == 2 && seen.changes[1].first == WXL_EV_Update && seen.changes[1].second,
+              "the first subscription is reported, the second is not");
+        bus.Unsubscribe(a);
+        Check(bus.Listening(WXL_EV_Update) && seen.changes.size() == 2, "one left: still listened to");
+        bus.Unsubscribe(b);
+        Check(!bus.Listening(WXL_EV_Update), "the last one gone: nobody listens");
+        Check(seen.changes.size() == 3 && seen.changes[2].first == WXL_EV_Update && !seen.changes[2].second,
+              "and the handler is told");
+        bus.Subscribe(WXL_EV_Update, &Record, &one, 0, 7);
+        bus.DropOwner(7);
+        Check(!bus.Listening(WXL_EV_Update) && seen.changes.size() == 5, "dropping an owner is reported too");
+        Check(!bus.Listening(static_cast<wxl_event>(WXL_EV_COUNT)), "an event outside the table is never listened to");
+        bus.SetListenHandler(nullptr, nullptr);
+        bus.Unsubscribe(early);
+        Check(seen.changes.size() == 5 && !bus.Listening(WXL_EV_FrameBegin), "a null handler stops the reports");
+    }
+
+    Section("what the host tells of its events");
+    {
+        CaptureSink sink;
+        HostConfig  config;
+        config.mods_directory = scratch.empty() ? fs::path("no-mods-here") : scratch / "no-mods-here";
+        config.runtime_id     = "test";
+        config.log_sink       = &sink;
+        config.events         = {WXL_EV_Update, WXL_EV_FrameEnd};
+        ModHost host(std::move(config));
+        const wxl_host* table = host.Table();
+        Check(table->struct_size >= offsetof(wxl_host, raises) + sizeof(table->raises) && table->raises,
+              "the table carries raises");
+        Check(table->raises(WXL_EV_Update) && table->raises(WXL_EV_FrameEnd) && !table->raises(WXL_EV_SoundPlay) &&
+                  !table->raises(static_cast<wxl_event>(WXL_EV_COUNT)),
+              "raises answers the runtime's list, false outside it and outside the contract");
+
+        ModHost::RecentEvent recent[ModHost::kRecentEvents];
+        const wxl_update_args tick{0.1f};
+        host.Raise(WXL_EV_Update, &tick);
+        Check(host.Recent(recent, ModHost::kRecentEvents) == 0, "a raise nobody listens to is not remembered");
+        int one = 1;
+        host.Events().Subscribe(WXL_EV_Update, &Record, &one, 0);
+        for (int i = 0; i < 3; ++i) host.Raise(WXL_EV_Update, &tick);
+        host.Raise(WXL_EV_FrameEnd, nullptr);
+        size_t count = host.Recent(recent, ModHost::kRecentEvents);
+        Check(count == 3 && recent[0].event == WXL_EV_Update && recent[2].main_thread,
+              "the raises that dispatched are remembered, on the main thread");
+        for (int i = 0; i < 40; ++i) host.Raise(WXL_EV_Update, &tick);
+        count = host.Recent(recent, 4);
+        Check(count == 4 && recent[3].event == WXL_EV_Update, "the last ones, as many as asked for");
+        Check(host.Recent(recent, ModHost::kRecentEvents) == ModHost::kRecentEvents, "at most kRecentEvents");
+        std::thread([&] { host.Raise(WXL_EV_Update, &tick); }).join();
+        count = host.Recent(recent, 1);
+        Check(count == 1 && !recent[0].main_thread, "a raise on another thread says so");
+        g_order.clear();
     }
 
     Section("event bus");
@@ -916,6 +1115,60 @@ int main(int argc, char** argv)
               "CanRaise reflects the configuration");
     }
 
+    Section("event bus and a profiler");
+    {
+        // A profiler that records what it is asked: locations by name, zones as a trace.
+        struct Recorder
+        {
+            std::vector<std::string> names;
+            std::vector<std::string> trace;
+        };
+        static Recorder recorder;
+        Profiler        profiler;
+        profiler.user     = &recorder;
+        profiler.location = [](void* user, std::string_view name, std::string_view, uint32_t) -> const void* {
+            Recorder& r = *static_cast<Recorder*>(user);
+            r.names.emplace_back(name);
+            return reinterpret_cast<const void*>(r.names.size());
+        };
+        profiler.begin = [](void* user, const void* location) -> uint64_t {
+            Recorder& r = *static_cast<Recorder*>(user);
+            r.trace.push_back("+" + r.names[reinterpret_cast<uintptr_t>(location) - 1]);
+            return reinterpret_cast<uintptr_t>(location);
+        };
+        profiler.end = [](void* user, uint64_t zone) {
+            Recorder& r = *static_cast<Recorder*>(user);
+            r.trace.push_back("-" + r.names[static_cast<size_t>(zone) - 1]);
+        };
+
+        EventBus bus({WXL_EV_Update}, nullptr);
+        bus.SetProfiler(&profiler, [](void*, uint32_t owner) { return owner == 7 ? std::string("scout") : std::string(); },
+                        nullptr);
+        std::atomic<int> calls{0};
+        bus.Subscribe(WXL_EV_Update, &CountUp, &calls, 0, 7);
+        bus.Subscribe(WXL_EV_Update, &CountUp, &calls, 1, 0);
+        bus.Emit(WXL_EV_Update, nullptr);
+        Check(calls.load() == 2 && recorder.trace.empty(), "nothing is recorded while profiling is off");
+        bus.SetProfiling(true);
+        bus.Emit(WXL_EV_Update, nullptr);
+#if WXL_HOST_PROFILE
+        Check(recorder.trace.size() == 6 && recorder.trace[0] == "+OnUpdate" &&
+                  recorder.trace[1] == "+scout: OnUpdate" && recorder.trace[2] == "-scout: OnUpdate" &&
+                  recorder.trace[3] == "+runtime: OnUpdate" && recorder.trace[5] == "-OnUpdate",
+              "a dispatch is a zone named after its event, each handler one inside it named after its owner");
+        recorder.trace.clear();
+        bus.Subscribe(WXL_EV_Update, &CountUp, &calls, 2, 7);
+        const size_t named = recorder.names.size();
+        bus.Subscribe(WXL_EV_Update, &CountUp, &calls, 3, 7);
+        Check(recorder.names.size() == named, "one location per owner and event, however often it subscribes");
+        bus.SetProfiling(false);
+        bus.Emit(WXL_EV_Update, nullptr);
+        Check(recorder.trace.empty(), "and nothing once profiling is off again");
+#else
+        Check(recorder.trace.empty(), "a host built without WXL_HOST_PROFILE opens no zone");
+#endif
+    }
+
     Section("event bus across threads");
     {
         EventBus bus({WXL_EV_Update}, nullptr);
@@ -995,9 +1248,9 @@ int main(int argc, char** argv)
         WriteFile(mods / "needy" / "mod.json",
                   ManifestText("wxl.needy", "\"requires\": [ { \"service\": \"wxl.nothing\", \"version\": 1 } ]",
                                kAbi, "good.dll"));
-        WriteFile(mods / "oldabi" / "mod.json", ManifestText("wxl.oldabi", "", "9.0", "good.dll"));
+        WriteFile(mods / "oldabi" / "mod.json", ManifestText("wxl.oldabi", "", "9.0.0", "good.dll"));
         WriteFile(mods / "elsewhere" / "mod.json",
-                  "{ \"id\": \"wxl.elsewhere\", \"name\": \"E\", \"version\": \"1.0.0\", \"abi\": \"0.1\", "
+                  "{ \"id\": \"wxl.elsewhere\", \"name\": \"E\", \"version\": \"1.0.0\", \"abi\": \"0.1.0\", "
                   "\"binaries\": { \"linux-x64\": \"e.so\" } }");
         WriteFile(mods / "unreadable" / "mod.json", "{ \"id\": \"wxl.unreadable\" ");
         WriteFile(mods / "noquery" / "mod.json", ManifestText("wxl.noquery", "", kAbi, "noquery.dll"));
@@ -1026,7 +1279,9 @@ int main(int argc, char** argv)
         g_trace.clear();
         ModHost host(config);
         Check(host.Table()->struct_size == sizeof(wxl_host) &&
-                  host.Table()->abi_major == WXL_ABI_VERSION_MAJOR,
+                  host.Table()->abi_major == WXL_ABI_VERSION_MAJOR &&
+                  host.Table()->abi_feature == WXL_ABI_VERSION_FEATURE &&
+                  host.Table()->runtime()->abi_feature == WXL_ABI_VERSION_FEATURE,
               "the table is filled before anything loads");
         Check(host.Services().Has("wxl.runtime", 1), "runtime services are published at construction");
 
@@ -1039,10 +1294,10 @@ int main(int argc, char** argv)
                                                   "nostage:load"},
               "wxl_mod_load ran in load order; a refused query or binary never reached it");
         Check(host.Loaded().size() == 3 && host.Loaded()[0].name == "Good" &&
-                  host.Loaded()[0].version == 1 && host.Loaded()[0].has_stage &&
+                  host.Loaded()[0].has_stage &&
                   host.Loaded()[0].has_unload && !host.Loaded()[2].has_stage &&
                   !host.Loaded()[2].has_unload,
-              "a loaded mod reports its name, version and optional entry points");
+              "a loaded mod reports its name and optional entry points");
         Check(host.Loaded().size() == 3 && host.Loaded()[0].directory_name == "b-good" &&
                   host.Loaded()[0].binary == mods / "b-good" / "good.dll",
               "and where it came from");
@@ -1064,7 +1319,7 @@ int main(int argc, char** argv)
         Check(refused && Contains(refused->reason, "wxl.nothing"),
               "a missing required service is refused");
         refused = FindRefused(host, "wxl.oldabi");
-        Check(refused && Contains(refused->reason, "9.0"), "a foreign abi is refused");
+        Check(refused && Contains(refused->reason, "9.0.0"), "a foreign abi is refused");
         refused = FindRefused(host, "wxl.elsewhere");
         Check(refused && refused->verdict == Verdict::Skip, "a mod for another target is skipped");
         refused = FindRefused(host, "wxl.noquery");
@@ -1136,6 +1391,48 @@ int main(int argc, char** argv)
         Check(host.Loaded().empty(), "LoadAll is a one-shot");
     }
 
+    Section("a binary's headers bound the events it subscribes to");
+    if (scratch.empty())
+    {
+        std::printf("  (skipped: no scratch directory given)\n");
+    }
+    else
+    {
+        const fs::path mods = scratch / "older";
+        fs::remove_all(mods);
+        const std::string older = std::to_string(WXL_ABI_VERSION_MAJOR) + "." +
+                                  std::to_string(WXL_ABI_VERSION_MINOR) + "." + std::to_string(kOlderFeature);
+        WriteFile(mods / "older" / "mod.json", ManifestText("wxl.older", "", older.c_str(), "older.dll"));
+
+        FakeLoader loader;
+        loader.images.push_back({"older.dll", Fn(&OlderQuery), Fn(&OlderLoad), nullptr, nullptr});
+        CaptureSink sink;
+        HostConfig  config;
+        config.mods_directory = mods;
+        config.runtime_id     = "test";
+        config.runtime_name   = "Test runtime";
+        config.log_sink       = &sink;
+        config.events         = AllEvents();
+        config.loader         = &loader;
+
+        ModHost host(config);
+        host.LoadAll();
+        Check(host.Loaded().size() == 1 && host.Loaded()[0].built_abi.feature == kOlderFeature,
+              "the binary loads, its built abi kept");
+        Check(g_olderNew == WXL_SUBSCRIPTION_NONE && g_olderOld != WXL_SUBSCRIPTION_NONE,
+              "an event newer than its headers is refused, an older one is not");
+        const AbiVersion  since = EventSince(WXL_EV_ChatMessage);
+        const std::string line  = "[WARN ] [host] mod wxl.older subscribed to ChatMessage, which came with abi " +
+                                 AbiText(since) + "; its binary was built against abi " + older +
+                                 ", whose headers do not have that event: the subscription is refused";
+        Check(CountLines(sink.lines, line.c_str()) == 1, "the refusal is logged once, naming both versions");
+        Check(AtLeast(AbiVersion{0, 1, 6}, AbiVersion{0, 1, 5}) && AtLeast(AbiVersion{0, 1, 5}, AbiVersion{0, 1, 5}) &&
+                  !AtLeast(AbiVersion{0, 1, 5}, AbiVersion{0, 1, 6}) && AtLeast(AbiVersion{0, 2, 0}, AbiVersion{0, 1, 9}) &&
+                  !AtLeast(AbiVersion{0, 9, 9}, AbiVersion{1, 0, 0}),
+              "versions compare major, then minor, then feature");
+        host.Shutdown();
+    }
+
     Section("crash guard");
 #if defined(_MSC_VER)
     {
@@ -1145,9 +1442,14 @@ int main(int argc, char** argv)
               "a call that returns is reported as returned");
         Check(!CallGuarded(&GuardedCrash, nullptr, &fault) && fault.code == 0xC0000005u,
               "a null write inside the guard is reported as an access violation");
-        char text[96];
-        Check(Contains(DescribeFault(fault, text, sizeof text), "access violation (0xC0000005) at 0x"),
-              "a fault describes itself");
+        char text[192];
+        DescribeFault(fault, text, sizeof text);
+        Check(Contains(text, "access violation (0xC0000005) writing 0x0 at "),
+              "a fault describes itself, with the address it touched");
+        Check(Contains(text, ".exe+0x"), "and where it happened, as a module and an offset");
+        char where[96];
+        Check(std::string(DescribeAddress(0x10, where, sizeof where)) == "0x10",
+              "an address outside every module is shown bare");
     }
     if (scratch.empty())
     {
@@ -1246,6 +1548,79 @@ int main(int argc, char** argv)
     std::printf("  (skipped: off MSVC the guard is a plain call)\n");
 #endif
 
+    Section("a mod that disables itself");
+    if (scratch.empty())
+    {
+        std::printf("  (skipped: no scratch directory given)\n");
+    }
+    else
+    {
+        const fs::path mods = scratch / "quit";
+        fs::remove_all(mods);
+        WriteFile(mods / "a-quitter" / "mod.json", ManifestText("wxl.quitter", "", kAbi, "quitter.dll"));
+        WriteFile(mods / "b-loadquit" / "mod.json", ManifestText("wxl.loadquit", "", kAbi, "loadquit.dll"));
+        WriteFile(mods / "c-unloadquit" / "mod.json",
+                  ManifestText("wxl.unloadquit", "", kAbi, "unloadquit.dll"));
+
+        FakeLoader loader;
+        loader.images.push_back({"quitter.dll", Fn(&QuitterQuery), Fn(&QuitterLoad), Fn(&QuitterStage), Fn(&QuitterUnload)});
+        loader.images.push_back({"loadquit.dll", Fn(&LoadQuitQuery), Fn(&LoadQuitLoad), nullptr, nullptr});
+        loader.images.push_back({"unloadquit.dll", Fn(&UnloadQuitQuery), Fn(&UnloadQuitLoad), nullptr, Fn(&UnloadQuitUnload)});
+
+        CaptureSink sink;
+        HostConfig  config;
+        config.mods_directory = mods;
+        config.runtime_id     = "test";
+        config.runtime_name   = "Test runtime";
+        config.log_sink       = &sink;
+        config.events         = {WXL_EV_Update};
+        config.loader         = &loader;
+
+        struct Told
+        {
+            std::vector<std::string> ids;
+            static void Disabled(void* user, ModHost::ModToken, const char* id)
+            {
+                static_cast<Told*>(user)->ids.push_back(id);
+            }
+        } told;
+
+        g_trace.clear();
+        ModHost host(config);
+        host.SetDisableHandler(&Told::Disabled, &told);
+        host.LoadAll();
+        Check(host.Table()->struct_size == sizeof(wxl_host) && host.Table()->disable != nullptr,
+              "the table carries disable");
+        const RefusedMod* refused = FindRefused(host, "wxl.loadquit");
+        Check(host.Loaded().size() == 2 && refused &&
+                  refused->reason == "it disabled itself in wxl_mod_load: gave up; the binary "
+                                     "stays mapped and nothing of it is called again",
+              "a mod that disables itself while loading is refused with its reason");
+        Check(host.Events().LiveCount(WXL_EV_Update) == 1, "and what it subscribed is dropped");
+
+        host.Stage(WXL_STAGE_EARLY);
+        host.Stage(WXL_STAGE_READY);
+        Check(host.Loaded()[0].disabled && host.Loaded()[0].fault == "OnReady threw an exception: boom" &&
+                  told.ids == std::vector<std::string>{"wxl.quitter"},
+              "one that disables itself in a stage is disabled there, and the runtime is told");
+        Check(sink.Has("mod wxl.quitter disabled itself: OnReady threw an exception: boom; it is "
+                       "disabled: its handlers are dropped"),
+              "the log gives its reason");
+        Check(host.Events().LiveCount(WXL_EV_Update) == 0, "its handlers are gone");
+
+        host.Table()->disable(Text("nobody's"));
+        Check(sink.Has("disable was called from code that is no mod's; nothing is disabled"),
+              "called from no mod's code, it disables nothing and says so");
+
+        g_trace.clear();
+        host.Shutdown();
+        Check(g_trace == std::vector<std::string>{"unloadquit:unload"},
+              "the disabled mod's later stages and unload are skipped");
+        Check(sink.Has("mod wxl.unloadquit disabled itself: OnUnload threw an exception: late") &&
+                  loader.closed == 0,
+              "one that disables itself in its unload stays mapped");
+    }
+
     Section("mod host with the fixture binary");
     if (fixture.empty() || scratch.empty())
     {
@@ -1274,7 +1649,7 @@ int main(int argc, char** argv)
         for (const RefusedMod& mod : host.Refused())
             std::printf("        %s: %s\n", mod.directory_name.c_str(), mod.reason.c_str());
         Check(host.Loaded().size() == 1 && host.Loaded()[0].id == "wxl.fixture" &&
-                  host.Loaded()[0].name == "Fixture" && host.Loaded()[0].version == 7,
+                  host.Loaded()[0].name == "Fixture",
               "the fixture loads through the OS loader and reports its info");
         Check(host.Loaded().size() == 1 && host.Loaded()[0].has_stage && host.Loaded()[0].has_unload,
               "the SDK macro exports all four entry points");

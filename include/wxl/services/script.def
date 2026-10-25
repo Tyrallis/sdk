@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
+//
+// wxl.script as data: one row per member of wxl_script_api, in member order. The shapes and
+// their columns are described in wxl/services/rows.hpp.
+//
+// The accessors of a call (arg_count to fail) are native: they exist inside a registered
+// function, which a Lua mod writes in Lua; the shim that runs it reads and answers through them.
+
+#ifndef WXL_API
+#error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including script.def"
+#endif
+
+WXL_API_SERVICE(script, WXL_SCRIPT_SERVICE, WXL_SCRIPT_SERVICE_VERSION, (0, 1, 5), safe,
+                "The client's own script: functions and events added to it, text run in it.")
+
+WXL_API(script, context, Context, enumeration<wxl_script_context>, (), generated, generated,
+        "Which script context is live: the glue's (login, characters) or the game's.")
+WXL_API(script, register_function, RegisterFunction, result, (cstr name, script_fn fn, ptr user), shim, by_hand,
+        "Makes a function callable from the client's script under a global name.")
+WXL_API(script, register_event, RegisterEvent, result, (cstr name), shim, generated,
+        "Declares an event the client's frames can listen to.")
+WXL_API(script, fire_event, FireEvent, result, (cstr name, values args), generated, by_hand,
+        "Raises a declared event, with its values, to every frame listening.")
+WXL_API(script, run, Run, result, (str chunk, cstr name), generated, generated,
+        "Runs script text in the live context; the name labels it in errors.")
+WXL_API(script, arg_count, ArgCount, u32, (call invocation), native, by_hand, "")
+WXL_API(script, arg_number, ArgNumber, found<f64>, (call invocation, u32 index), native, by_hand, "")
+WXL_API(script, arg_string, ArgString, found<str>, (call invocation, u32 index), native, by_hand, "")
+WXL_API(script, arg_bool, ArgBool, found<boolean>, (call invocation, u32 index), native, by_hand, "")
+WXL_API(script, arg_type, ArgType, u32, (call invocation, u32 index), native, by_hand, "")
+WXL_API(script, push_number, PushNumber, none, (call invocation, f64 value), native, by_hand, "")
+WXL_API(script, push_string, PushString, none, (call invocation, str value), native, by_hand, "")
+WXL_API(script, push_bool, PushBool, none, (call invocation, boolean value), native, by_hand, "")
+WXL_API(script, push_nil, PushNil, none, (call invocation), native, by_hand, "")
+WXL_API(script, fail, Fail, none, (call invocation, str message), native, by_hand, "")
+WXL_API_SINCE(script, live, (0, 1, 15))
+WXL_API(script, live, Live, boolean, (), generated, generated,
+        "Whether a script context is live: false before the first one and between two.")

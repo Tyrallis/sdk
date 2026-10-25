@@ -16,6 +16,20 @@
 // happens to be built is published by that runtime as a service of its own, not added below.
 //
 // Handlers run on the client's main thread, except where a row says it may be raised elsewhere.
+//
+// Which version of the contract brought which events is written once, in rows of a second shape
+// placed among the events:
+//
+//   WXL_EVENTS_SINCE(major, minor, feature, first)
+//
+// abi major.minor.feature brought the events from id `first` on. The row sits right above the
+// event of id `first`; since ids are appended, every event from that id up to the next such row
+// came with that version. A feature that appends events opens them with one of these rows, the
+// version abi.h is raised to and the first new id; a feature that appends no event adds none.
+// wxl/reflect.hpp reads them (wxl::reflect::Since), so that wxl.lua refuses a script mod's
+// subscription to an event newer than the "abi" its manifest asks for, and the host one from a
+// binary built against headers that did not have the event; tests/reflect.cpp checks that each
+// row sits above its first event and that none is newer than abi.h.
 
 // Two ways to consume it, and nothing to remember:
 //
@@ -27,13 +41,18 @@
 
 #if !defined(WXL_EVENT) && !defined(WXL_EVENT_World) && !defined(WXL_EVENT_Render) && \
     !defined(WXL_EVENT_Object) && !defined(WXL_EVENT_Asset) && !defined(WXL_EVENT_Net) && \
-    !defined(WXL_EVENT_Lua) && !defined(WXL_EVENT_Combat)
-    #error "define WXL_EVENT(family, name, id, args) or a WXL_EVENT_<family> before events.def"
+    !defined(WXL_EVENT_Lua) && !defined(WXL_EVENT_Combat) && !defined(WXL_EVENT_Player) && \
+    !defined(WXL_EVENT_Glue) && !defined(WXL_EVENT_Chat) && !defined(WXL_EVENTS_SINCE)
+    #error "define WXL_EVENT(family, name, id, args), a WXL_EVENT_<family> or WXL_EVENTS_SINCE before events.def"
 #endif
 
 #ifndef WXL_EVENT
     #define WXL_EVENT(family, name, id, args) WXL_EVENT_##family(name, id, args)
     #define WXL_EVENT_DEFAULTED
+#endif
+#ifndef WXL_EVENTS_SINCE
+    #define WXL_EVENTS_SINCE(major, minor, feature, first)
+    #define WXL_EVENTS_SINCE_DEFAULTED
 #endif
 #ifndef WXL_EVENT_World
     #define WXL_EVENT_World(name, id, args)
@@ -63,8 +82,23 @@
     #define WXL_EVENT_Combat(name, id, args)
     #define WXL_EVENT_Combat_DEFAULTED
 #endif
+#ifndef WXL_EVENT_Player
+    #define WXL_EVENT_Player(name, id, args)
+    #define WXL_EVENT_Player_DEFAULTED
+#endif
+#ifndef WXL_EVENT_Glue
+    #define WXL_EVENT_Glue(name, id, args)
+    #define WXL_EVENT_Glue_DEFAULTED
+#endif
+#ifndef WXL_EVENT_Chat
+    #define WXL_EVENT_Chat(name, id, args)
+    #define WXL_EVENT_Chat_DEFAULTED
+#endif
 
 // --- World: the game's own facts -----------------------------------------------------------
+
+// Everything numbered before the three-part version came with the first contract under it.
+WXL_EVENTS_SINCE(0, 1, 5, 0)
 
 /** The logic tick advanced. */
 WXL_EVENT(World, Update,        0, wxl_update_args)
@@ -103,7 +137,8 @@ WXL_EVENT(Render, SwapchainRestored,12, wxl_swapchain_args)
 
 /** An object entered the client's view. */
 WXL_EVENT(Object, ObjectCreate,     13, wxl_object_args)
-/** An object's server-side fields changed. */
+/** An object's server-side fields changed: once per object and update packet, after the whole
+    packet is applied. An object the packet creates is announced by ObjectCreate instead. */
 WXL_EVENT(Object, ObjectUpdate,     14, wxl_object_args)
 /** An object is about to leave; it is still resident and its handle still resolves. */
 WXL_EVENT(Object, ObjectDestroy,    15, wxl_object_args)
@@ -127,7 +162,8 @@ WXL_EVENT(Asset, MapObjectLoad,     22, wxl_map_object_args)
 /** A file is about to be opened by name. A handler may answer with another path. May be raised
     on any thread that opens files. */
 WXL_EVENT(Asset, FileOpen,          29, wxl_file_open_args)
-/** A file open finished, whether or not it found anything. */
+/** A file open finished, whether or not it found anything. May be raised on any thread that opens
+    files. */
 WXL_EVENT(Asset, FileOpened,        30, wxl_file_opened_args)
 /** A client database finished loading; its records are readable. */
 WXL_EVENT(Asset, ClientDbLoaded,    31, wxl_client_db_args)
@@ -151,9 +187,12 @@ WXL_EVENT(Net, Disconnected,    26, wxl_connection_args)
 //
 // The client runs two script contexts in turn: the login glue and the game. Each is created and
 // destroyed more than once in a session, so anything registered on one is registered again on the
-// next -- these events are where that happens.
+// next -- these events are where that happens. A context is announced when its interface comes
+// up, after the client's own functions are registered and before its frames load; the client
+// also makes contexts it destroys before loading any interface into them (while it starts, and
+// between the game and the glue), and those raise neither event.
 
-/** A script context exists and can be registered on. */
+/** A script context with an interface coming up exists and can be registered on. */
 WXL_EVENT(Lua, ScriptVmReady,   27, wxl_script_vm_args)
 /** A script context is about to be destroyed. Anything held on it dies with it. */
 WXL_EVENT(Lua, ScriptVmClosing, 28, wxl_script_vm_args)
@@ -223,6 +262,85 @@ WXL_EVENT(Combat, CombatHeal,        53, wxl_combat_heal_args)
 /** An attack did not land: a spell on one of its targets, or a melee round. */
 WXL_EVENT(Combat, CombatMiss,        54, wxl_combat_miss_args)
 
+// --- World, continued: where the player is, what the mouse is over, the console -----------
+
+WXL_EVENTS_SINCE(0, 1, 6, 55)
+
+/** The player's zone, subzone or indoor state changed, as the client announces it to its interface. */
+WXL_EVENT(World, ZoneChanged,      55, wxl_zone_args)
+/** The object under the mouse changed: a unit, a game object, or nothing. */
+WXL_EVENT(World, MouseoverChanged, 56, wxl_mouseover_args)
+/** A console variable's value changed, by whoever set it. */
+WXL_EVENT(World, CVarChanged,      57, wxl_cvar_args)
+
+// --- Player: what the local player does and is told ---------------------------------------
+
+/** The local player's own movement started: a move, strafe, turn, pitch, jump, ascent or descent, as it is sent to the server. */
+WXL_EVENT(Player, PlayerMoveStart,    58, wxl_player_move_args)
+/** It stopped: the matching stop, or the landing of a fall. */
+WXL_EVENT(Player, PlayerMoveStop,     59, wxl_player_move_args)
+/** The local player gained a level: SMSG_LEVELUP_INFO, with what the level added. */
+WXL_EVENT(Player, PlayerLevelUp,      60, wxl_level_up_args)
+/** The local player gained experience: SMSG_LOG_XPGAIN. */
+WXL_EVENT(Player, PlayerXpGain,       61, wxl_xp_gain_args)
+/** The local player's money changed, with the amounts before and after. */
+WXL_EVENT(Player, PlayerMoneyChanged, 62, wxl_money_args)
+
+// --- Glue: the login screens ---------------------------------------------------------------
+
+/** The glue moved to another screen: "login", "charselect", "charcreate", "realmwizard", ... */
+WXL_EVENT(Glue, GlueScreenChanged,  63, wxl_glue_screen_args)
+/** The character list arrived: SMSG_CHAR_ENUM, with its count. One GlueCharacter per entry follows. */
+WXL_EVENT(Glue, GlueCharacterList,  64, wxl_character_list_args)
+/** One character of the list, in order. */
+WXL_EVENT(Glue, GlueCharacter,      65, wxl_character_args)
+/** The realm list arrived from the logon server, with its count. One GlueRealm per entry follows.
+    May be raised on the logon connection's thread. */
+WXL_EVENT(Glue, GlueRealmList,      66, wxl_realm_list_args)
+/** One realm of the list, in order. May be raised on the logon connection's thread. */
+WXL_EVENT(Glue, GlueRealm,          67, wxl_realm_args)
+/** The world server answered the login: SMSG_AUTH_RESPONSE, with the result and the queue. */
+WXL_EVENT(Glue, GlueAuthResult,     68, wxl_auth_result_args)
+/** The client asks to enter the world with a character: CMSG_PLAYER_LOGIN, before it is sent. */
+WXL_EVENT(Glue, GlueEnterWorld,     69, wxl_enter_world_args)
+
+// --- Chat: what is said ---------------------------------------------------------------------
+
+/** A chat message of the server (SMSG_MESSAGECHAT, SMSG_GM_MESSAGECHAT) became a line the client shows, as it shows it; nothing for one it drops. */
+WXL_EVENT(Chat, ChatMessage, 70, wxl_chat_args)
+/** The local player sends a chat or addon message from the interface. A handler may suppress it. */
+WXL_EVENT(Chat, ChatSend,    71, wxl_chat_send_args)
+
+// --- Combat, continued ----------------------------------------------------------------------
+
+/** Power was given or drained: SMSG_SPELLENERGIZELOG, or an energize or drain tick of SMSG_PERIODICAURALOG. */
+WXL_EVENT(Combat, CombatEnergize, 72, wxl_combat_energize_args)
+
+// --- Chat, continued ------------------------------------------------------------------------
+
+WXL_EVENTS_SINCE(0, 1, 7, 73)
+
+/** An addon message of the server is delivered to the interface as CHAT_MSG_ADDON, with its prefix, text and sender. */
+WXL_EVENT(Chat, ChatAddonMessage, 73, wxl_chat_addon_args)
+
+// --- Object, continued ----------------------------------------------------------------------
+
+WXL_EVENTS_SINCE(0, 1, 9, 74)
+
+/** A descriptor field watch_field asked for changed on an object, as an update of the server applied it. */
+WXL_EVENT(Object, ObjectFieldChanged, 74, wxl_object_field_args)
+
+// --- Asset and World, continued: where the memory goes ----------------------------------------
+
+WXL_EVENTS_SINCE(0, 1, 11, 75)
+
+/** The client mounted an archive, with its tables read. */
+WXL_EVENT(Asset, ArchiveMounted,   75, wxl_archive_args)
+/** The client is about to close an archive it mounted. */
+WXL_EVENT(Asset, ArchiveUnmounted, 76, wxl_archive_args)
+/** The largest free block of the address space fell under the threshold a mod watches (wxl.footprint). */
+WXL_EVENT(World, MemoryPressure,   77, wxl_memory_pressure_args)
+
 // Give back whatever was defaulted above, so the file can be included again right after with a
 // different selector. What the consumer defined itself is left alone: undefining it here would
 // break the consumer that includes the table twice on purpose.
@@ -230,6 +348,10 @@ WXL_EVENT(Combat, CombatMiss,        54, wxl_combat_miss_args)
 #ifdef WXL_EVENT_DEFAULTED
     #undef WXL_EVENT
     #undef WXL_EVENT_DEFAULTED
+#endif
+#ifdef WXL_EVENTS_SINCE_DEFAULTED
+    #undef WXL_EVENTS_SINCE
+    #undef WXL_EVENTS_SINCE_DEFAULTED
 #endif
 #ifdef WXL_EVENT_World_DEFAULTED
     #undef WXL_EVENT_World
@@ -258,4 +380,16 @@ WXL_EVENT(Combat, CombatMiss,        54, wxl_combat_miss_args)
 #ifdef WXL_EVENT_Combat_DEFAULTED
     #undef WXL_EVENT_Combat
     #undef WXL_EVENT_Combat_DEFAULTED
+#endif
+#ifdef WXL_EVENT_Player_DEFAULTED
+    #undef WXL_EVENT_Player
+    #undef WXL_EVENT_Player_DEFAULTED
+#endif
+#ifdef WXL_EVENT_Glue_DEFAULTED
+    #undef WXL_EVENT_Glue
+    #undef WXL_EVENT_Glue_DEFAULTED
+#endif
+#ifdef WXL_EVENT_Chat_DEFAULTED
+    #undef WXL_EVENT_Chat
+    #undef WXL_EVENT_Chat_DEFAULTED
 #endif

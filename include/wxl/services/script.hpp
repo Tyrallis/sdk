@@ -12,7 +12,18 @@
 #include <type_traits>
 
 #include "wxl/sdk.hpp"
+#include "wxl/services/rows.hpp"
 #include "wxl/services/script.h"
+
+namespace wxl::api::facade
+{
+    template <>
+    struct Methods<wxl_script_api>
+    {
+#define WXL_API_TABLE "wxl/services/script.def"
+#include "wxl/services/methods.inc"
+    };
+} // namespace wxl::api::facade
 
 namespace wxl
 {
@@ -111,20 +122,20 @@ namespace wxl
      *
      * Registrations do not survive a context: register again on every ScriptVmReady. Every call
      * answers WXL_E_UNSUPPORTED while the runtime does not publish the service.
+     *
+     * Three methods are rows of script.def, and answer as script.h says:
+     *
+     *   Context()             Expected<wxl_script_context>  which context is live
+     *   RegisterEvent(name)   wxl_result                    declares an event frames can listen to
+     *   Run(chunk, name)      wxl_result                    runs script text in the live context;
+     *                                                       @p name labels it in errors
      */
-    class ScriptService : public detail::Facade<ScriptService, wxl_script_api>
+    class ScriptService : public detail::Facade<ScriptService, wxl_script_api>,
+                          public api::facade::Methods<wxl_script_api>
     {
     public:
         static constexpr const char* kName    = WXL_SCRIPT_SERVICE;
         static constexpr uint32_t    kVersion = WXL_SCRIPT_SERVICE_VERSION;
-
-        /// Which context is live.
-        Expected<wxl_script_context> Context() const
-        {
-            const wxl_script_api* api = Raw();
-            if (!api) return Unexpected{WXL_E_UNSUPPORTED};
-            return static_cast<wxl_script_context>(api->context());
-        }
 
         /// Registers a raw function, with its user pointer.
         wxl_result RegisterFunction(const char* name, wxl_script_fn fn, void* user) const
@@ -148,6 +159,27 @@ namespace wxl
         }
 
         /**
+         * @brief Registers a member function, called on @p object.
+         *
+         *     void Count(wxl::ScriptCall& call);          // a member of Api, const or not
+         *     script.RegisterFunction<&Api::Count>("Count", this);
+         *
+         * The object must outlive the context it is registered on.
+         */
+        template <auto Method, class C>
+        wxl_result RegisterFunction(const char* name, C* object) const
+        {
+            static_assert(std::is_member_function_pointer_v<decltype(Method)>,
+                          "RegisterFunction<&Class::Method>(name, object) takes a member "
+                          "function; pass a plain function as RegisterFunction<&Fn>(name)");
+            static_assert(std::is_invocable_v<decltype(Method), C*, ScriptCall&>,
+                          "the member function is called as (object->*Method)(call): it takes a "
+                          "wxl::ScriptCall& and is a member of the object's class");
+            if (!object) return WXL_E_INVALID;
+            return RegisterFunction(name, &MethodThunk<Method, C>, object);
+        }
+
+        /**
          * @brief Registers a callable object, called as `(*handler)(ScriptCall&)`.
          *
          * The object must outlive the context it is registered on.
@@ -159,13 +191,6 @@ namespace wxl
                           "pass a plain function as RegisterFunction<&Fn>(name)");
             if (!handler) return WXL_E_INVALID;
             return RegisterFunction(name, &HandlerThunk<Handler>, handler);
-        }
-
-        wxl_result RegisterEvent(const char* name) const
-        {
-            const wxl_script_api* api = Raw();
-            if (!api) return WXL_E_UNSUPPORTED;
-            return api->register_event(name);
         }
 
         wxl_result FireEvent(const char* name, const wxl_value* args, uint32_t count) const
@@ -181,27 +206,40 @@ namespace wxl
             return FireEvent(name, args.begin(), static_cast<uint32_t>(args.size()));
         }
 
-        /// Runs a chunk of script text in the live context; @p name labels it in errors.
-        wxl_result Run(std::string_view chunk, const char* name) const
+    private:
+        /// Runs a registered function. What it throws fails the call, with what() as the
+        /// script's error, and is logged: the script side never sees a C++ exception.
+        template <class F>
+        static void Contained(wxl_script_call* call, F&& f)
         {
-            const wxl_script_api* api = Raw();
-            if (!api) return WXL_E_UNSUPPORTED;
-            return api->run(Str(chunk), name);
+            ScriptCall      typed(Raw(), call);
+            detail::Thrown thrown;
+            if (detail::Contain([&] { f(typed); }, thrown)) return;
+            detail::LogThrown("a function registered with wxl.script", thrown,
+                              "; the call fails on the script side with that message");
+            char described[320];
+            typed.Fail(thrown.standard ? std::string_view(thrown.what)
+                                       : std::string_view(thrown.Describe(described,
+                                                                          sizeof described)));
         }
 
-    private:
         template <void (*Fn)(ScriptCall&)>
         static void WXL_CALL FunctionThunk(wxl_script_call* call, void*)
         {
-            ScriptCall typed(Raw(), call);
-            Fn(typed);
+            Contained(call, [](ScriptCall& typed) { Fn(typed); });
+        }
+
+        template <auto Method, class C>
+        static void WXL_CALL MethodThunk(wxl_script_call* call, void* user)
+        {
+            Contained(call,
+                      [user](ScriptCall& typed) { (static_cast<C*>(user)->*Method)(typed); });
         }
 
         template <class Handler>
         static void WXL_CALL HandlerThunk(wxl_script_call* call, void* user)
         {
-            ScriptCall typed(Raw(), call);
-            (*static_cast<Handler*>(user))(typed);
+            Contained(call, [user](ScriptCall& typed) { (*static_cast<Handler*>(user))(typed); });
         }
     };
 } // namespace wxl

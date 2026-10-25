@@ -54,7 +54,7 @@ typedef struct wxl_runtime_info
     uint32_t abi_major; ///< the contract it implements
     uint32_t abi_minor;
 
-    // --- appended after 0.3 ------------------------------------------------------------------
+    // --- appended after 0.1.3 ----------------------------------------------------------------
 
     /**
      * @brief The directory the runtime scans for mods, UTF-8; empty when it scans none.
@@ -63,6 +63,11 @@ typedef struct wxl_runtime_info
      * skipped -- so that both read the same tree. Check @ref struct_size before reading it.
      */
     wxl_str mods_directory;
+
+    // --- appended at 0.1.5 -------------------------------------------------------------------
+
+    /// The feature of the contract it implements, after @ref abi_major and @ref abi_minor.
+    uint32_t abi_feature;
 } wxl_runtime_info;
 
 /**
@@ -70,6 +75,13 @@ typedef struct wxl_runtime_info
  *
  * The table lives for the process lifetime, so the pointer can be kept. Check @ref struct_size
  * before reading a field a smaller version would not carry.
+ *
+ * Threads: every function of the table may be called from any thread, from inside a handler or
+ * outside one, including a handler of an event raised off the main thread (events.def marks
+ * those). Lines logged from two threads at once come out whole, one after the other. A service
+ * published on one thread is found by the next lookup on any other. A subscription made, or
+ * dropped, while the event is being raised on another thread takes effect from the next raise.
+ * What a service's own functions allow is that service's header's to say.
  */
 typedef struct wxl_host
 {
@@ -132,6 +144,45 @@ typedef struct wxl_host
      * @param args  that event's args struct; the runtime forwards it without interpreting it.
      */
     void(WXL_CALL* emit)(wxl_event event, const void* args);
+
+    // --- appended at 0.1.5 -------------------------------------------------------------------
+
+    /**
+     * @brief The feature of the contract the runtime implements, after @ref abi_major and
+     *        @ref abi_minor.
+     *
+     * A mod whose manifest asks for less than its headers carry compares it with
+     * WXL_ABI_VERSION_FEATURE before using what was appended in between.
+     */
+    uint32_t abi_feature;
+
+    // --- appended at 0.1.8 -------------------------------------------------------------------
+
+    /**
+     * @brief Disables the calling mod, as a fault in its code would.
+     *
+     * For a failure the mod cannot recover from and the crash guard cannot see: a C++ exception
+     * that reached one of its entry points, a broken invariant. The runtime logs @p reason under
+     * the mod's id, drops its subscriptions, skips its remaining stages and its unload, and
+     * withdraws what the mod registered with the runtime's services. The call returns; the mod
+     * then returns from what it was doing and none of its code is called again. Called from code
+     * that is no mod's, it does nothing.
+     *
+     * @param reason  what went wrong, for the log: "OnReady threw an exception: ...".
+     */
+    void(WXL_CALL* disable)(wxl_str reason);
+
+    // --- appended at 0.1.13 ------------------------------------------------------------------
+
+    /**
+     * @brief Whether this runtime raises @p event at all: a subscribe to one it never raises is
+     *        refused.
+     *
+     * For a mod that takes whatever the runtime offers (a probe, a menu of events) rather than
+     * asking for one event it needs. Says nothing of whether anyone listens. An event outside
+     * the contract the runtime was built with answers false.
+     */
+    wxl_bool(WXL_CALL* raises)(wxl_event event);
 } wxl_host;
 
 #ifdef __cplusplus

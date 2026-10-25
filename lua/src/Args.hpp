@@ -1,9 +1,10 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 WarcraftXL
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
 //
-// An event's args as Lua sees them: a userdata over the C struct, read member by member through
-// the field table of reflect.hpp. Nothing here names an event or a member: a row added to
-// fields.def reaches Lua without a change below.
+// An event's args as Lua sees them: one value per parameter of the handler, read from the C
+// struct through the field table of reflect.hpp, and the members an Override answers through.
+// Nothing here names an event or a member: a row added to fields.def reaches Lua without a
+// change below.
 
 #ifndef WXL_LUA_ARGS_HPP
 #define WXL_LUA_ARGS_HPP
@@ -18,32 +19,21 @@
 namespace wxl::lua
 {
     /**
-     * @brief What the args userdata holds.
+     * @brief Pushes a handler's parameters: every member reflect::IsExtent leaves, in order.
      *
-     * @ref args points at the struct the runtime handed over and is valid for the handler's
-     * call only; the dispatcher nulls it when the handler returns, so a userdata a handler kept
-     * raises a Lua error instead of reading freed memory.
+     * Each is a copy -- a number, a string, a table, an object over a handle -- so nothing a
+     * handler keeps reads the struct after the call. Returns how many were pushed.
      */
-    struct ArgsBox
-    {
-        const reflect::Event* event;
-        const void*           args;
-        bool                  writable; ///< an Override handler may write answer and buffer members
-    };
-
-    /// Registers the args metatable in a state.
-    void OpenArgs(lua_State* L);
-
-    /// Pushes a new args userdata and returns it, so the caller can null @ref ArgsBox::args
-    /// after the call.
-    ArgsBox* PushArgs(lua_State* L, const reflect::Event& event, const void* args, bool writable);
+    int PushParameters(lua_State* L, const reflect::Event& event, const void* args);
 
     /// Pushes one member of an args struct as a Lua value.
     void PushField(lua_State* L, const reflect::Field& field, const void* args);
 
-    /// The first answer member of an event's args, or null; the same for the first buffer.
-    const reflect::Field* AnswerOf(const reflect::Event& event);
-    const reflect::Field* BufferOf(const reflect::Event& event);
+    /// The members an Override answers through, answers and buffers, in member order.
+    std::vector<const reflect::Field*> WritableOf(const reflect::Event& event);
+
+    /// Whether an event has a member an Override answers through.
+    bool Answerable(const reflect::Event& event);
 
     /// Writes WXL_TRUE through an answer member. False when the runtime passed no flag.
     bool WriteAnswer(const reflect::Field& field, const void* args);
@@ -53,15 +43,13 @@ namespace wxl::lua
     bool WriteBuffer(const reflect::Field& field, const void* args, std::string_view text,
                      uint32_t& capacity);
 
-    /// wxl.totable(args): every member of the args as a plain table.
-    int ToTable(lua_State* L);
-
     /**
      * @brief A deep copy of an event's args, for an event raised off the main thread.
      *
      * The struct is copied, then every pointer member is pointed into storage owned here: a
-     * str's text, a bytes member's extent, an answer's flag, a buffer's capacity. Handlers may
-     * write the flag and the buffer; nobody reads them back, which is what "not taken" means.
+     * str's text, a bytes member's extent, an answer's flag, a buffer's capacity. The flag and
+     * the buffer hold what they held when the copy was made, so a handler reads them as it would
+     * on the main thread; no answer is written to them, which is what "not taken" means.
      */
     class ArgsCopy
     {

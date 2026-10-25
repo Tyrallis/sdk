@@ -13,12 +13,15 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "wxl/events.h"
 #include "wxl/host.h"
 #include "wxl/host/guard.hpp"
 #include "wxl/host/log.hpp"
+#include "wxl/host/profile.hpp"
 
 namespace wxl::host
 {
@@ -40,6 +43,10 @@ namespace wxl::host
      *
      * Every subscription carries an owner, an opaque token the host assigns to the mod that
      * made it (0 for nobody); @ref DropOwner drops them all at once, during a dispatch included.
+     *
+     * With a profiler set and profiling on, each dispatch is a zone named after its event, and
+     * each handler a zone inside it named after its owner and the event: "scout: OnUpdate".
+     * Profiling off costs a dispatch one load.
      *
      * Any thread may emit, subscribe and unsubscribe. A dispatch takes no lock: each event's list
      * is an immutable snapshot that a change replaces, and a replaced snapshot is freed once no
@@ -72,6 +79,31 @@ namespace wxl::host
         void SetRaisable(wxl_event event, bool raisable);
         bool CanRaise(wxl_event event) const;
 
+        /// Told when an event gains its first live subscription or loses its last one.
+        using ListenFn = void (*)(void* user, wxl_event event, bool listening);
+
+        /**
+         * @brief Has @p handler told whenever @ref Listening changes for an event, and at once
+         *        for every event already listened to.
+         *
+         * Called with the subscription lock held, on the thread that changed the subscriptions:
+         * it must not subscribe or unsubscribe. A runtime uses it to keep a flag per event where
+         * the client can test it without calling into the runtime. Null stops the reports.
+         */
+        void SetListenHandler(ListenFn handler, void* user);
+
+        /**
+         * @brief Whether a dispatch of @p event would reach any handler.
+         *
+         * One atomic load, no lock: what a seam asks before it reads the client for an event's
+         * args. A subscription made or dropped on another thread meanwhile may not be seen yet,
+         * as if it had come a moment later or earlier.
+         */
+        bool Listening(wxl_event event) const
+        {
+            return Known(event) && lists_[event].load(std::memory_order_relaxed) != nullptr;
+        }
+
         void SetOwnerTracker(OwnerFn swap, void* user)
         {
             ownerFn_   = swap;
@@ -86,6 +118,19 @@ namespace wxl::host
             faultUser_ = user;
         }
 
+        /// Names an owner for the zones of its handlers: its mod's id. Called when it subscribes.
+        using OwnerNameFn = std::string (*)(void* user, uint32_t owner);
+
+        /**
+         * @brief Gives the bus a profiler, before the first subscription: the zones it opens
+         *        while @ref SetProfiling is on. Null removes it. A no-op in a host built without
+         *        WXL_HOST_PROFILE.
+         */
+        void SetProfiler(const Profiler* profiler, OwnerNameFn name, void* nameUser);
+
+        /// Whether a viewer is watching: dispatches open zones only while this is on. Any thread.
+        void SetProfiling(bool on) { profiling_.store(on && profiler_ != nullptr, std::memory_order_relaxed); }
+
         /// @return WXL_SUBSCRIPTION_NONE for a null handler, an unknown event, or one the
         ///         runtime does not raise.
         wxl_subscription Subscribe(wxl_event event, wxl_event_fn handler, void* user,
@@ -99,6 +144,14 @@ namespace wxl::host
         void DropOwner(uint32_t owner);
 
         void Emit(wxl_event event, const void* args);
+
+        /// Whether a subscription's owner receives one dispatch.
+        using AcceptFn = bool (*)(void* user, uint32_t owner);
+
+        /// Dispatches to the subscriptions whose owner @p accept takes, in the same order as
+        /// Emit: an event that concerns some mods only (ObjectFieldChanged goes to the mods
+        /// watching the field). A null @p accept is Emit.
+        void EmitTo(wxl_event event, const void* args, AcceptFn accept, void* user);
 
         /**
          * @brief Waits until no other thread is inside a dispatch.
@@ -123,6 +176,7 @@ namespace wxl::host
             int32_t           priority;
             uint32_t          owner;
             std::atomic<bool> live{true};
+            const void*       zone = nullptr; ///< the profiler's location for its handler
         };
 
         /// One event's subscriptions, sorted by priority then by id. Never changed once published.
@@ -153,7 +207,19 @@ namespace wxl::host
 
         mutable std::atomic<uint32_t> inFlight_{0}; ///< dispatches running, on every thread
 
+        /// The location of a handler's zone: one per owner and event, made once.
+        const void* HandlerZone(wxl_event event, uint32_t owner);
+
+        const Profiler*          profiler_ = nullptr;
+        OwnerNameFn              ownerName_ = nullptr;
+        void*                    ownerNameUser_ = nullptr;
+        std::atomic<bool>        profiling_{false};
+        std::vector<const void*> eventZones_;   ///< per event
+        std::vector<std::pair<uint64_t, const void*>> handlerZones_; ///< (owner << 32 | event, location), under writeLock_
+
         const Logger* logger_    = nullptr;
+        ListenFn      listenFn_   = nullptr;
+        void*         listenUser_ = nullptr;
         OwnerFn       ownerFn_   = nullptr;
         void*         ownerUser_ = nullptr;
         FaultFn       faultFn_   = nullptr;

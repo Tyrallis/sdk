@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
+//
+// wxl.profile as data: one row per member of wxl_profile_api, in member order. The shapes and
+// their columns are described in wxl/services/rows.hpp.
+
+#ifndef WXL_API
+#error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including profile.def"
+#endif
+
+WXL_API_SERVICE(profile, WXL_PROFILE_SERVICE, WXL_PROFILE_SERVICE_VERSION, (0, 1, 12), safe,
+                "Zones, graphs and messages on the profiler's timeline, beside the client's frames and the mods' handlers.")
+
+WXL_API(profile, connected, Connected, boolean, (), generated, generated,
+        "Whether a profiler viewer is connected: nothing is recorded while none is.")
+WXL_API(profile, location, Location, uptr, (str name, str function, str file, u32 line, u32 color), native, by_hand,
+        "")
+WXL_API(profile, zone_begin, Begin, uptr, (uptr location), shim, by_hand,
+        "Opens a zone named name, inside the handler running now; End closes it.")
+WXL_API(profile, zone_end, End, none, (uptr zone), shim, by_hand,
+        "Closes the innermost zone this mod opened.")
+WXL_API(profile, zone_text, Text, none, (uptr zone, str text), shim, by_hand,
+        "Adds a line of text to the innermost zone this mod opened.")
+WXL_API(profile, plot, Plot, none, (str name, f64 value), generated, generated,
+        "Puts a value on the graph of that name, drawn under the timeline.")
+WXL_API(profile, message, Message, none, (str text), generated, generated,
+        "A line of text on the timeline, now.")
+WXL_API(profile, frame_mark, FrameMark, none, (str name), generated, generated,
+        "Ends a frame of a frame set of the mod's own, drawn beside the client's frames.")

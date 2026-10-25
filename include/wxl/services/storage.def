@@ -1,0 +1,44 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
+//
+// wxl.storage as data: one row per member of wxl_storage_api, in member order. The shapes and
+// their columns are described in wxl/services/rows.hpp.
+
+#ifndef WXL_API
+#error "define the WXL_API shapes (wxl/services/rows.hpp lists them) before including storage.def"
+#endif
+
+WXL_API_SERVICE(storage, WXL_STORAGE_SERVICE, WXL_STORAGE_SERVICE_VERSION, (0, 1, 5), safe,
+                "The client's files, whatever they are packed in: named as the client names them.")
+
+// An open file, from open, closed by close; a Lua mod's are closed when it lets go of them.
+WXL_API_RESOURCE(storage, File, wxl_handle, WXL_HANDLE_NONE)
+
+WXL_API(storage, exists, Exists, boolean, (str path), generated, generated,
+        "Whether a name resolves to a file, in an archive or in a folder.")
+WXL_API(storage, size, Size, out<u64>, (str path), generated, generated,
+        "A file's length in bytes, without reading it.")
+WXL_API(storage, read, Read, whole_bytes, (str path), generated, by_hand,
+        "A whole file.")
+WXL_API(storage, open, Open, File, (str path), generated, by_hand,
+        "Opens a file to read it a piece at a time.")
+WXL_API(storage, read_at, ReadAt, read_bytes, (File file, u64 offset), generated, by_hand,
+        "Reads at an offset: as many bytes as asked, or what is left.")
+WXL_API_CLOSE(storage, close, Close, none, File, collected,
+              "Closes the file; one the mod lets go of is closed for it.")
+WXL_API(storage, add_search_path, AddSearchPath, result, (str directory, i32 priority), shim, generated,
+        "Adds a folder inside the client's folder to the files searched, until the mod removes it or "
+        "goes: the higher priority wins a name, the client's own data is 0.")
+WXL_API(storage, mount_archive, MountArchive, result, (str path, i32 priority), generated, generated,
+        "Adds an archive to the files searched, at a priority as AddSearchPath's.")
+WXL_API(storage, find, Find, list<wxl_str>, (str pattern), generated, by_hand,
+        "The names matching a pattern, * standing for any run of characters, each once.")
+WXL_API_SINCE(storage, remove_search_path, (0, 1, 10))
+WXL_API(storage, remove_search_path, RemoveSearchPath, result, (str directory), shim, generated,
+        "Takes a folder the mod added back out of the files searched; not_found for one it did not add.")
+WXL_API_SINCE(storage, redirect, (0, 1, 15))
+WXL_API(storage, redirect, Redirect, result, (str from, str to), shim, generated,
+        "Opens one name in place of another, on every thread, until the mod takes it back or goes: "
+        "the latest of two mods' wins.")
+WXL_API(storage, unredirect, Unredirect, result, (str from), shim, generated,
+        "Takes the mod's redirect of a name back; not_found for one it did not redirect.")

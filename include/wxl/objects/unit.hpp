@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 WarcraftXL
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 WarcraftXL
 //
 // wxl::Unit: something alive, or recently so.
 
@@ -27,15 +27,19 @@ namespace wxl
     {
     public:
         static constexpr wxl_object_type kKinds[] = {WXL_OBJECT_UNIT, WXL_OBJECT_PLAYER};
-        static constexpr bool            Accepts(wxl_object_type type)
+        static constexpr bool            Accepts(uint32_t type)
         {
             return type == WXL_OBJECT_UNIT || type == WXL_OBJECT_PLAYER;
         }
 
         using Object::Object;
 
-        /// A value of 0 is a dead unit; a missing value is a gone one.
-        Expected<uint32_t> Health() const { return Read(&wxl_object_api::unit_health); }
+        /// The same object as this class, unchecked: for a handler whose event already gave the
+        /// kind (`Accepts(type)`). As<T>() is the checked way.
+        explicit constexpr Unit(const Object& object) : Object(object.Handle()) {}
+
+        /// 0 or less is a dead unit, as the client reads it; a missing value is a gone one.
+        Expected<int32_t> Health() const { return Read(&wxl_object_api::unit_health); }
         Expected<uint32_t> MaxHealth() const { return Read(&wxl_object_api::unit_max_health); }
         Expected<uint32_t> Level() const { return Read(&wxl_object_api::unit_level); }
 
@@ -44,9 +48,9 @@ namespace wxl
         {
             const Expected<uint32_t> max = MaxHealth();
             if (!max) return Unexpected{max.Error()};
-            const Expected<uint32_t> health = Health();
+            const Expected<int32_t> health = Health();
             if (!health) return Unexpected{health.Error()};
-            return *max ? static_cast<float>(*health) / static_cast<float>(*max) : 0.0f;
+            return *max && *health > 0 ? static_cast<float>(*health) / static_cast<float>(*max) : 0.0f;
         }
 
         /// What the unit targets. A null Unit as the value means it targets nothing in view.

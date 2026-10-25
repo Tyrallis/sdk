@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 WarcraftXL
 //
-// What Scout remembers. There is not one line of WarcraftXL in this file on purpose: a mod is
-// ordinary C++, and the part of it that holds your own data should not know the SDK exists.
+// What Scout remembers: a clock and a bounded journal. Plain C++, with nothing of the SDK in it.
 
 #ifndef SCOUT_JOURNAL_H
 #define SCOUT_JOURNAL_H
 
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -14,7 +14,10 @@
 
 namespace scout
 {
-    /// Seconds since the mod started, advanced one frame at a time.
+    /// The tag on every line Scout writes to the log.
+    inline constexpr const char* kTag = "scout";
+
+    /// Seconds since the mod started, advanced by the client's tick.
     class Clock
     {
     public:
@@ -25,59 +28,52 @@ namespace scout
         float now_ = 0.0f;
     };
 
-    /// The kinds of thing worth writing down.
+    /// The kinds of thing Scout writes down.
     enum class What
     {
         Appeared,
-        LeftView,
+        Left,
         Died,
         Targeted
     };
+
+    /// The word for a kind, as the log and the interface show it.
+    const char* Describe(What what);
 
     /// One line of the journal.
     struct Entry
     {
         What        what  = What::Appeared;
-        std::string who   = "?"; ///< the unit's name, or "?" when it could not be read
-        uint32_t    level = 0;
+        std::string who   = "?";  ///< the unit's name, or "?" when it could not be read
+        uint32_t    level = 0;    ///< 0 when it could not be read
         float       at    = 0.0f; ///< Clock::Now() when it happened
     };
 
-    /**
-     * @brief The last few things that happened, oldest first.
-     *
-     * Bounded: a long session in a busy zone would otherwise grow without end, and nobody reads
-     * the thousandth entry. The oldest line falls off when a new one arrives.
-     */
+    /// The last kLimit lines, oldest first. A line added at the limit drops the oldest.
     class Journal
     {
     public:
-        static constexpr size_t kLimit = 64;
+        static constexpr std::size_t kLimit = 64;
 
+        /// Appends a line, then calls the listener with it.
         void Add(Entry entry);
         void Clear() { entries_.clear(); }
 
-        size_t Size() const { return entries_.size(); }
-        bool   Empty() const { return entries_.empty(); }
+        std::size_t Size() const { return entries_.size(); }
 
-        /// The most recent line, or nullptr while nothing has happened.
-        const Entry* Last() const { return entries_.empty() ? nullptr : &entries_.back(); }
+        /// The line @p back steps from the newest, 0 being the newest; null past the oldest.
+        const Entry* FromNewest(std::size_t back) const;
 
-        const std::deque<Entry>& Entries() const { return entries_; }
-
-        /// How many lines have ever been written, including the ones that fell off.
+        /// How many lines were ever added, the dropped ones included.
         uint32_t Written() const { return written_; }
 
-        /// A word for a kind, for the log and for script.
-        static const char* Describe(What what);
-
-        /// Called after every Add. The journal does not know who listens, and does not care.
-        void OnChange(std::function<void()> listener) { listener_ = std::move(listener); }
+        /// Sets the function Add calls after each new line.
+        void OnAdd(std::function<void(const Entry&)> listener) { listener_ = std::move(listener); }
 
     private:
-        std::deque<Entry>     entries_;
-        uint32_t              written_ = 0;
-        std::function<void()> listener_;
+        std::deque<Entry>                 entries_;
+        uint32_t                          written_ = 0;
+        std::function<void(const Entry&)> listener_;
     };
 } // namespace scout
 
