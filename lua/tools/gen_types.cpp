@@ -339,6 +339,19 @@ namespace
             return "---Takes this mod's redirect of a name back; nil, \"not_found\" for one it did not redirect.\n"
                    "---@param from string\n---@return true|nil ok\n---@return string|nil reason\n"
                    "function " + owner + ".Unredirect(from) end\n\n";
+        if (name == "Serve")
+            return "---Serves `data` under a name, for this mod, on every thread: the client opens and reads it as\n"
+                   "---one of its own files, and so do wxl.storage's Read and Open. The bytes are copied. Above 0,\n"
+                   "---the name wins over the client's archives; 0 or below, it only fills a name they lack. Serving\n"
+                   "---a name again replaces this mod's bytes. It stays until Unserve, or until the mod is disabled,\n"
+                   "---reloads or unloads; when two mods serve one name, the higher priority wins, then the later.\n"
+                   "---@param path string\n---@param data string\n---@param priority integer\n"
+                   "---@return true|nil ok\n---@return string|nil reason\n"
+                   "function " + owner + ".Serve(path, data, priority) end\n\n";
+        if (name == "Unserve")
+            return "---Takes back what this mod serves under a name; nil, \"not_found\" for one it does not serve.\n"
+                   "---@param path string\n---@return true|nil ok\n---@return string|nil reason\n"
+                   "function " + owner + ".Unserve(path) end\n\n";
         if (name == "Snapshot")
             return "---Takes the picture the lists read: Storm's counts, the client's consumers, the address space,\n"
                    "---and the heap of every Lua mod, each shown as its own category. On the main thread.\n"

@@ -28,6 +28,7 @@ namespace wxl::lua
         {
         case WXL_OK: return "ok";
         case WXL_E_UNSUPPORTED: return "unsupported";
+        case WXL_E_PENDING: return "pending";
         case WXL_E_VERSION: return "version";
         case WXL_E_INVALID: return "invalid";
         case WXL_E_NOT_FOUND: return "not_found";

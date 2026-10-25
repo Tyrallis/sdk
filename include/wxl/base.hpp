@@ -73,6 +73,7 @@ namespace wxl
         {
         case WXL_OK: return "WXL_OK";
         case WXL_E_UNSUPPORTED: return "WXL_E_UNSUPPORTED";
+        case WXL_E_PENDING: return "WXL_E_PENDING";
         case WXL_E_VERSION: return "WXL_E_VERSION";
         case WXL_E_INVALID: return "WXL_E_INVALID";
         case WXL_E_NOT_FOUND: return "WXL_E_NOT_FOUND";

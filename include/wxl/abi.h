@@ -47,7 +47,7 @@
 
 #define WXL_ABI_VERSION_MAJOR   0
 #define WXL_ABI_VERSION_MINOR   1
-#define WXL_ABI_VERSION_FEATURE 18
+#define WXL_ABI_VERSION_FEATURE 19
 
 // --- Platform ------------------------------------------------------------------------------
 //
@@ -86,7 +86,10 @@ typedef enum wxl_result
     WXL_E_VERSION     = 2, ///< the versions cannot be reconciled
     WXL_E_INVALID     = 3, ///< an argument is out of range or malformed
     WXL_E_NOT_FOUND   = 4, ///< the name, handle or resource does not resolve
-    WXL_E_FAILED      = 5  ///< it should have worked and did not
+    WXL_E_FAILED      = 5, ///< it should have worked and did not
+    /// Not available yet, try again later: what was asked for exists, but is still being made
+    /// ready (downloaded, read, computed). Appended in 0.1.19.
+    WXL_E_PENDING     = 6
 } wxl_result;
 
 /**

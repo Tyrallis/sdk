@@ -53,6 +53,8 @@
 //   bytes_size uint32_t: the length of the bytes before it, which must all be as long
 //   object wxl_handle: a world object; a script passes the object, C++ a wxl::Object
 //   vec3 wxl_vec3: a point; a script passes a table with x, y and z
+//   provider const wxl_asset_provider*  transform const wxl_asset_transform*: what a native
+//       mod hands wxl.storage; no script reaches a row taking one
 //   a resource: its ctype
 //   opt<K> the C parameters of K, a parameter a script may leave out: it is then K's zero (0
 //       for a number), which the row's doc says. Every other parameter a script must give, and
@@ -123,6 +125,8 @@ namespace wxl::api
         struct bytes_size {};
         struct object {};
         struct vec3 {};
+        struct provider {};
+        struct transform {};
         template <class K>
         struct opt {};
 
@@ -218,6 +222,8 @@ namespace wxl::api
     template <> struct Param<kind::bytes_size> { using C = List<uint32_t>; };
     template <> struct Param<kind::object> { using C = List<wxl_handle>; };
     template <> struct Param<kind::vec3> { using C = List<wxl_vec3>; };
+    template <> struct Param<kind::provider> { using C = List<const wxl_asset_provider*>; };
+    template <> struct Param<kind::transform> { using C = List<const wxl_asset_transform*>; };
     template <class R>
     struct Param<R, std::enable_if_t<IsResource<R>::value>>
     {

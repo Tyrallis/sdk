@@ -176,6 +176,23 @@ WXL_ENUM_VALUE(wxl_window_kind, WXL_WINDOW_STABLE,    10, stable)
 WXL_ENUM_VALUE(wxl_window_kind, WXL_WINDOW_PETITION,  11, petition)
 WXL_ENUM_VALUE(wxl_window_kind, WXL_WINDOW_TABARD,    12, tabard)
 WXL_ENUM_END(wxl_window_kind)
+/// How a texture file stores its pixels: the BLP2 header's encoding byte.
+WXL_ENUM(wxl_texture_encoding)
+WXL_ENUM_VALUE(wxl_texture_encoding, WXL_TEXTURE_JPEG,    0, jpeg)    ///< legacy; this client does not decode it
+WXL_ENUM_VALUE(wxl_texture_encoding, WXL_TEXTURE_PALETTE, 1, palette) ///< 256 colours and an alpha plane
+WXL_ENUM_VALUE(wxl_texture_encoding, WXL_TEXTURE_DXT,     2, dxt)     ///< block-compressed: DXT1, 3 or 5
+WXL_ENUM_VALUE(wxl_texture_encoding, WXL_TEXTURE_RAW,     3, raw)     ///< 32-bit pixels as they are
+WXL_ENUM_END(wxl_texture_encoding)
+
+/// Which stage of the pipeline a shader program is for.
+WXL_ENUM(wxl_shader_stage)
+WXL_ENUM_VALUE(wxl_shader_stage, WXL_SHADER_VERTEX,   0, vertex)
+WXL_ENUM_VALUE(wxl_shader_stage, WXL_SHADER_HULL,     1, hull)
+WXL_ENUM_VALUE(wxl_shader_stage, WXL_SHADER_DOMAIN,   2, domain)
+WXL_ENUM_VALUE(wxl_shader_stage, WXL_SHADER_GEOMETRY, 3, geometry)
+WXL_ENUM_VALUE(wxl_shader_stage, WXL_SHADER_PIXEL,    4, pixel)
+WXL_ENUM_VALUE(wxl_shader_stage, WXL_SHADER_COMPUTE,  5, compute)
+WXL_ENUM_END(wxl_shader_stage)
 
 /// The power a unit runs on, as the client numbers UNIT_FIELD_POWER1..7 and the fourth byte of
 /// UNIT_FIELD_BYTES_0.

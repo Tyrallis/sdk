@@ -1232,6 +1232,14 @@
 ---arrives as its number.
 ---@alias wxl.WindowKind "gossip"|"merchant"|"trainer"|"bank"|"auction"|"mail"|"taxi"|"trade"|"quest"|"guild_bank"|"stable"|"petition"|"tabard"
 
+---A wxl_texture_encoding value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.TextureEncoding "jpeg"|"palette"|"dxt"|"raw"
+
+---A wxl_shader_stage value, by name; a newer value than these headers know
+---arrives as its number.
+---@alias wxl.ShaderStage "vertex"|"hull"|"domain"|"geometry"|"pixel"|"compute"
+
 ---A wxl_power_type value, by name; a newer value than these headers know
 ---arrives as its number.
 ---@alias wxl.PowerType "mana"|"rage"|"focus"|"energy"|"happiness"|"runes"|"runic_power"
@@ -1332,6 +1340,12 @@ ObjectScript = {}
 ---@field OnClientDbLoaded fun(self: AssetScript, name: string, records: lightuserdata|nil, record_count: integer, record_size: integer)
 ---@field OnArchiveMounted fun(self: AssetScript, path: string, priority: integer, hash_entries: integer, block_entries: integer, bytes: integer)
 ---@field OnArchiveUnmounted fun(self: AssetScript, path: string, priority: integer, hash_entries: integer, block_entries: integer, bytes: integer)
+---@field OnTerrainTileLoad fun(self: AssetScript, path: string, tile_x: integer, tile_y: integer, data: wxl.Bytes)
+---@field OnMapObjectGroupLoad fun(self: AssetScript, path: string, group: integer, data: wxl.Bytes)
+---@field OnSkinProfileLoad fun(self: AssetScript, model: string, data: wxl.Bytes)
+---@field OnTextureDecode fun(self: AssetScript, path: string, width: integer, height: integer, encoding: wxl.TextureEncoding|integer, alpha_bits: integer, alpha_kind: integer, mip_levels: integer)
+---@field OnShaderLoad fun(self: AssetScript, stage: wxl.ShaderStage|integer, path: string, name: string, permutations: integer)
+---@field OnSoundFileLoad fun(self: AssetScript, path: string, streaming: boolean, priority: integer)
 AssetScript = {}
 
 ---@class NetScript
@@ -1576,6 +1590,12 @@ SocialScript = {}
 ---@overload fun(family: "PlayerScript", method: "OnPlayerResurrected", handler: fun(unit: wxl.Object|nil)): integer
 ---@overload fun(family: "PlayerScript", method: "OnReputationChanged", handler: fun(faction_id: integer, previous: integer, current: integer, bonus: number)): integer
 ---@overload fun(family: "PlayerScript", method: "OnAchievementEarned", handler: fun(player: wxl.Object|nil, player_guid: wxl.Guid, achievement_id: integer, date: integer, silent: boolean)): integer
+---@overload fun(family: "AssetScript", method: "OnTerrainTileLoad", handler: fun(path: string, tile_x: integer, tile_y: integer, data: wxl.Bytes)): integer
+---@overload fun(family: "AssetScript", method: "OnMapObjectGroupLoad", handler: fun(path: string, group: integer, data: wxl.Bytes)): integer
+---@overload fun(family: "AssetScript", method: "OnSkinProfileLoad", handler: fun(model: string, data: wxl.Bytes)): integer
+---@overload fun(family: "AssetScript", method: "OnTextureDecode", handler: fun(path: string, width: integer, height: integer, encoding: wxl.TextureEncoding|integer, alpha_bits: integer, alpha_kind: integer, mip_levels: integer)): integer
+---@overload fun(family: "AssetScript", method: "OnShaderLoad", handler: fun(stage: wxl.ShaderStage|integer, path: string, name: string, permutations: integer)): integer
+---@overload fun(family: "AssetScript", method: "OnSoundFileLoad", handler: fun(path: string, streaming: boolean, priority: integer)): integer
 ---@param family wxl.Family
 ---@param method string
 ---@param handler function
@@ -2597,6 +2617,26 @@ function storage.Redirect(from, to) end
 ---@return true|nil ok
 ---@return string|nil reason
 function storage.Unredirect(from) end
+
+---Came with abi 0.1.19: a mod whose mod.json asks for an older abi cannot use it.
+---Serves `data` under a name, for this mod, on every thread: the client opens and reads it as
+---one of its own files, and so do wxl.storage's Read and Open. The bytes are copied. Above 0,
+---the name wins over the client's archives; 0 or below, it only fills a name they lack. Serving
+---a name again replaces this mod's bytes. It stays until Unserve, or until the mod is disabled,
+---reloads or unloads; when two mods serve one name, the higher priority wins, then the later.
+---@param path string
+---@param data string
+---@param priority integer
+---@return true|nil ok
+---@return string|nil reason
+function storage.Serve(path, data, priority) end
+
+---Came with abi 0.1.19: a mod whose mod.json asks for an older abi cannot use it.
+---Takes back what this mod serves under a name; nil, "not_found" for one it does not serve.
+---@param path string
+---@return true|nil ok
+---@return string|nil reason
+function storage.Unserve(path) end
 
 ---wxl.data. The client's databases, served from a mod's own files before the client reads them.
 ---@class wxl.data

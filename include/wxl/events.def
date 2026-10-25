@@ -480,6 +480,23 @@ WXL_EVENT(Player, ReputationChanged,  127, wxl_reputation_args)
 /** A player in view, or the local player, earned an achievement. */
 WXL_EVENT(Player, AchievementEarned,  128, wxl_achievement_args)
 
+// --- Asset, continued: the engine's own loads (the asset pipeline) --------------------------
+
+WXL_EVENTS_SINCE(0, 1, 19, 129)
+
+/** A terrain tile's file was read, before its chunks are walked. */
+WXL_EVENT(Asset, TerrainTileLoad,    129, wxl_terrain_tile_args)
+/** A map object's group file was read, before its chunks are walked. */
+WXL_EVENT(Asset, MapObjectGroupLoad, 130, wxl_map_object_group_args)
+/** A model's skin profile (its .skin file) was read, before it is parsed. */
+WXL_EVENT(Asset, SkinProfileLoad,    131, wxl_skin_profile_args)
+/** A texture file is about to be decoded: what its header says. */
+WXL_EVENT(Asset, TextureDecode,      132, wxl_texture_decode_args)
+/** The graphics device is loading a shader program by name. */
+WXL_EVENT(Asset, ShaderLoad,         133, wxl_shader_load_args)
+/** The sound engine is opening a sound file to play it. */
+WXL_EVENT(Asset, SoundFileLoad,      134, wxl_sound_file_args)
+
 // Give back whatever was defaulted above, so the file can be included again right after with a
 // different selector. What the consumer defined itself is left alone: undefining it here would
 // break the consumer that includes the table twice on purpose.

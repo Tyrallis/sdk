@@ -541,6 +541,115 @@ namespace wxl::lua::shims
             return PushResultFailure(L, WXL_E_NOT_FOUND);
         }
 
+
+        // --- wxl.storage: the names each mod serves ------------------------------------------
+        //
+        // The host sees what every Lua mod serves as wxl.lua's, one set of bytes per name. Each
+        // mod's are kept here, with their priority, so that the runtime serves the one that should
+        // win -- the highest priority, then the latest --, and a mod's go when it does.
+
+        struct ServedName
+        {
+            ScriptMod*  mod;
+            std::string bytes;
+            int32_t     priority;
+        };
+
+        struct Served
+        {
+            std::string             key;  ///< the name, lower case, backslashes
+            std::string             path; ///< as the first mod gave it
+            std::vector<ServedName> holders; ///< oldest first
+        };
+
+        std::vector<Served> g_served;
+
+        /// The holder that wins a name: the highest priority, the latest of equals.
+        const ServedName* Winner(const Served& entry)
+        {
+            const ServedName* best = nullptr;
+            for (const ServedName& holder : entry.holders)
+                if (!best || holder.priority >= best->priority) best = &holder;
+            return best;
+        }
+
+        wxl_result SettleServed(const Served& entry)
+        {
+            const wxl_storage_api* api = Storage();
+            if (!api || !wxl::detail::Carries(api, &wxl_storage_api::unserve)) return WXL_E_UNSUPPORTED;
+            const ServedName* best = Winner(entry);
+            if (!best) return api->unserve(Str(entry.path));
+            return api->serve(Str(entry.path), best->bytes.data(), static_cast<uint32_t>(best->bytes.size()),
+                              best->priority);
+        }
+
+        void LetGoServed(size_t index, ScriptMod& mod)
+        {
+            Served& entry = g_served[index];
+            entry.holders.erase(std::remove_if(entry.holders.begin(), entry.holders.end(),
+                                               [&](const ServedName& holder) { return holder.mod == &mod; }),
+                                entry.holders.end());
+            SettleServed(entry);
+            if (entry.holders.empty()) g_served.erase(g_served.begin() + static_cast<std::ptrdiff_t>(index));
+        }
+
+        int L_Serve(lua_State* L)
+        {
+            ScriptMod&        mod  = Self(L);
+            const std::string path = CheckName(L, 1, "Serve", "path");
+            if (lua_isnoneornil(L, 2))
+                luaL_error(L, "wxl.storage.Serve: 'data' (argument 2) is missing; it takes a string");
+            size_t      size = 0;
+            const char* data = luaL_checklstring(L, 2, &size);
+            if (lua_isnoneornil(L, 3))
+                luaL_error(L, "wxl.storage.Serve: 'priority' (argument 3) is missing; it takes a whole number");
+            const lua_Integer priority = luaL_checkinteger(L, 3);
+            if (size > UINT32_MAX) return PushResultFailure(L, WXL_E_INVALID);
+            const wxl_storage_api* api = Storage();
+            if (!api || !wxl::detail::Carries(api, &wxl_storage_api::serve)) return PushResultFailure(L, WXL_E_UNSUPPORTED);
+
+            const std::string key   = NameKey(path);
+            auto              known = std::find_if(g_served.begin(), g_served.end(),
+                                                   [&](const Served& entry) { return entry.key == key; });
+            Served candidate{key, path, {}};
+            Served& entry = known == g_served.end() ? candidate : *known;
+            std::vector<ServedName> before = entry.holders;
+            entry.holders.erase(std::remove_if(entry.holders.begin(), entry.holders.end(),
+                                               [&](const ServedName& holder) { return holder.mod == &mod; }),
+                                entry.holders.end());
+            entry.holders.push_back(ServedName{&mod, std::string(data, size), static_cast<int32_t>(priority)});
+            const wxl_result result = SettleServed(entry);
+            if (result != WXL_OK)
+            {
+                entry.holders = std::move(before);
+                return PushResultFailure(L, result);
+            }
+            if (known == g_served.end()) g_served.push_back(std::move(candidate));
+            lua_pushboolean(L, 1);
+            return 1;
+        }
+
+        int L_Unserve(lua_State* L)
+        {
+            ScriptMod&        mod  = Self(L);
+            const std::string path = CheckName(L, 1, "Unserve", "path");
+            const wxl_storage_api* api = Storage();
+            if (!api || !wxl::detail::Carries(api, &wxl_storage_api::unserve)) return PushResultFailure(L, WXL_E_UNSUPPORTED);
+
+            const std::string key = NameKey(path);
+            for (size_t i = 0; i < g_served.size(); ++i)
+            {
+                const Served& entry = g_served[i];
+                if (entry.key != key || std::none_of(entry.holders.begin(), entry.holders.end(),
+                                                     [&](const ServedName& holder) { return holder.mod == &mod; }))
+                    continue;
+                LetGoServed(i, mod);
+                lua_pushboolean(L, 1);
+                return 1;
+            }
+            return PushResultFailure(L, WXL_E_NOT_FOUND);
+        }
+
         // --- wxl.footprint: what each mod states about memory -------------------------------
         //
         // The host sees every report and threshold of a Lua mod as wxl.lua's. Each mod's are kept
@@ -680,6 +789,8 @@ namespace wxl::lua::shims
         if (service == "storage" && name == "RemoveSearchPath") return &L_RemoveSearchPath;
         if (service == "storage" && name == "Redirect") return &L_Redirect;
         if (service == "storage" && name == "Unredirect") return &L_Unredirect;
+        if (service == "storage" && name == "Serve") return &L_Serve;
+        if (service == "storage" && name == "Unserve") return &L_Unserve;
         if (service == "footprint" && name == "Snapshot") return &L_Snapshot;
         if (service == "footprint" && name == "Report") return &L_Report;
         if (service == "footprint" && name == "WatchPressure") return &L_WatchPressure;
@@ -699,6 +810,10 @@ namespace wxl::lua::shims
             if (std::any_of(g_redirects[i].holders.begin(), g_redirects[i].holders.end(),
                             [&](const auto& holder) { return holder.first == &mod; }))
                 LetGoName(i, mod);
+        for (size_t i = g_served.size(); i-- > 0;)
+            if (std::any_of(g_served[i].holders.begin(), g_served[i].holders.end(),
+                            [&](const ServedName& holder) { return holder.mod == &mod; }))
+                LetGoServed(i, mod);
     }
 
     void Start()

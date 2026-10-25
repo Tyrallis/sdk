@@ -120,6 +120,7 @@ namespace wxl::lua
             case WXL_E_NOT_FOUND: lua_pushliteral(L, "gone"); break;
             case WXL_E_INVALID: lua_pushliteral(L, "invalid"); break;
             case WXL_E_UNSUPPORTED: lua_pushliteral(L, "unsupported"); break;
+            case WXL_E_PENDING: lua_pushliteral(L, "pending"); break;
             default: lua_pushliteral(L, "failed"); break;
             }
             return 2;

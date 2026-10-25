@@ -1213,6 +1213,61 @@ WXL_ARGS_FIELD(wxl_achievement_args, date, u32)           ///< when, packed as t
 WXL_ARGS_FIELD(wxl_achievement_args, silent, bool)        ///< WXL_TRUE when the client shows nothing for it
 WXL_ARGS_END(wxl_achievement_args)
 
+/**
+ * @brief A terrain tile's file (an .adt), read whole, before the client walks its chunks.
+ *
+ * The bytes are the file's, after any transform; looking is free, changing them is a
+ * transform's job (wxl.storage add_transform).
+ */
+WXL_ARGS(wxl_terrain_tile_args)
+WXL_ARGS_FIELD(wxl_terrain_tile_args, path, str)    ///< the name it was opened by
+WXL_ARGS_FIELD(wxl_terrain_tile_args, tile_x, i32)  ///< its column on the map's 64 x 64 grid
+WXL_ARGS_FIELD(wxl_terrain_tile_args, tile_y, i32)  ///< its row
+WXL_ARGS_BYTES(wxl_terrain_tile_args, data, size)   ///< the file; valid for the call only
+WXL_ARGS_FIELD(wxl_terrain_tile_args, size, u32)
+WXL_ARGS_END(wxl_terrain_tile_args)
+
+/// A map object's group file ("..._000.wmo"), read whole, before its chunks are walked.
+WXL_ARGS(wxl_map_object_group_args)
+WXL_ARGS_FIELD(wxl_map_object_group_args, path, str)   ///< the map object's root file
+WXL_ARGS_FIELD(wxl_map_object_group_args, group, u32)  ///< the group's number, as in its file name
+WXL_ARGS_BYTES(wxl_map_object_group_args, data, size)  ///< the group file; valid for the call only
+WXL_ARGS_FIELD(wxl_map_object_group_args, size, u32)
+WXL_ARGS_END(wxl_map_object_group_args)
+
+/// A model's skin profile, read whole, before it is parsed.
+WXL_ARGS(wxl_skin_profile_args)
+WXL_ARGS_FIELD(wxl_skin_profile_args, model, str)    ///< the model's file; its skins are named after it
+WXL_ARGS_BYTES(wxl_skin_profile_args, data, size)    ///< the .skin file; valid for the call only
+WXL_ARGS_FIELD(wxl_skin_profile_args, size, u32)
+WXL_ARGS_END(wxl_skin_profile_args)
+
+/// A texture file about to be decoded, as its header describes it.
+WXL_ARGS(wxl_texture_decode_args)
+WXL_ARGS_FIELD(wxl_texture_decode_args, path, str)                       ///< the texture's file
+WXL_ARGS_FIELD(wxl_texture_decode_args, width, u32)                      ///< in pixels, at the largest mip level
+WXL_ARGS_FIELD(wxl_texture_decode_args, height, u32)
+WXL_ARGS_ENUM(wxl_texture_decode_args, encoding, wxl_texture_encoding)   ///< how the pixels are stored
+WXL_ARGS_FIELD(wxl_texture_decode_args, alpha_bits, u32)                 ///< 0, 1, 4 or 8
+WXL_ARGS_FIELD(wxl_texture_decode_args, alpha_kind, u32)                 ///< the header's preferred format: for DXT, 0 is DXT1, 1 DXT3, 7 DXT5
+WXL_ARGS_FIELD(wxl_texture_decode_args, mip_levels, u32)                 ///< how many mip levels the file holds
+WXL_ARGS_END(wxl_texture_decode_args)
+
+/// A shader program the graphics device loads by name, from "<path>\\<profile>\\<name>.bls".
+WXL_ARGS(wxl_shader_load_args)
+WXL_ARGS_ENUM(wxl_shader_load_args, stage, wxl_shader_stage)  ///< vertex or pixel, in this client
+WXL_ARGS_FIELD(wxl_shader_load_args, path, str)               ///< the folder: "Shaders\\Vertex", "Shaders\\Pixel"
+WXL_ARGS_FIELD(wxl_shader_load_args, name, str)               ///< the program: "MapObjDiffuse"
+WXL_ARGS_FIELD(wxl_shader_load_args, permutations, u32)       ///< how many variants the file holds
+WXL_ARGS_END(wxl_shader_load_args)
+
+/// A sound file the sound engine opens to play, cached or not.
+WXL_ARGS(wxl_sound_file_args)
+WXL_ARGS_FIELD(wxl_sound_file_args, path, str)        ///< the file: "Sound\\Music\\..."
+WXL_ARGS_FIELD(wxl_sound_file_args, streaming, bool)  ///< read as it plays rather than loaded whole
+WXL_ARGS_FIELD(wxl_sound_file_args, priority, i32)    ///< the engine's priority for the channel
+WXL_ARGS_END(wxl_sound_file_args)
+
 #ifdef WXL_ARGS_ENUM_DEFAULTED
     #undef WXL_ARGS_ENUM
     #undef WXL_ARGS_ENUM_DEFAULTED
