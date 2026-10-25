@@ -35,3 +35,9 @@ WXL_POINT(vFrameScript_SignalEvent, "vFrameScript_SignalEvent", void, (uint32_t 
 WXL_POINT(NetClient_ProcessMessage, "NetClient::ProcessMessage", int32_t, (void* self, uint32_t timeReceived, void* msg, int32_t unused_a4), "i32(ptr,u32,ptr,i32)", 0xBDAC6C44u, replace, main, stable, both)
 // a model's bytes read and fixed up; inlined into CM2Shared::LoadSucceededCallback on x86
 WXL_POINT(CM2Shared_FinishLoading, "CM2Shared::FinishLoading", int32_t, (void* self), "i32(ptr)", 0x78EA765Eu, replace, main, provisional, x64)
+
+// MSVC takes a file whose first directive is #ifndef X and whose last is its #endif for one
+// guarded by X, and skips it when it is included again with X defined: this table is read
+// several times in one translation unit. A directive after the rows keeps it from looking so.
+#ifdef WXL_TABLE_END
+#endif

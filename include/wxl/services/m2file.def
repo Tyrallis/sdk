@@ -17,3 +17,9 @@ WXL_API(m2file, alloc_near, AllocNear, ptr, (cptr anchor, u32 size), native, gen
 WXL_API(m2file, animate_bones, AnimateBones, none, (ptr file), native, generated, "")
 WXL_API(m2file, array_data, ArrayData, ptr, (cptr array), native, generated, "")
 WXL_API(m2file, set_array, SetArray, result, (ptr array, cptr data, u32 count), native, generated, "")
+
+// MSVC takes a file whose first directive is #ifndef X and whose last is its #endif for one
+// guarded by X, and skips it when it is included again with X defined: this table is read
+// several times in one translation unit. A directive after the rows keeps it from looking so.
+#ifdef WXL_TABLE_END
+#endif

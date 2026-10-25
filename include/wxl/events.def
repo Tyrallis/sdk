@@ -587,3 +587,9 @@ WXL_EVENT(Render, ModelBatchDrawn,  139, wxl_model_batch_args)
     #undef WXL_EVENT_Social
     #undef WXL_EVENT_Social_DEFAULTED
 #endif
+
+// MSVC takes a file whose first directive is #ifndef X and whose last is its #endif for one
+// guarded by X, and skips it when it is included again with X defined: this table is read
+// several times in one translation unit. A directive after the rows keeps it from looking so.
+#ifdef WXL_TABLE_END
+#endif
