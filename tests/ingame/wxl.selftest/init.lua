@@ -685,6 +685,44 @@ step(function()
     if relogging then call(AGAIN, " after logging back in") end
 end)
 
+-- 7. Engine points (wxl.point) ----------------------------------------------------------------------
+
+local function flag(flags, bit) return math.floor(flags / bit) % 2 == 1 end
+
+step(function()
+    print("phase 7: the engine points")
+    if not wxl.point then
+        result("wxl.point", false, "the runtime publishes no wxl.point")
+        return
+    end
+    local points, why = wxl.point.Points()
+    if not points then
+        result("wxl.point.Points", false, tostring(why))
+        return
+    end
+    result("wxl.point lists the six points of W1", #points >= 6, #points .. " listed")
+    local byName = {}
+    for _, p in ipairs(points) do byName[p.name] = p end
+    for _, name in ipairs({ "CGCamera::UpdateCallback", "CM2Cache::CreateShared", "CGWorldFrame::RenderWorld",
+                            "vFrameScript_SignalEvent", "NetClient::ProcessMessage" }) do
+        local p = byName[name]
+        result("point " .. name .. " is here", p ~= nil and p.point ~= 0 and flag(p.flags, 4),
+               p and (p.absent ~= "" and p.absent or p.signature) or "not listed")
+    end
+    local finish = byName["CM2Shared::FinishLoading"]
+    if finish then
+        local id, reason = wxl.point.Find(finish.name)
+        if flag(finish.flags, 4) then
+            result("CM2Shared::FinishLoading is a point here (x64)", id == finish.point, tostring(reason))
+        else
+            result("CM2Shared::FinishLoading is absent here, x64 only (x86)",
+                   id == nil and finish.absent:find("x64 only", 1, true) == 1, finish.absent)
+        end
+    else
+        result("CM2Shared::FinishLoading is listed", false, "not listed")
+    end
+end)
+
 -- The end ----------------------------------------------------------------------------------------
 
 step(function()

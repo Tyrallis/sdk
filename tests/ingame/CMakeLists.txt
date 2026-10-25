@@ -5,6 +5,7 @@
 #     wxl.selftest/  wxl.test-*/       the suite, Lua mods as they are in this folder
 #     wxl.test-throw/bin/<arch>/...    the C++ test mods, built for this tree's architecture
 #     wxl.scout/  wxl.lua-services/  wxl.memory-report/  wxl.probe/   the examples it calls
+#     wxl.model-swap/                  the points example, which logs every model and swaps the murloc
 #
 # One tree is one architecture: configure the x64 tree and the x86 tree with the same
 # WXL_INGAME_DIR and build both to fill bin/x64/ and bin/x86/ of each C++ mod.
@@ -71,7 +72,12 @@ foreach(mod IN LISTS ingame_cpp_mods)
                 "$<TARGET_FILE:${target}>" "${WXL_INGAME_DIR}/wxl.${mod}/bin/${ingame_arch}/${mod}.dll")
 endforeach()
 
-# The scout example is the tree's own build of it (tests/CMakeLists.txt).
+# The scout and model-swap examples are the tree's own builds of them (tests/CMakeLists.txt).
+list(APPEND ingame_commands
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../examples/model-swap/mod.json" "${WXL_INGAME_DIR}/wxl.model-swap/mod.json"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "$<TARGET_FILE:model-swap>" "${WXL_INGAME_DIR}/wxl.model-swap/bin/${ingame_arch}/model-swap.dll")
 list(APPEND ingame_commands
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/../../examples/scout/mod.json" "${WXL_INGAME_DIR}/wxl.scout/mod.json"
@@ -93,4 +99,4 @@ add_custom_target(wxl-ingame ALL
     ${ingame_commands}
     COMMENT "In-game test suite -> ${WXL_INGAME_DIR}"
     VERBATIM)
-add_dependencies(wxl-ingame ${ingame_targets} scout)
+add_dependencies(wxl-ingame ${ingame_targets} scout model-swap)

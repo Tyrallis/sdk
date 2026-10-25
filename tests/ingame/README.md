@@ -25,7 +25,10 @@ world with a character, wait about two minutes without touching anything, and re
 
 `wxl.selftest` also calls into four of the SDK's examples: `scout` (`ScoutCount()` and the others),
 `lua-services` (`LuaServicesGreet()`), `memory-report` (`MemoryReport()`) and `probe`
-(`WxlProbeStep()`). The build puts them in the suite's folder too.
+(`WxlProbeStep()`). The build puts them in the suite's folder too, with `model-swap`, the points
+example: its `[model-swap]` lines in the log name every model loaded, and murlocs are drawn as gnolls.
+Phase 7 of `wxl.selftest` checks the list of engine points (`wxl.point`, abi 0.1.16) on the runtime
+it runs on.
 
 ## Building it
 
