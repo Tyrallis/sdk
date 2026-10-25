@@ -15,7 +15,10 @@ local PER_LINE = 900  -- characters of a list before it continues on the next li
 
 -- Events left alone, by name: "OnModelLoad" copies every model file into a Lua string for the
 -- handler, for example. Add a name here to take an event out of the probe.
-local SKIP = {}
+local SKIP = {
+    -- One per model batch drawn, thousands a frame: a Lua call for each would slow the whole session.
+    OnModelBatchDrawn = true,
+}
 
 -- Events that reach only the mods that asked for them: their absence from a probe's log is
 -- expected, and the "never seen" line says why.

@@ -19,7 +19,7 @@
 --      asset events seen since the start;
 --  11. models: the loader's events and the appearance changes phase 4 caused, then wxl.m2 hangs a
 --      murloc on the player's head and takes it off again, and ModelBatchDrawn counts the batches
---      drawn meanwhile (x64 only).
+--      drawn meanwhile, for two seconds.
 --
 -- Each check is one line in the log: PASS, FAIL, SKIP (what it needs is not there: a class
 -- without a cast-time spell, say) or NOTE (an event the server may not send). The chat box shows
@@ -1039,6 +1039,7 @@ step(function()
     if not hat then return end
     result("Model:Attach on the head", hat:Attach(body, 11, 0) == true)
     result("Model:Parent is the player's model", hat:Parent() == body)
+    -- Thousands of batches a frame: listened to for these two seconds only.
     if wxl.runtime.Raises("RenderScript", "ModelBatchDrawn") then
         batchId = Observe("RenderScript", "OnModelBatchDrawn", function() batches = batches + 1 end)
     end
@@ -1048,9 +1049,10 @@ end)
 step(function()
     if batchId then
         Unobserve(batchId)
+        batchId = nil
         result("event ModelBatchDrawn (" .. batches .. " batches in two seconds)", batches > 0)
     else
-        note("event ModelBatchDrawn", false, "the stock client does not raise it: x64 only")
+        result("event ModelBatchDrawn", false, "this runtime does not raise it")
     end
     if not hat then return end
     hat:Detach()

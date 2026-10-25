@@ -1120,7 +1120,7 @@ The model loader's stages (`AssetScript:OnModelParsed`, `OnSkinProfileParsed`,
 `OnModelSequenceLoad`) and the drawn batches (`RenderScript:OnModelBatchDrawn`) come to Lua too,
 with their numbers, but reshaping a model file or drawing with the device is a C++ mod's work:
 the C++ guide (`building-a-mod.md`, "Models") shows it. `OnModelBatchDrawn` comes thousands of
-times a frame, and only on the recompiled client. All of this came with abi `0.1.20`.
+times a frame: listen to it only while you need it. All of this came with abi `0.1.20`.
 
 ### The client's databases: `wxl.data`
 
@@ -1822,7 +1822,7 @@ A few to start from:
 | `AssetScript` | `OnTerrainTileLoad`, `OnMapObjectGroupLoad`, `OnSkinProfileLoad`, `OnTextureDecode`, `OnShaderLoad`, `OnSoundFileLoad` | see [Serving and converting assets](#serving-and-converting-assets) | the engine read a tile, a building's group, a skin, a texture, a shader, a sound (abi `0.1.19`) |
 | `ObjectScript` | `OnAppearanceChanged` | `change`, `wearer`, `model`, `race_id`, `sex_id`, `item_slot`, `display_id`, `npc` | a character's appearance put an item on, is taking one off (`"worn"`, `"removed"`), or goes away (`"freed"`) (abi `0.1.20`) |
 | `AssetScript` | `OnModelParsed`, `OnSkinProfileParsed`, `OnModelSequenceLoad` | `path`, `file`, then the header, the skin or the sequence | the model loader's stages; see [Models](#models-wxlm2) (abi `0.1.20`) |
-| `RenderScript` | `OnModelBatchDrawn` | `model`, `root_model`, then the numbers of the draw | the device drew one batch of a model; the recompiled client only (abi `0.1.20`) |
+| `RenderScript` | `OnModelBatchDrawn` | `model`, `root_model`, then the numbers of the draw | the device drew one batch of a model (abi `0.1.20`) |
 
 The families `PlayerScript`, `GlueScript` and `ChatScript`, and `WorldScript`'s `OnZoneChanged`,
 `OnMouseoverChanged` and `OnCVarChanged`, came with `0.1.6`: a mod that uses one asks for

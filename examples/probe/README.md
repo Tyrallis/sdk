@@ -41,8 +41,10 @@ even read out of the client until a mod subscribes. Listening to everything turn
 for every event, for the whole session: the client runs slower, and a handler runs in Lua for each
 texture, file and network message. `OnModelLoad` and `OnMapObjectLoad` hand the handler a copy of
 the whole file, which takes memory on the original client. That is the price of seeing everything;
-it is why the probe is a test tool. Add an event's name to `SKIP` at the top of `init.lua` to leave
-it alone.
+it is why the probe is a test tool. `OnModelBatchDrawn` is left out from the start: it comes once
+for every batch of every model the client draws, thousands of times a frame, and a Lua call for each
+would slow the whole session; the load line lists it under "not listened to" as skipped. Add an
+event's name to `SKIP` at the top of `init.lua` to leave it alone too, or take this one out to see it.
 
 `core/tools/read_logs.py` reads the log the probe writes into a summary of each launch: the marks,
 the events seen and not seen, the warnings and the errors.

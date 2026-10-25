@@ -53,8 +53,9 @@ Phase 11 checks the models (abi 0.1.20, the work of Tyrallis): the loader's even
 the start (`ModelParsed`, `SkinProfileParsed`; `ModelSequenceLoad` a NOTE), the appearance changes
 phase 4 caused (`AppearanceChanged`, a SKIP when phase 4 took nothing off), then `wxl.m2`: the
 player's model, its head's attachment point, a murloc made, hung on the head (`Model:Attach`) and
-taken off again. While it hangs, `ModelBatchDrawn` counts the batches the device draws: a PASS on
-the recompiled client, a NOTE on the stock one, which does not raise it. With `model-swap` in
+taken off again. While it hangs, `ModelBatchDrawn` counts the batches the device draws for two
+seconds, then the selftest stops listening (the event comes thousands of times a frame): a PASS on
+both clients, a FAIL when none came or the runtime does not raise it. With `model-swap` in
 `Mods/`, the murloc is drawn as a gnoll.
 
 ## Building it

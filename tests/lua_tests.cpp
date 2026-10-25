@@ -1718,12 +1718,15 @@ print("later " .. tostring(s.Unredirect("Interface\\Nope.txt")) .. " " .. tostri
         host.LoadAll();
         host.Stage(WXL_STAGE_READY);
 
-        const size_t offered = static_cast<size_t>(WXL_EV_COUNT) - 1;
+        // Every event but the one this runtime lacks and the one the probe skips.
+        const size_t offered = static_cast<size_t>(WXL_EV_COUNT) - 2;
         Check(sink.Has(("[wxl.probe] listening to " + std::to_string(offered) + " events").c_str()) &&
                   sink.Has("[wxl.probe] not raised by this runtime: OnSoundPlay"),
               "the probe listens to every event the runtime raises, and names the one it does not");
         Check(host.Listening(WXL_EV_TextureLoad) && !host.Listening(WXL_EV_SoundPlay),
               "which turns every raised event on, as its README warns");
+        Check(!host.Listening(WXL_EV_ModelBatchDrawn) && sink.Has("[wxl.probe] not listened to: OnModelBatchDrawn (skipped)"),
+              "but the model batches, thousands a frame, which it skips and says so");
 
         const wxl_world_args world{571, {5000.25f, -12.5f, 31.0f}};
         host.Raise(WXL_EV_WorldEnter, &world);

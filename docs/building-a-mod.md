@@ -947,7 +947,7 @@ mod and a mod that teaches the client a later expansion's model format.
 | know what a character puts on and takes off | `ObjectScript::OnAppearanceChanged` | every runtime |
 | hang a model of your own on a character, a creature, a mount | `wxl::M2Service`, `wxl::M2Model` | every runtime |
 | reshape a model file as the client loads it | `AssetScript::OnModelParsed` and the stages after it, `wxl::M2FileService` | every runtime |
-| draw a batch of a model again, with your own state | `RenderScript::OnModelBatchDrawn`, `wxl::GxService` | the recompiled client |
+| draw a batch of a model again, with your own state | `RenderScript::OnModelBatchDrawn`, `wxl::GxService` | every runtime |
 
 The three services are **not safe**: they hand you the client's own models and memory, which no
 check stands between. A native mod names each one it uses in its manifest, as any service.
@@ -1058,14 +1058,15 @@ client an offset reaches 2 GB at most, which the client's allocator does not pro
 the session, as the client's arrays do. `AnimateBones(file)` has the client animate the file's bones
 when it draws their shadows: it skips that for a file whose bones carry none of the flags it counts.
 
-**Drawing a batch again.** On the recompiled client, `RenderScript::OnModelBatchDrawn` comes after
-every batch the device drew, with the numbers of its `DrawIndexedPrimitive` and everything it drew
+**Drawing a batch again.** `RenderScript::OnModelBatchDrawn` comes after every batch the device
+drew, with the numbers of its `DrawIndexedPrimitive` and everything it drew
 with still bound: an outline mod sets a render target and a pixel shader of its own on
 `wxl::GxService::D3d9Device()`, draws the same numbers again, puts the target back and calls
 `wxl::GxService::InvalidateState()` so that the client sends its own state again. It comes for
-every batch of every model, thousands a frame: return at once for the ones you do not want. The
-stock client keeps no record of its draws, so it does not raise it: `wxl::Raises(WXL_EV_ModelBatchDrawn)`
-says so at run time.
+every batch of every model, thousands a frame: return at once for the ones you do not want, and
+subscribe only while you draw. Both clients raise it with the same numbers: the recompiled client
+records them as the device draws, and on the stock one the runtime rebuilds them from what the batch
+was drawn from.
 
 These came with abi `0.1.20`.
 

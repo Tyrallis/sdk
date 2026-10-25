@@ -213,7 +213,7 @@ Beyond events, a runtime publishes services, and a mod asks for the ones it need
 | `wxl.point` | functions of the engine: run code before, instead of or after them | yes; a few exist on one runtime, and say so |
 | `wxl.m2file` | a parsed model file's arrays, read and pointed the runtime's way, for a mod that teaches the client a model format | yes |
 | `wxl.m2` | the models objects draw with, and models a mod makes and hangs on them | yes |
-| `wxl.gx` | the client's D3D9 device, to draw a model batch again (`ModelBatchDrawn`, which only the recompiled client raises) | yes |
+| `wxl.gx` | the client's D3D9 device, to draw a model batch again (`ModelBatchDrawn`) | yes |
 | `wxl.hook` | hook points a runtime names and keeps working | yes |
 | `wxl.hook.raw` | a detour at a raw address | no: runtimes that load into a shipped binary |
 | `wxl.patch` | bytes written into the image | no: runtimes that load into a shipped binary |
